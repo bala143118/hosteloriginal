@@ -1,0 +1,7 @@
+ultralytics>=8.3.0
+torch
+torchvision
+Pillow
+numpy
+dill
+lap>=0.5.12

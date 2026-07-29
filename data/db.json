@@ -1,0 +1,153 @@
+{
+  "users": [
+    {
+      "email": "student@hostelfix.edu",
+      "password": "student123",
+      "role": "student",
+      "name": "John Doe",
+      "userId": "USR-MS51ND92-CDGSBY"
+    },
+    {
+      "email": "tech@hostelfix.edu",
+      "password": "tech123",
+      "role": "technician",
+      "name": "Mike Johnson",
+      "userId": "USR-MS51ND92-KZUXHS"
+    },
+    {
+      "email": "admin@hostelfix.edu",
+      "password": "admin123",
+      "role": "admin",
+      "name": "Admin User",
+      "userId": "USR-MS51ND92-KDXD2D"
+    },
+    {
+      "userId": "USR-MS52I1Q0-WD5ZWJ",
+      "email": "student@gmail.com",
+      "password": "student",
+      "role": "student",
+      "name": "bala"
+    },
+    {
+      "userId": "USR-MS52K9AM-0QW5KK",
+      "email": "technician@gmail.com",
+      "password": "technician",
+      "role": "technician",
+      "name": "bala"
+    },
+    {
+      "userId": "USR-MS52LXTO-3VPOF0",
+      "email": "admin123@gmail.com",
+      "password": "admin123",
+      "role": "admin",
+      "name": "bala"
+    }
+  ],
+  "complaints": [],
+  "gatePasses": [
+    {
+      "id": "GP-1785248876928-417",
+      "student": "bala",
+      "email": "",
+      "registrationNumber": "12",
+      "hostelBlock": "Block A",
+      "roomNumber": "123",
+      "reason": "outing",
+      "session": "Morning",
+      "gateDate": "2026-07-28",
+      "status": "Approved",
+      "createdAt": "2026-07-28T14:27:56.928Z",
+      "approvedBy": "Admin",
+      "approvedAt": "2026-07-28T14:28:04.832Z"
+    },
+    {
+      "id": "GP-1785223812429-530",
+      "student": "siva",
+      "email": "",
+      "registrationNumber": "302",
+      "hostelBlock": "Block A",
+      "roomNumber": "302",
+      "reason": "ewfxssfcgvjkdhgjgc",
+      "session": "Afternoon",
+      "gateDate": "2026-07-26",
+      "status": "Approved",
+      "createdAt": "2026-07-28T07:30:12.430Z",
+      "approvedBy": "Admin",
+      "approvedAt": "2026-07-28T07:34:10.744Z"
+    },
+    {
+      "id": "GP-1785050590973-185",
+      "student": "bala",
+      "email": "",
+      "registrationNumber": "12",
+      "hostelBlock": "Block A",
+      "roomNumber": "123",
+      "reason": "outing",
+      "session": "Morning",
+      "gateDate": "2026-07-26",
+      "status": "Rejected",
+      "createdAt": "2026-07-26T07:23:10.973Z",
+      "approvedBy": "Admin",
+      "approvedAt": "2026-07-26T07:23:31.226Z"
+    },
+    {
+      "id": "GP-1784762307805-800",
+      "student": "Test Student",
+      "email": "student@hostelfix.edu",
+      "registrationNumber": "REG999",
+      "hostelBlock": "Block A",
+      "roomNumber": "A-101",
+      "reason": "Family visit",
+      "session": "Afternoon",
+      "gateDate": "2026-07-24",
+      "status": "Rejected",
+      "createdAt": "2026-07-22T23:18:27.805Z",
+      "approvedBy": "Admin",
+      "approvedAt": "2026-07-23T01:07:59.403Z"
+    }
+  ],
+  "laundryRequests": [
+    {
+      "id": "LR-1785248823989-486",
+      "student": "bala",
+      "email": "",
+      "registrationNumber": "18",
+      "hostelBlock": "block A",
+      "roomNumber": "108",
+      "dressCount": 10,
+      "pickupDate": "2026-03-01",
+      "details": "hi",
+      "status": "Pending",
+      "createdAt": "2026-07-28T14:27:03.991Z"
+    },
+    {
+      "id": "LR-1785056242983-684",
+      "student": "Automated Test",
+      "email": "auto@test.edu",
+      "registrationNumber": "REG-AUTO-1",
+      "hostelBlock": "Block C",
+      "roomNumber": "C-303",
+      "dressCount": 2,
+      "pickupDate": "2026-07-26",
+      "details": "2 shirts",
+      "status": "Pending",
+      "createdAt": "2026-07-26T08:57:22.983Z"
+    }
+  ],
+  "announcements": [
+    {
+      "id": "ANN-1785257364265-703",
+      "title": "important messange",
+      "message": "to  dinner at 7:00pm",
+      "priority": "Important",
+      "audience": "All Students",
+      "adminName": "Admin",
+      "createdAt": "2026-07-28T16:49:24.266Z"
+    }
+  ],
+  "adminSettings": {
+    "alertCameraName": "Hostel CCTV Camera 3",
+    "alertCameraLocation": "Block A - Ground Floor"
+  },
+  "alertHistory": []
+}
