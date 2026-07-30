@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -491,44 +491,81 @@
                 </div>
             </div>
         </div>
-
         <!-- ===== PROFILE PAGE ===== -->
         <div id="page-profile" class="page">
             <div class="min-h-screen bg-surface-alt px-4 py-10 sm:px-6 lg:px-8">
-                <div class="mx-auto w-full max-w-2xl">
-                    <div class="mb-6 flex items-center justify-between">
+                <div class="mx-auto w-full max-w-4xl">
+                    <div class="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                         <div>
                             <p class="text-sm font-medium text-primary">Account</p>
                             <h2 class="text-3xl font-bold text-text">My Profile</h2>
+                            <p class="mt-2 text-sm text-text-secondary">Manage your account, profile picture, and session in one place.</p>
                         </div>
-                        <button type="button" onclick="navigateTo(getCurrentUserDashboard())" class="btn-secondary rounded-xl px-4 py-2 text-sm">Back to Dashboard</button>
+                        <div class="flex flex-wrap gap-3">
+                            <button type="button" onclick="navigateTo(getCurrentUserDashboard())" class="btn-secondary rounded-xl px-4 py-2 text-sm">Back to Dashboard</button>
+                            <button type="button" onclick="logoutCurrentUser()" class="rounded-xl bg-red-500 px-4 py-2 text-sm font-semibold text-white transition-all hover:bg-red-600">
+                                <i class="fa-solid fa-right-from-bracket mr-2"></i>Logout
+                            </button>
+                        </div>
                     </div>
-                    <div class="rounded-3xl border border-border bg-surface p-6 shadow-sm sm:p-8">
-                        <div class="mb-8 flex items-center gap-4 border-b border-border pb-6">
-                            <div id="profileAvatar" class="flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-primary to-emerald text-xl font-bold text-white">U</div>
-                            <div>
-                                <h3 id="profileName" class="text-xl font-bold text-text">User</h3>
-                                <p id="profileRole" class="text-sm text-text-secondary">Role</p>
+                    <div class="overflow-hidden rounded-[2rem] border border-border bg-surface shadow-sm">
+                        <div class="bg-gradient-to-r from-primary/10 via-sky-500/10 to-emerald/10 p-6 sm:p-8">
+                            <div class="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
+                                <div class="flex flex-col gap-5 sm:flex-row sm:items-center">
+                                    <div class="relative">
+                                        <div id="profileAvatarWrap" class="flex h-24 w-24 items-center justify-center overflow-hidden rounded-[1.75rem] bg-gradient-to-br from-primary via-sky-500 to-emerald text-3xl font-bold text-white shadow-lg">
+                                            <div id="profileAvatar" class="flex h-full w-full items-center justify-center">U</div>
+                                        </div>
+                                        <label for="profileImageInput" class="absolute -bottom-2 left-1/2 inline-flex -translate-x-1/2 cursor-pointer items-center gap-2 rounded-full bg-surface px-3 py-1.5 text-xs font-semibold text-text shadow-md ring-1 ring-border transition-all hover:bg-surface-alt">
+                                            <i class="fa-solid fa-camera"></i>
+                                            Change
+                                        </label>
+                                        <input id="profileImageInput" type="file" accept="image/*" class="hidden" onchange="handleProfileImageChange(event)">
+                                    </div>
+                                    <div>
+                                        <div class="mb-3 inline-flex items-center gap-2 rounded-full bg-surface px-3 py-1 text-xs font-semibold text-primary ring-1 ring-primary/20">
+                                            <i class="fa-solid fa-circle-check"></i>
+                                            Account active
+                                        </div>
+                                        <h3 id="profileName" class="text-2xl font-bold text-text">User</h3>
+                                        <p id="profileRole" class="mt-1 text-sm text-text-secondary">Role</p>
+                                        <p id="profileEmailHeadline" class="mt-2 break-all text-sm text-text-secondary">user@example.com</p>
+                                    </div>
+                                </div>
+                                <div class="grid gap-3 sm:grid-cols-2">
+                                    <div class="rounded-2xl bg-surface/80 p-4 shadow-sm ring-1 ring-border/60 backdrop-blur">
+                                        <p class="text-xs font-semibold uppercase tracking-wide text-text-secondary">Profile Status</p>
+                                        <p class="mt-2 text-lg font-bold text-text">Ready to use</p>
+                                        <p class="mt-1 text-xs text-text-secondary">You can update your image and log out securely here.</p>
+                                    </div>
+                                    <div class="rounded-2xl bg-surface/80 p-4 shadow-sm ring-1 ring-border/60 backdrop-blur">
+                                        <p class="text-xs font-semibold uppercase tracking-wide text-text-secondary">Quick Tip</p>
+                                        <p class="mt-2 text-lg font-bold text-text">Add a photo</p>
+                                        <p class="mt-1 text-xs text-text-secondary">Choose a clear image so your account is easier to recognize.</p>
+                                    </div>
+                                </div>
                             </div>
                         </div>
-                        <dl class="grid gap-5 sm:grid-cols-2">
-                            <div class="rounded-2xl bg-surface-alt p-4">
-                                <dt class="text-xs font-semibold uppercase tracking-wide text-text-secondary">User ID</dt>
-                                <dd id="profileUserId" class="mt-1 break-all font-semibold text-text">—</dd>
-                            </div>
-                            <div class="rounded-2xl bg-surface-alt p-4">
-                                <dt class="text-xs font-semibold uppercase tracking-wide text-text-secondary">Email</dt>
-                                <dd id="profileEmail" class="mt-1 break-all font-semibold text-text">—</dd>
-                            </div>
-                            <div class="rounded-2xl bg-surface-alt p-4">
-                                <dt class="text-xs font-semibold uppercase tracking-wide text-text-secondary">Account Role</dt>
-                                <dd id="profileRoleDetail" class="mt-1 font-semibold text-text">—</dd>
-                            </div>
-                            <div class="rounded-2xl bg-surface-alt p-4">
-                                <dt id="profileExtraLabel" class="text-xs font-semibold uppercase tracking-wide text-text-secondary">Additional Details</dt>
-                                <dd id="profileExtraValue" class="mt-1 font-semibold text-text">—</dd>
-                            </div>
-                        </dl>
+                        <div class="p-6 sm:p-8">
+                            <dl class="grid gap-5 sm:grid-cols-2">
+                                <div class="rounded-2xl bg-surface-alt p-4">
+                                    <dt class="text-xs font-semibold uppercase tracking-wide text-text-secondary">User ID</dt>
+                                    <dd id="profileUserId" class="mt-1 break-all font-semibold text-text">—</dd>
+                                </div>
+                                <div class="rounded-2xl bg-surface-alt p-4">
+                                    <dt class="text-xs font-semibold uppercase tracking-wide text-text-secondary">Email</dt>
+                                    <dd id="profileEmail" class="mt-1 break-all font-semibold text-text">—</dd>
+                                </div>
+                                <div class="rounded-2xl bg-surface-alt p-4">
+                                    <dt class="text-xs font-semibold uppercase tracking-wide text-text-secondary">Account Role</dt>
+                                    <dd id="profileRoleDetail" class="mt-1 font-semibold text-text">—</dd>
+                                </div>
+                                <div class="rounded-2xl bg-surface-alt p-4">
+                                    <dt id="profileExtraLabel" class="text-xs font-semibold uppercase tracking-wide text-text-secondary">Additional Details</dt>
+                                    <dd id="profileExtraValue" class="mt-1 font-semibold text-text">—</dd>
+                                </div>
+                            </dl>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -2053,7 +2090,7 @@
                         </div>
                         <div class="glass rounded-2xl border border-border p-6">
                             <h3 class="font-semibold mb-2">Telegram Emergency Alerts</h3>
-                            <p class="mb-4 text-sm text-text-secondary">After a fire or smoke detection remains above 80% for five seconds, the system saves a screenshot and sends it to the Telegram chat configured in the server <code>.env</code>.</p>
+                            <p class="mb-4 text-sm text-text-secondary">As soon as a fire or smoke detection reaches 70% confidence, the system saves a screenshot and sends it to the Telegram chat configured in the server <code>.env</code>.</p>
                             <form onsubmit="saveEmergencyAlertSettings(event)" class="space-y-4">
                                 <div>
                                     <label class="block text-sm font-medium mb-2">CCTV Camera Name</label>
@@ -2062,6 +2099,11 @@
                                 <div>
                                     <label class="block text-sm font-medium mb-2">CCTV Camera Location</label>
                                     <input id="emergencyAlertLocation" type="text" placeholder="Block A - Ground Floor" class="input-focus w-full px-4 py-3 rounded-xl border border-border bg-surface-alt text-sm">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium mb-2">Alert Confidence Threshold (%)</label>
+                                    <input id="emergencyAlertConfidence" type="number" min="1" max="99" step="1" value="70" class="input-focus w-full px-4 py-3 rounded-xl border border-border bg-surface-alt text-sm">
+                                    <p class="mt-2 text-xs text-text-secondary">Raise this to 80-90% if you want fewer false alerts and better accuracy.</p>
                                 </div>
                                 <button type="submit" class="btn-primary px-5 py-3 rounded-xl text-white font-semibold">Save Alert Settings</button>
                             </form>
@@ -2160,47 +2202,47 @@
                 {
                     name: 'laundry',
                     keywords: ['laundry', 'wash', 'washing', 'clothes', 'linen', 'laundary', 'launtry', 'laundrette'],
-                    reply: '🧺 Laundry pickup is handled through the student dashboard. Open the laundry request page, enter your name, registration number, dress count, and pickup date.'
+                    reply: 'Laundry pickup is handled through the student dashboard. Open the laundry request page, enter your name, registration number, dress count, and pickup date.'
                 },
                 {
                     name: 'gate_pass',
                     keywords: ['gate pass', 'gatepass', 'outpass', 'out pass', 'pass', 'warden pass', 'gate'],
-                    reply: '🎫 For gate pass, go to the Gate Pass section and submit your request with reason, session, and date. Your warden will approve or reject it there.'
+                    reply: 'For gate pass, go to the Gate Pass section and submit your request with reason, session, and date. Your warden will approve or reject it there.'
                 },
                 {
                     name: 'complaint',
                     keywords: ['complaint', 'complaints', 'maintenance', 'repair', 'issue', 'broken', 'fix', 'fault', 'problem'],
-                    reply: '🔧 Report maintenance issues from the Complaint Registration page. Include the room number, category, and a short description so the technician can respond faster.'
+                    reply: 'Report maintenance issues from the Complaint Registration page. Include the room number, category, and a short description so the technician can respond faster.'
                 },
                 {
                     name: 'wifi',
                     keywords: ['wifi', 'wi-fi', 'internet', 'network', 'connection', 'hotspot', 'online', 'wlan', 'wifii'],
-                    reply: '📶 If WiFi is slow or disconnected, raise a complaint under network or WiFi so the support team can investigate quickly.'
+                    reply: 'If WiFi is slow or disconnected, raise a complaint under network or WiFi so the support team can investigate quickly.'
                 },
                 {
                     name: 'mess',
                     keywords: ['mess', 'food', 'meal', 'menu', 'dining', 'canteen', 'breakfast', 'lunch', 'dinner'],
-                    reply: '🍽️ The mess menu and meal details are available on the student dashboard. Ask there for today’s menu, timings, or special dietary requests.'
+                    reply: 'The mess menu and meal details are available on the student dashboard. Ask there for today\'s menu, timings, or special dietary requests.'
                 },
                 {
                     name: 'room_change',
                     keywords: ['room change', 'change room', 'room transfer', 'roommove', 'room shift', 'roommate', 'room moving'],
-                    reply: '🛏️ For room change requests, use the room change section and provide your current room, preferred room type, and reason.'
+                    reply: 'For room change requests, use the room change section and provide your current room, preferred room type, and reason.'
                 },
                 {
                     name: 'tracking',
                     keywords: ['track', 'tracking', 'status', 'update', 'progress', 'follow up', 'follow-up', 'pending'],
-                    reply: '📌 You can track complaint and request status in your dashboard. Check the relevant section for updates from the technician or warden.'
+                    reply: 'You can track complaint and request status in your dashboard. Check the relevant section for updates from the technician or warden.'
                 },
                 {
                     name: 'qr_code',
                     keywords: ['qr', 'qr code', 'qrcode', 'qr-code', 'room qr', 'scan code', 'room code'],
-                    reply: '📱 QR code rooms are linked in your student dashboard. Use the QR section to view or scan room access codes.'
+                    reply: 'QR code rooms are linked in your student dashboard. Use the QR section to view or scan room access codes.'
                 },
                 {
                     name: 'notifications',
                     keywords: ['notification', 'notifications', 'alert', 'notice', 'reminder', 'announcement', 'remind'],
-                    reply: '🔔 Notifications are delivered through your dashboard. Enable alerts so you get updates on laundry, gate pass, complaints, and other hostel messages.'
+                    reply: 'Notifications are delivered through your dashboard. Enable alerts so you get updates on laundry, gate pass, complaints, and other hostel messages.'
                 }
                 ,{
                     name: 'account',
@@ -2241,11 +2283,11 @@
             const smallTalk = [
                 {
                     keywords: ['hi', 'hello', 'hey', 'good morning', 'good afternoon', 'good evening', 'greetings'],
-                    reply: 'Hi there! I’m HostelFix Assistant. I can help with laundry, gate pass, complaints, WiFi, mess menu, room change, QR codes, tracking, and notifications.'
+                    reply: 'Hi there! I\'m HostelFix Assistant. I can help with laundry, gate pass, complaints, WiFi, mess menu, room change, QR codes, tracking, and notifications.'
                 },
                 {
                     keywords: ['thanks', 'thank you', 'thx', 'thank u', 'thankyou'],
-                    reply: 'You’re welcome! If you need anything else, ask me about laundry, gate pass, complaints, WiFi, mess menu, room change, QR codes, tracking, or notifications.'
+                    reply: 'You\'re welcome! If you need anything else, ask me about laundry, gate pass, complaints, WiFi, mess menu, room change, QR codes, tracking, or notifications.'
                 }
             ];
 
@@ -2467,7 +2509,7 @@
                     <h3 class="text-xl font-semibold text-white">Live Announcement</h3>
                     <p class="text-sm text-white/80 mt-1">Publish notice to students in real time.</p>
                 </div>
-                <button type="button" class="close-button text-3xl font-bold text-white opacity-90 hover:opacity-100" onclick="closeAnnouncementPopup()">×</button>
+                        <button type="button" class="close-button text-3xl font-bold text-white opacity-90 hover:opacity-100" onclick="closeAnnouncementPopup()">x</button>
             </div>
             <div class="announcement-body p-6">
                 <form id="announcementForm" onsubmit="sendLiveAnnouncement(event)" class="space-y-5">
@@ -2510,9 +2552,9 @@
         <div class="emergency-modal glass rounded-3xl p-6 max-w-2xl mx-auto">
             <div class="flex items-center justify-between mb-4">
                 <div>
-                    <h3 class="text-xl font-semibold">⚠️ EMERGENCY NOTICE</h3>
+                    <h3 class="text-xl font-semibold">EMERGENCY NOTICE</h3>
                 </div>
-                <button type="button" class="close-button text-2xl font-bold" onclick="closeAnnouncementModal()">×</button>
+                <button type="button" class="close-button text-2xl font-bold" onclick="closeAnnouncementModal()">x</button>
             </div>
             <h4 id="announcementEmergencyTitle" class="announcement-emergency-title text-lg font-semibold mb-3">Emergency Title</h4>
             <p id="announcementEmergencyMessage" class="announcement-emergency-message text-text-secondary mb-6">Emergency announcement message goes here.</p>
@@ -2523,6 +2565,7 @@
     </div>
     <script src="/socket.io/socket.io.js"></script>
     <script src="public/fire-detection-utils.js"></script>
-    <script src="script.js?v=telegram-emergency-alerts-1"></script>
+    <script src="script.js?v=telegram-emergency-alerts-2"></script>
 </body>
 </html>
+

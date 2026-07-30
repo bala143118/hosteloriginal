@@ -37,23 +37,34 @@ async function sendTelegramAlert({ alertType, confidence, cameraName, location, 
   const config = getTelegramConfig();
   if (!config) throw new Error('Telegram is not configured. Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in .env.');
 
-  const caption = formatTelegramAlert({ alertType, confidence, cameraName, location, timestamp });
-  if (imagePath && fs.existsSync(imagePath)) {
-    const image = fs.readFileSync(imagePath);
-    const form = new FormData();
-    form.append('chat_id', config.chatId);
-    form.append('caption', caption);
-    form.append('photo', new Blob([image], { type: 'image/jpeg' }), path.basename(imagePath));
-    const message = await telegramRequest(config, 'sendPhoto', { method: 'POST', body: form });
-    return { messageId: message.message_id, message: caption };
-  }
-
+  const messageText = formatTelegramAlert({ alertType, confidence, cameraName, location, timestamp });
   const message = await telegramRequest(config, 'sendMessage', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ chat_id: config.chatId, text: caption })
+    body: JSON.stringify({ chat_id: config.chatId, text: messageText, disable_notification: false })
   });
-  return { messageId: message.message_id, message: caption };
+
+  if (imagePath && fs.existsSync(imagePath)) {
+    try {
+      const image = fs.readFileSync(imagePath);
+      const form = new FormData();
+      form.append('chat_id', config.chatId);
+      form.append('caption', messageText);
+      form.append('disable_notification', 'false');
+      form.append('photo', new Blob([image], { type: 'image/jpeg' }), path.basename(imagePath));
+      const photoMessage = await telegramRequest(config, 'sendPhoto', { method: 'POST', body: form });
+      return {
+        messageId: message.message_id,
+        photoMessageId: photoMessage.message_id,
+        message: messageText,
+        delivery: 'text+photo'
+      };
+    } catch (error) {
+      console.warn(`Telegram photo upload failed for ${path.basename(imagePath)}. Text alert was already delivered.`, error.message);
+    }
+  }
+
+  return { messageId: message.message_id, message: messageText, delivery: 'text' };
 }
 
 module.exports = { getTelegramConfig, sendTelegramAlert };

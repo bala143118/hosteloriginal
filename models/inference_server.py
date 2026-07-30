@@ -1,4 +1,6 @@
 import argparse
+import contextlib
+import io
 import json
 import sys
 
@@ -37,32 +39,35 @@ def extract_people(result):
 
 def main():
     args = parse_args()
-    model, loader_type = load_model(args.model)
-    crowd_model = YOLO(args.crowd_model)
+    with contextlib.redirect_stdout(io.StringIO()):
+        model, loader_type = load_model(args.model)
+        crowd_model = YOLO(args.crowd_model)
 
     for line in sys.stdin:
         try:
             request = json.loads(line)
             image_data = request.get('image')
+            include_crowd = bool(request.get('includeCrowd', True))
             if not image_data:
                 raise ValueError('No image provided.')
 
             image = load_image_from_base64(image_data)
             tensor = preprocess_image(image)
             with torch.no_grad():
-                output = run_model(model, tensor, image, loader_type)
-                crowd_results = crowd_model.track(
-                    source=np.array(image),
-                    classes=[0],
-                    conf=0.35,
-                    iou=0.5,
-                    imgsz=640,
-                    tracker='bytetrack.yaml',
-                    persist=True,
-                    device='cpu',
-                    verbose=False
-                )
-            people = extract_people(crowd_results[0])
+                with contextlib.redirect_stdout(io.StringIO()):
+                    output = run_model(model, tensor, image, loader_type)
+                    crowd_results = None
+                    if include_crowd:
+                        crowd_results = crowd_model.predict(
+                            source=np.array(image),
+                            classes=[0],
+                            conf=0.35,
+                            iou=0.5,
+                            imgsz=512,
+                            device='cpu',
+                            verbose=False
+                        )
+            people = extract_people(crowd_results[0]) if include_crowd and crowd_results else []
             result = {
                 'success': True,
                 'result': {

@@ -1,4 +1,4 @@
-const API_BASE_URL = (() => {
+﻿const API_BASE_URL = (() => {
     if (window.location.protocol === 'file:') {
         return 'http://localhost:5000';
     }
@@ -19,10 +19,13 @@ const DEBUG_CCTV_INFERENCE = window.location.search.includes('debug=true');
 const CCTV_STREAM_SOURCE = '';
 const CCTV_INFERENCE_API = '/api/cctv-inference';
 const CCTV_REVIEW_CONFIDENCE = 0.3;
-const CCTV_HAZARD_CONFIDENCE = 0.8;
-const CCTV_EMERGENCY_PERSIST_MS = 5_000;
+const CCTV_EMERGENCY_PERSIST_MS = 500;
 const CROWD_ALERT_THRESHOLD = 20;
 const CROWD_ALERT_STABLE_FRAMES = 3;
+const CCTV_LIVE_CAPTURE_MAX_WIDTH = 640;
+const CCTV_UPLOAD_CAPTURE_MAX_WIDTH = 960;
+const CCTV_LIVE_INFERENCE_INTERVAL_MS = 700;
+const CCTV_UPLOAD_INFERENCE_INTERVAL_MS = 350;
 let cctvInferenceInterval = null;
 let cctvCanvas = null;
 let cctvVideoSourceUrl = '';
@@ -38,7 +41,107 @@ let cctvEmergencyAlertSent = false;
 let cctvEmergencyAlertInFlight = false;
 let emergencyAlertCameraName = 'Hostel CCTV Camera 3';
 let emergencyAlertCameraLocation = 'Block A - Ground Floor';
+let cctvAlertConfidenceThreshold = 0.5;
 let cctvHazardStartedAt = null;
+let cctvDetectionLogEntries = [];
+let cctvDetectionSessionStartedAt = null;
+
+function formatCCTVTimestamp(date = new Date()) {
+    return new Intl.DateTimeFormat('en-IN', {
+        dateStyle: 'medium',
+        timeStyle: 'medium'
+    }).format(date);
+}
+
+function resetCCTVDetectionLogs() {
+    cctvDetectionLogEntries = [];
+    cctvDetectionSessionStartedAt = new Date().toISOString();
+    updateCCTVDetectionLogOutput();
+}
+
+function appendCCTVDetectionLogEntry(entry) {
+    cctvDetectionLogEntries.push({
+        ...entry,
+        timestamp: entry.timestamp || new Date().toISOString()
+    });
+    updateCCTVDetectionLogOutput();
+}
+
+function updateCCTVDetectionLogOutput() {
+    const resultEl = document.getElementById('cctvInferenceOutput');
+    if (!resultEl) return;
+
+    if (!cctvDetectionLogEntries.length) {
+        resultEl.textContent = 'Start live camera monitoring to see detections here.';
+        return;
+    }
+
+    const logText = cctvDetectionLogEntries.slice(-60).map((entry, index) => {
+        const detectionLines = Array.isArray(entry.predictions) && entry.predictions.length
+            ? entry.predictions.map((item) => `- ${item.label} (${Math.round((Number(item.confidence) || 0) * 100)}%)`).join('\n')
+            : '- No fire or smoke detections returned.';
+        const crowdLine = entry.personCount > 0 ? `People detected: ${entry.personCount}` : 'No crowd';
+        return `[${formatCCTVTimestamp(new Date(entry.timestamp))}] Entry ${index + 1}
+Source: ${entry.sourceLabel}
+Status: ${entry.summary}
+Confidence: ${entry.confidenceText}
+Speed: ${entry.speedText}
+${crowdLine}
+${detectionLines}`;
+    }).join('\n\n');
+
+    resultEl.textContent = logText;
+    resultEl.scrollTop = resultEl.scrollHeight;
+}
+
+async function downloadCCTVDetectionLogPdf() {
+    if (!cctvDetectionLogEntries.length) {
+        showToast('No detection log is available to download yet.', 'warning');
+        return;
+    }
+
+    const statusEl = document.getElementById('cctvModelStatus');
+    const accuracyEl = document.getElementById('cctvAccuracy');
+    const speedEl = document.getElementById('cctvSpeed');
+    const crowdCountEl = document.getElementById('cctvCrowdCount');
+    const payload = {
+        title: 'Hostel CCTV Detection Log',
+        generatedAt: new Date().toISOString(),
+        sessionStartedAt: cctvDetectionSessionStartedAt,
+        currentStatus: statusEl?.textContent?.trim() || 'N/A',
+        currentConfidence: accuracyEl?.textContent?.trim() || 'N/A',
+        currentSpeed: speedEl?.textContent?.trim() || 'N/A',
+        currentCrowdCount: crowdCountEl?.textContent?.trim() || 'N/A',
+        entries: cctvDetectionLogEntries
+    };
+
+    try {
+        const response = await apiRequest('/api/cctv-log-pdf', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({ error: 'Unable to generate the PDF.' }));
+            throw new Error(errorData.error || 'Unable to generate the PDF.');
+        }
+
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+        link.href = url;
+        link.download = `cctv-detection-log-${stamp}.pdf`;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        showToast('Detection log PDF downloaded successfully.', 'success');
+    } catch (error) {
+        console.error('PDF download failed:', error);
+        showToast(error.message || 'Unable to download the detection log PDF.', 'error');
+    }
+}
 
 function apiUrl(path) {
     return `${API_BASE_URL}${path}`;
@@ -74,12 +177,16 @@ async function parseJsonResponse(response) {
     }
 }
 
-async function requestCCTVInference(imageDataUrl) {
+async function requestCCTVInference(imageDataUrl, options = {}) {
     const endpoint = DEBUG_CCTV_INFERENCE ? `${CCTV_INFERENCE_API}?debug=true` : CCTV_INFERENCE_API;
     const response = await apiRequest(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: imageDataUrl })
+        body: JSON.stringify({
+            image: imageDataUrl,
+            sourceType: options.sourceType || 'live',
+            includeCrowd: options.includeCrowd !== false
+        })
     });
 
     if (!response.ok) {
@@ -103,12 +210,15 @@ async function saveEmergencyAlertSettings(event) {
     event.preventDefault();
     const alertCameraName = document.getElementById('emergencyAlertCamera')?.value.trim() || 'Hostel CCTV Camera 3';
     const alertCameraLocation = document.getElementById('emergencyAlertLocation')?.value.trim() || 'Block A - Ground Floor';
+    const alertMinConfidenceValue = Number(document.getElementById('emergencyAlertConfidence')?.value);
+    const alertMinConfidence = Math.min(99, Math.max(1, Math.round(Number.isFinite(alertMinConfidenceValue) ? alertMinConfidenceValue : (cctvAlertConfidenceThreshold * 100))));
     try {
-        const response = await apiRequest('/api/admin-settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ alertCameraName, alertCameraLocation }) });
+        const response = await apiRequest('/api/admin-settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ alertCameraName, alertCameraLocation, alertMinConfidence }) });
         const data = await parseJsonResponse(response);
         if (!response.ok) throw new Error(data.error || 'Unable to save emergency settings.');
         emergencyAlertCameraName = data.alertCameraName;
         emergencyAlertCameraLocation = data.alertCameraLocation;
+        cctvAlertConfidenceThreshold = (Number(data.alertMinConfidence) || 50) / 100;
         showToast('Telegram emergency alert settings saved successfully.', 'success');
     } catch (error) {
         showToast(error.message || 'Unable to save emergency settings.', 'error');
@@ -118,20 +228,23 @@ async function saveEmergencyAlertSettings(event) {
 async function loadEmergencyAlertSettings() {
     const cameraInput = document.getElementById('emergencyAlertCamera');
     const locationInput = document.getElementById('emergencyAlertLocation');
-    if (!cameraInput && !locationInput) return;
+    const confidenceInput = document.getElementById('emergencyAlertConfidence');
+    if (!cameraInput && !locationInput && !confidenceInput) return;
     const response = await apiRequest('/api/admin-settings');
     const data = await parseJsonResponse(response);
     if (!response.ok) throw new Error(data.error || 'Unable to load emergency settings.');
     if (cameraInput) cameraInput.value = data.alertCameraName || emergencyAlertCameraName;
     if (locationInput) locationInput.value = data.alertCameraLocation || emergencyAlertCameraLocation;
+    if (confidenceInput) confidenceInput.value = Number(data.alertMinConfidence) || 50;
     emergencyAlertCameraName = data.alertCameraName || emergencyAlertCameraName;
     emergencyAlertCameraLocation = data.alertCameraLocation || emergencyAlertCameraLocation;
+    cctvAlertConfidenceThreshold = (Number(data.alertMinConfidence) || 50) / 100;
 }
 
 function renderAlertHistory(alerts) {
     const body = document.getElementById('alertHistoryTableBody');
     if (!body) return;
-    body.innerHTML = alerts.length ? alerts.map((alert) => `<tr><td class="py-3 pr-4">${alert.date}<br><span class="text-xs text-text-secondary">${alert.time}</span></td><td class="py-3 pr-4 font-medium">${alert.detectionType}</td><td class="py-3 pr-4">${alert.confidence}%</td><td class="py-3 pr-4">${alert.cameraName || alert.camera}<br><span class="text-xs text-text-secondary">${alert.location || ''}</span></td><td class="py-3 pr-4">${alert.telegramStatus || alert.status}</td><td class="py-3">${alert.imagePath ? `<a href="${alert.imagePath}" target="_blank"><img src="${alert.imagePath}" alt="Emergency screenshot" class="h-12 w-16 rounded-lg object-cover border border-border"></a>` : '—'}</td></tr>`).join('') : '<tr><td colspan="6" class="py-5 text-center text-text-secondary">No alerts have been sent yet.</td></tr>';
+    body.innerHTML = alerts.length ? alerts.map((alert) => `<tr><td class="py-3 pr-4">${alert.date}<br><span class="text-xs text-text-secondary">${alert.time}</span></td><td class="py-3 pr-4 font-medium">${alert.detectionType}</td><td class="py-3 pr-4">${alert.confidence}%</td><td class="py-3 pr-4">${alert.cameraName || alert.camera}<br><span class="text-xs text-text-secondary">${alert.location || ''}</span></td><td class="py-3 pr-4">${alert.telegramStatus || alert.status}</td><td class="py-3">${alert.imagePath ? `<a href="${alert.imagePath}" target="_blank"><img src="${alert.imagePath}" alt="Emergency screenshot" class="h-12 w-16 rounded-lg object-cover border border-border"></a>` : '-'}</td></tr>`).join('') : '<tr><td colspan="6" class="py-5 text-center text-text-secondary">No alerts have been sent yet.</td></tr>';
 }
 
 async function loadAlertHistory() {
@@ -150,7 +263,7 @@ function showEmergencyBrowserNotification(alert) {
         feed.style.boxShadow = 'inset 0 0 0 5px #ef4444, 0 0 32px rgba(239,68,68,.85)';
         setTimeout(() => { feed.style.boxShadow = ''; }, 60_000);
     }
-    showModal('🚨 FIRE / SMOKE EMERGENCY', `<div class="space-y-4 text-center"><i class="fa-solid fa-triangle-exclamation text-6xl text-danger"></i><p class="text-xl font-bold">${alert.detectionType} detected</p><p class="text-text-secondary">${camera} · ${alert.location || 'Hostel CCTV Location'}</p><p class="text-lg font-semibold">Confidence: ${alert.confidence}%</p><p class="text-sm text-text-secondary">${alert.date} ${alert.time}</p><button onclick="closeModal()" class="btn-primary px-6 py-3 rounded-xl text-white font-semibold">Acknowledge Alert</button></div>`);
+    showModal('FIRE / SMOKE EMERGENCY', `<div class="space-y-4 text-center"><i class="fa-solid fa-triangle-exclamation text-6xl text-danger"></i><p class="text-xl font-bold">${alert.detectionType} detected</p><p class="text-text-secondary">${camera} - ${alert.location || 'Hostel CCTV Location'}</p><p class="text-lg font-semibold">Confidence: ${alert.confidence}%</p><p class="text-sm text-text-secondary">${alert.date} ${alert.time}</p><button onclick="closeModal()" class="btn-primary px-6 py-3 rounded-xl text-white font-semibold">Acknowledge Alert</button></div>`);
     if ('Notification' in window && Notification.permission === 'granted') {
         new Notification('HostelFix Emergency Alert', {
             body: `${alert.detectionType} detected at ${camera} (${alert.confidence}%). Verify immediately.`,
@@ -175,8 +288,7 @@ async function sendTelegramEmergencyAlert(prediction, imageDataUrl) {
         cctvEmergencyAlertSent = true;
         showToast('Telegram emergency alert sent successfully.', 'success');
     } catch (error) {
-        cctvEmergencyAlertSent = true;
-        showToast('Unable to send Telegram emergency alert', 'error');
+        showToast(error.message || 'Unable to send Telegram emergency alert', 'error');
         console.error('Telegram emergency alert failed:', error);
     } finally {
         cctvEmergencyAlertInFlight = false;
@@ -272,6 +384,52 @@ let selectedLoginRole = 'student';
 let technicians = [];
 let announcementSocket = null;
 let studentNotifications = [];
+const USER_SESSION_KEY = 'hostelfix.currentUser';
+
+function getCurrentUserStorageKey() {
+    if (!currentUser) return null;
+    return `hostelfix.profileImage.${currentUser.userId || currentUser.email || currentUser.name}`;
+}
+
+function persistCurrentUser() {
+    if (!currentUser) {
+        localStorage.removeItem(USER_SESSION_KEY);
+        return;
+    }
+
+    localStorage.setItem(USER_SESSION_KEY, JSON.stringify(currentUser));
+}
+
+function restoreCurrentUser() {
+    const saved = localStorage.getItem(USER_SESSION_KEY);
+    if (!saved) return false;
+
+    try {
+        currentUser = JSON.parse(saved);
+        return Boolean(currentUser);
+    } catch (error) {
+        console.error('Unable to restore saved user session:', error);
+        localStorage.removeItem(USER_SESSION_KEY);
+        currentUser = null;
+        return false;
+    }
+}
+
+function getCurrentUserProfileImage() {
+    const key = getCurrentUserStorageKey();
+    return key ? localStorage.getItem(key) : '';
+}
+
+function setCurrentUserProfileImage(dataUrl) {
+    const key = getCurrentUserStorageKey();
+    if (!key) return;
+
+    if (dataUrl) {
+        localStorage.setItem(key, dataUrl);
+    } else {
+        localStorage.removeItem(key);
+    }
+}
 
 function normalizeText(value) {
     return String(value || '').trim().toLowerCase();
@@ -914,6 +1072,15 @@ function updateNavAfterLogin() {
     window.setTimeout(updateSidebarIdentity, 100);
 }
 
+function resetNavAfterLogout() {
+    const navProfileBtn = document.getElementById('navProfileBtn');
+    if (!navProfileBtn) return;
+
+    navProfileBtn.classList.add('hidden');
+    navProfileBtn.innerHTML = '<i class="fa-solid fa-user"></i><span>Profile</span>';
+    navProfileBtn.onclick = () => navigateTo('login');
+}
+
 function updateSidebarIdentity() {
     if (!currentUser) return;
 
@@ -930,6 +1097,7 @@ function updateSidebarIdentity() {
         .join('')
         .toUpperCase();
     const roleLabel = roleLabels[currentUser.role] || 'User';
+    const profileImage = getCurrentUserProfileImage();
 
     document.querySelectorAll('.sidebar-mobile').forEach((sidebar) => {
         const navigation = sidebar.querySelector('nav');
@@ -938,7 +1106,13 @@ function updateSidebarIdentity() {
 
         const avatar = identityCard.children[0];
         const textLines = identityCard.children[1]?.querySelectorAll('p') || [];
-        if (avatar) avatar.textContent = initials;
+        if (avatar) {
+            if (profileImage) {
+                avatar.innerHTML = `<img src="${profileImage}" alt="Profile" class="h-full w-full rounded-full object-cover">`;
+            } else {
+                avatar.textContent = initials;
+            }
+        }
         if (textLines[0]) textLines[0].textContent = currentUser.name || 'User';
         if (textLines[1]) textLines[1].textContent = roleLabel;
 
@@ -952,6 +1126,14 @@ function updateSidebarIdentity() {
             button.classList.add('hidden');
         }
     });
+}
+
+function logoutCurrentUser() {
+    currentUser = null;
+    localStorage.removeItem(USER_SESSION_KEY);
+    resetNavAfterLogout();
+    navigateTo('login', { skipHistory: true });
+    showToast('You have been logged out successfully.', 'success');
 }
 
 function getCurrentUserDashboard() {
@@ -978,13 +1160,21 @@ function renderCurrentUserProfile() {
             ? 'Technician account'
             : 'Administrator account';
     const extraLabel = currentUser.role === 'student' ? 'Hostel / Room' : 'Account Details';
+    const profileImage = getCurrentUserProfileImage();
+    const initials = (currentUser.name || 'User')
+        .split(/\s+/)
+        .filter(Boolean)
+        .slice(0, 2)
+        .map((part) => part[0])
+        .join('')
+        .toUpperCase() || 'U';
 
     const fields = {
-        profileAvatar: (currentUser.name || 'U').slice(0, 1).toUpperCase(),
         profileName: currentUser.name || 'User',
         profileRole: roleLabel,
         profileUserId: currentUser.userId || '—',
         profileEmail: currentUser.email || '—',
+        profileEmailHeadline: currentUser.email || 'No email available',
         profileRoleDetail: roleLabel,
         profileExtraLabel: extraLabel,
         profileExtraValue: extraDetails
@@ -994,6 +1184,35 @@ function renderCurrentUserProfile() {
         const element = document.getElementById(id);
         if (element) element.textContent = value;
     });
+
+    const avatar = document.getElementById('profileAvatar');
+    if (avatar) {
+        avatar.innerHTML = profileImage
+            ? `<img src="${profileImage}" alt="Profile picture" class="h-full w-full object-cover">`
+            : initials;
+    }
+}
+
+function handleProfileImageChange(event) {
+    const file = event.target.files?.[0];
+    if (!file || !currentUser) return;
+
+    if (!file.type.startsWith('image/')) {
+        showToast('Please choose a valid image file.', 'warning');
+        event.target.value = '';
+        return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+        setCurrentUserProfileImage(reader.result);
+        renderCurrentUserProfile();
+        updateSidebarIdentity();
+        showToast('Profile image updated successfully.', 'success');
+    };
+    reader.onerror = () => showToast('Unable to read that image file.', 'error');
+    reader.readAsDataURL(file);
+    event.target.value = '';
 }
 
 function toggleSidebar() {
@@ -1068,6 +1287,7 @@ async function handleLogin(e) {
         }
 
         currentUser = data;
+        persistCurrentUser();
         updateNavAfterLogin();
         showToast(`Welcome back, ${data.name}!`, 'success');
         if (role === 'technician') {
@@ -1549,7 +1769,7 @@ function openCCTVMonitoring() {
                     </div>
                     <div class="stat-widget rounded-[1.5rem] p-5 bg-white/95 border border-border shadow-sm">
                         <h5 class="font-semibold mb-2">Crowd Count</h5>
-                        <p class="text-xl font-semibold text-slate-900 cctv-stat-value" id="cctvCrowdCount">0 / ${CROWD_ALERT_THRESHOLD}</p>
+                        <p class="text-xl font-semibold text-slate-900 cctv-stat-value" id="cctvCrowdCount">No crowd</p>
                     </div>
                     <div class="stat-widget rounded-[1.5rem] p-5 bg-white/95 border border-border shadow-sm">
                         <h5 class="font-semibold mb-2">Detection Confidence</h5>
@@ -1562,12 +1782,18 @@ function openCCTVMonitoring() {
                 </div>
             </div>
             <div class="cctv-card rounded-[1.75rem] border border-border bg-surface-alt shadow-lg p-5">
-                <h5 class="font-semibold mb-3">Detection Log</h5>
+                <div class="flex flex-col gap-3 mb-3 sm:flex-row sm:items-center sm:justify-between">
+                    <h5 class="font-semibold">Detection Log</h5>
+                    <button type="button" onclick="downloadCCTVDetectionLogPdf()" class="btn btn-secondary px-4 py-2 rounded-xl text-sm font-semibold self-start sm:self-auto">
+                        <i class="fa-solid fa-file-pdf mr-2"></i>Download PDF
+                    </button>
+                </div>
                 <pre id="cctvInferenceOutput" class="whitespace-pre-wrap text-sm text-text-secondary bg-white/90 rounded-2xl p-4 h-48 overflow-auto border border-border">Start live camera monitoring to see detections here.</pre>
             </div>
         </div>
     `;
     showModal('Hostel CCTV Live Monitoring', content);
+    updateCCTVDetectionLogOutput();
 }
 
 async function startLiveCCTV() {
@@ -1750,6 +1976,15 @@ function stopCCTVMonitoring() {
     if (statusEl) {
         statusEl.textContent = 'CCTV monitoring stopped.';
     }
+    appendCCTVDetectionLogEntry({
+        sourceLabel: 'System',
+        summary: 'Monitoring stopped by user.',
+        confidenceText: 'N/A',
+        speedText: 'N/A',
+        personCount: 0,
+        includeCrowd: true,
+        predictions: []
+    });
 }
 
 function handleCCTVUpload(event) {
@@ -1785,7 +2020,7 @@ function handleCCTVUpload(event) {
         try {
             await video.play();
             if (statusEl) statusEl.textContent = 'Uploaded video active. Detecting fire and smoke from frames...';
-            startCCTVInference(video, document.getElementById('cctvInferenceOutput'), statusEl);
+            startCCTVInference(video, document.getElementById('cctvInferenceOutput'), statusEl, { sourceType: 'upload' });
         } catch (error) {
             console.error('Uploaded video playback failed:', error);
             if (statusEl) statusEl.textContent = 'Unable to play the uploaded video.';
@@ -1801,7 +2036,18 @@ function handleCCTVUpload(event) {
     };
 }
 
-function startCCTVInference(video, resultEl, statusEl) {
+function getCCTVFrameCaptureConfig(video, sourceType = 'live') {
+    const maxWidth = sourceType === 'upload' ? CCTV_UPLOAD_CAPTURE_MAX_WIDTH : CCTV_LIVE_CAPTURE_MAX_WIDTH;
+    const quality = sourceType === 'upload' ? 0.85 : 0.72;
+    const intervalMs = sourceType === 'upload' ? CCTV_UPLOAD_INFERENCE_INTERVAL_MS : CCTV_LIVE_INFERENCE_INTERVAL_MS;
+    const sourceWidth = Math.max(1, Number(video?.videoWidth) || 480);
+    const sourceHeight = Math.max(1, Number(video?.videoHeight) || 360);
+    const width = Math.min(maxWidth, sourceWidth);
+    const height = Math.max(1, Math.round(width * (sourceHeight / sourceWidth)));
+    return { width, height, quality, intervalMs };
+}
+
+function startCCTVInference(video, resultEl, statusEl, options = {}) {
     if (!video) return;
     stopCCTVInference(false);
     cctvInferenceInProgress = false;
@@ -1814,15 +2060,24 @@ function startCCTVInference(video, resultEl, statusEl) {
     cctvEmergencyAlertSent = false;
     cctvEmergencyAlertInFlight = false;
     cctvHazardStartedAt = null;
+    resetCCTVDetectionLogs();
+    const sourceType = options.sourceType === 'upload' ? 'upload' : 'live';
+    const includeCrowd = true;
+    const captureConfig = getCCTVFrameCaptureConfig(video, sourceType);
+    const sourceLabel = sourceType === 'upload' ? 'Uploaded video' : 'Live camera';
 
     if (!cctvCanvas) {
         cctvCanvas = document.createElement('canvas');
     }
-    cctvCanvas.width = 480;
-    cctvCanvas.height = 360;
+    cctvCanvas.width = captureConfig.width;
+    cctvCanvas.height = captureConfig.height;
 
     const accuracyEl = document.getElementById('cctvAccuracy');
     const speedEl = document.getElementById('cctvSpeed');
+    const crowdCountEl = document.getElementById('cctvCrowdCount');
+    if (crowdCountEl) {
+        crowdCountEl.textContent = 'No crowd';
+    }
 
     cctvInferenceInterval = setInterval(async () => {
         if (cctvInferenceInProgress) {
@@ -1840,11 +2095,11 @@ function startCCTVInference(video, resultEl, statusEl) {
         }
 
         ctx.drawImage(video, 0, 0, cctvCanvas.width, cctvCanvas.height);
-        const imageDataUrl = cctvCanvas.toDataURL('image/jpeg', 0.7);
+        const imageDataUrl = cctvCanvas.toDataURL('image/jpeg', captureConfig.quality);
         const startTime = performance.now();
 
         try {
-            const result = await requestCCTVInference(imageDataUrl);
+            const result = await requestCCTVInference(imageDataUrl, { sourceType, includeCrowd });
             const elapsed = performance.now() - startTime;
             const parsed = parseDetectionResult(result);
             const predictionEntries = parsed.predictions.map((item) => ({
@@ -1852,7 +2107,7 @@ function startCCTVInference(video, resultEl, statusEl) {
                 confidence: Number(item.confidence || item.score || item.conf || 0) || 0,
                 box: item.box || null
             }));
-            const crowd = result && typeof result === 'object' ? result.crowd : null;
+            const crowd = includeCrowd && result && typeof result === 'object' ? result.crowd : null;
             const people = Array.isArray(crowd?.people) ? crowd.people.map((person) => ({
                 label: 'person',
                 confidence: Number(person.confidence) || 0,
@@ -1860,11 +2115,10 @@ function startCCTVInference(video, resultEl, statusEl) {
                 trackId: person.trackId
             })) : [];
             const personCount = Number(crowd?.personCount) || people.length;
-            const crowdCountEl = document.getElementById('cctvCrowdCount');
-            if (crowdCountEl) crowdCountEl.textContent = `${personCount} / ${CROWD_ALERT_THRESHOLD}`;
+            if (crowdCountEl) crowdCountEl.textContent = personCount > 0 ? `${personCount} people` : 'No crowd';
             renderCCTVBoxes([...predictionEntries, ...people]);
             const hazardCandidate = getBestHazardCandidate(predictionEntries, CCTV_REVIEW_CONFIDENCE);
-            const hazardPrediction = FireDetectionUtils.getHazardPrediction(predictionEntries, CCTV_HAZARD_CONFIDENCE);
+            const hazardPrediction = FireDetectionUtils.getHazardPrediction(predictionEntries, cctvAlertConfidenceThreshold);
             const bestPrediction = predictionEntries.slice().sort((a, b) => b.confidence - a.confidence)[0];
             const confidence = hazardCandidate ? hazardCandidate.confidence : (bestPrediction ? bestPrediction.confidence : 0);
             if (hazardPrediction) {
@@ -1883,7 +2137,7 @@ function startCCTVInference(video, resultEl, statusEl) {
                 cctvFireDetectedState = false;
             }
 
-            if (personCount >= CROWD_ALERT_THRESHOLD) {
+            if (includeCrowd && personCount >= CROWD_ALERT_THRESHOLD) {
                 cctvCrowdStableCount += 1;
             } else {
                 cctvCrowdStableCount = 0;
@@ -1900,10 +2154,10 @@ function startCCTVInference(video, resultEl, statusEl) {
 
             if (statusEl) {
                 if (cctvFireDetectedState) {
-                    statusEl.textContent = `Emergency alert: ${hazardPrediction ? hazardPrediction.label : 'fire or smoke'} detected for 5 seconds (${Math.round(confidence * 100)}%).`;
+                    statusEl.textContent = `Emergency alert sent: ${hazardPrediction ? hazardPrediction.label : 'fire or smoke'} detected (${Math.round(confidence * 100)}%).`;
                 } else if (hazardCandidate) {
-                    statusEl.textContent = `Possible ${hazardCandidate.label} detected (${Math.round(hazardCandidate.confidence * 100)}%). Monitoring for confirmation before raising an emergency alert.`;
-                } else if (cctvCrowdAlertState) {
+                    statusEl.textContent = `Possible ${hazardCandidate.label} detected (${Math.round(hazardCandidate.confidence * 100)}%).`;
+                } else if (includeCrowd && cctvCrowdAlertState) {
                     statusEl.textContent = `Crowd alert: ${personCount} people detected (threshold ${CROWD_ALERT_THRESHOLD}).`;
                 } else if (bestPrediction) {
                     statusEl.textContent = `No fire or smoke confirmed. Current top detection: ${bestPrediction.label} (${Math.round(bestPrediction.confidence * 100)}%).`;
@@ -1919,16 +2173,23 @@ function startCCTVInference(video, resultEl, statusEl) {
             }
             if (resultEl) {
                 const summary = cctvFireDetectedState
-                    ? '⚠️ Fire or smoke detected in frame.'
+                    ? 'Fire or smoke detected in frame.'
                     : hazardCandidate
                         ? `Possible ${hazardCandidate.label} detected. Watching for a stable high-confidence signal.`
-                    : cctvCrowdAlertState
-                        ? `⚠️ Crowd alert: ${personCount} people detected.`
-                        : `People detected: ${personCount}. No fire or smoke alert.`;
-                const predictionsText = predictionEntries.length > 0
-                    ? predictionEntries.map((item) => `• ${item.label} (${Math.round(item.confidence * 100)}%)`).join('\n')
-                    : 'No fire or smoke detections returned.';
-                resultEl.textContent = `${summary}\nByteTrack people: ${personCount}\n\n${predictionsText}`;
+                    : includeCrowd && cctvCrowdAlertState
+                        ? `Crowd alert: ${personCount} people detected.`
+                        : includeCrowd
+                            ? `People detected: ${personCount}. No fire or smoke alert.`
+                            : 'Upload scan active. No fire or smoke alert.';
+                appendCCTVDetectionLogEntry({
+                    sourceLabel,
+                    summary,
+                    confidenceText: `${Math.round(confidence * 100)}%`,
+                    speedText: `${Math.round(elapsed)} ms per frame`,
+                    personCount,
+                    includeCrowd,
+                    predictions: predictionEntries
+                });
             }
         } catch (error) {
             console.error('CCTV inference request failed:', error);
@@ -1947,10 +2208,19 @@ function startCCTVInference(video, resultEl, statusEl) {
             if (speedEl) {
                 speedEl.textContent = 'N/A';
             }
+            appendCCTVDetectionLogEntry({
+                sourceLabel,
+                summary: message,
+                confidenceText: 'N/A',
+                speedText: 'N/A',
+                personCount: 0,
+                includeCrowd,
+                predictions: []
+            });
         } finally {
             cctvInferenceInProgress = false;
         }
-    }, 1200);
+    }, captureConfig.intervalMs);
 }
 
 function renderCCTVBoxes(predictions) {
@@ -2128,7 +2398,7 @@ function formatInferenceResult(result) {
     if (Array.isArray(result)) {
         const parsed = parseDetectionResult(result);
         if (parsed.labels.length > 0) {
-            return parsed.labels.map((label, index) => `• ${label}${parsed.boxes[index] ? ` (${JSON.stringify(parsed.boxes[index])})` : ''}`).join('\n');
+            return parsed.labels.map((label, index) => `- ${label}${parsed.boxes[index] ? ` (${JSON.stringify(parsed.boxes[index])})` : ''}`).join('\n');
         }
         return result.map((item, index) => `Frame ${index + 1}: ${JSON.stringify(item)}`).join('\n\n');
     }
@@ -2136,10 +2406,10 @@ function formatInferenceResult(result) {
     if (typeof result === 'object') {
         const parsed = parseDetectionResult(result);
         if (parsed.labels.length > 0) {
-            return parsed.labels.map((label, index) => `• ${label}${parsed.boxes[index] ? ` (${JSON.stringify(parsed.boxes[index])})` : ''}`).join('\n');
+            return parsed.labels.map((label, index) => `- ${label}${parsed.boxes[index] ? ` (${JSON.stringify(parsed.boxes[index])})` : ''}`).join('\n');
         }
         if (parsed.boxes.length > 0) {
-            return parsed.boxes.map((box, index) => `• Bounding box #${index + 1}: ${JSON.stringify(box)}`).join('\n');
+            return parsed.boxes.map((box, index) => `- Bounding box #${index + 1}: ${JSON.stringify(box)}`).join('\n');
         }
         if (result.debug) {
             return [
@@ -2222,6 +2492,14 @@ const landingObserver = new MutationObserver((mutations) => {
 document.addEventListener('DOMContentLoaded', function() {
     const landing = document.getElementById('page-landing');
     if (landing) landingObserver.observe(landing, { attributes: true, attributeFilter: ['class'] });
+
+    if (restoreCurrentUser()) {
+        updateNavAfterLogin();
+        updateSidebarIdentity();
+    } else {
+        resetNavAfterLogout();
+    }
+
     loadDashboardData();
     fetchAnnouncements();
     setupAnnouncementSocket();
@@ -2229,3 +2507,5 @@ document.addEventListener('DOMContentLoaded', function() {
         setTimeout(animateNumbers, 500);
     }
 });
+
+

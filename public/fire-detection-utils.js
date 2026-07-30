@@ -60,8 +60,13 @@
         return confidence >= threshold && (isFireLabel(item?.label) || isSmokeLabel(item?.label));
       })
       .sort((first, second) => {
+        const firstIsFire = isFireLabel(first?.label) ? 1 : 0;
+        const secondIsFire = isFireLabel(second?.label) ? 1 : 0;
         const firstConfidence = Number(first.confidence ?? first.score ?? first.conf ?? 0) || 0;
         const secondConfidence = Number(second.confidence ?? second.score ?? second.conf ?? 0) || 0;
+        if (secondIsFire !== firstIsFire) {
+          return secondIsFire - firstIsFire;
+        }
         return secondConfidence - firstConfidence;
       })[0] || null;
   }
