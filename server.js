@@ -1,19 +1,25 @@
 const express = require('express');
 const path = require('path');
 const fs = require('fs');
+const PDFDocument = require('pdfkit');
 const cors = require('cors');
 const compression = require('compression');
 const { spawn } = require('child_process');
 const http = require('http');
 const { Server } = require('socket.io');
+const crypto = require('crypto');
+const jwt = require('jsonwebtoken');
+const QRCode = require('qrcode');
 require('dotenv').config();
-const { getTelegramConfig, sendTelegramAlert } = require('./telegram_service');
+const { getTelegramConfig, sendTelegramAlert, sendTelegramMessage, formatTelegramAnnouncement } = require('./telegram_service');
 
 const DATA_DIR = path.join(__dirname, 'data');
 const DATA_PATH = path.join(DATA_DIR, 'db.json');
 const ALERT_IMAGES_DIR = path.join(DATA_DIR, 'alert-images');
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const MAIN_HTML = path.join(__dirname, 'index.html');
+const FACE_AUTH_DIR = path.join(__dirname, 'face_auth');
+const FACE_AUTH_EMBEDDINGS_DIR = path.join(FACE_AUTH_DIR, 'face_auth', 'embeddings');
 
 const app = express();
 const server = http.createServer(app);
@@ -27,12 +33,19 @@ const io = new Server(server, {
 let cctvInferenceProcess = null;
 let cctvInferenceBuffer = '';
 const cctvInferenceRequests = [];
+let faceAuthInferenceProcess = null;
+let faceAuthInferenceBuffer = '';
+const faceAuthInferenceRequests = [];
 const ALERT_COOLDOWN_MS = 60 * 1000;
+const FIRE_ALERT_MIN_CONFIDENCE = 40;
+const SMOKE_ALERT_MIN_CONFIDENCE = 65;
 const alertCooldowns = new Map();
+const gatePassScanAttempts = new Map();
+const GATEPASS_TOKEN_SECRET = process.env.GATEPASS_JWT_SECRET || 'hostelfix-local-gatepass-secret-change-in-production';
 app.use(cors());
 app.use(compression());
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+app.use(express.json({ limit: '25mb' }));
+app.use(express.urlencoded({ extended: true, limit: '25mb' }));
 app.use(express.static(__dirname, { maxAge: 0, index: false }));
 app.use('/public', express.static(PUBLIC_DIR, { maxAge: '7d' }));
 app.use('/alert-images', express.static(ALERT_IMAGES_DIR, { maxAge: '7d' }));
@@ -74,7 +87,8 @@ function ensureDataStore() {
       ],
       complaints: [],
       gatePasses: [],
-      announcements: []
+      announcements: [],
+      personalNotifications: []
     };
     fs.writeFileSync(DATA_PATH, JSON.stringify(initialData, null, 2), 'utf8');
   }
@@ -85,7 +99,7 @@ function readData() {
   const raw = fs.readFileSync(DATA_PATH, 'utf8').replace(/^\uFEFF/, '');
   const data = JSON.parse(raw);
 
-  if (ensureUserIds(data) || ensureAlertData(data)) {
+  if (ensureUserIds(data) || ensureAlertData(data) || ensureGatePassData(data)) {
     fs.writeFileSync(DATA_PATH, JSON.stringify(data, null, 2), 'utf8');
   }
 
@@ -349,8 +363,305 @@ function createCCTVLogPdfBuffer(payload) {
   });
 }
 
+function createGatePassPdfBuffer(payload) {
+  const gatePasses = Array.isArray(payload.gatePasses) ? payload.gatePasses : [];
+  const generatedAt = payload.generatedAt || new Date().toISOString();
+  const title = payload.title || 'Gate Pass Requests Report';
+  const subtitle = payload.subtitle || 'Student gate pass request summary';
+  const pageWidth = 842;
+  const pageHeight = 595;
+  const margin = 32;
+  const pages = [];
+  let commands = [];
+  let y = 0;
+
+  const newPage = () => {
+    if (commands.length) pages.push(commands.join('\n'));
+    commands = [];
+    y = margin;
+  };
+
+  const ensureSpace = (heightNeeded) => {
+    if (!commands.length) newPage();
+    if (y + heightNeeded > pageHeight - margin - 34) newPage();
+  };
+
+  const rgb = (color) => color.map((value) => (value / 255).toFixed(3)).join(' ');
+  const drawRect = (x, top, width, height, fillColor, strokeColor = null, lineWidth = 1) => {
+    const bottom = pageHeight - top - height;
+    if (fillColor) commands.push(`${rgb(fillColor)} rg`);
+    if (strokeColor) commands.push(`${rgb(strokeColor)} RG`);
+    if (strokeColor) commands.push(`${lineWidth} w`);
+    commands.push(`${x} ${bottom} ${width} ${height} re ${fillColor && strokeColor ? 'B' : fillColor ? 'f' : 'S'}`);
+  };
+  const drawText = (text, x, top, options = {}) => {
+    const {
+      font = 'F1',
+      size = 12,
+      color = [15, 23, 42]
+    } = options;
+    const baseline = pageHeight - top - size;
+    commands.push('BT');
+    commands.push(`/${font} ${size} Tf`);
+    commands.push(`${rgb(color)} rg`);
+    commands.push(`1 0 0 1 ${x} ${baseline} Tm`);
+    commands.push(`(${escapePdfText(text)}) Tj`);
+    commands.push('ET');
+  };
+  const drawWrappedText = (text, x, top, width, options = {}) => {
+    const {
+      font = 'F1',
+      size = 11,
+      color = [15, 23, 42],
+      lineHeight = size + 3
+    } = options;
+    const lines = wrapPdfText(text, width, size);
+    lines.forEach((line, index) => {
+      drawText(line, x, top + (index * lineHeight), { font, size, color });
+    });
+    return lines.length * lineHeight;
+  };
+
+  const columns = [
+    { key: 'id', title: 'ID', width: 112 },
+    { key: 'student', title: 'STUDENT', width: 88 },
+    { key: 'registrationNumber', title: 'REG. NO', width: 82 },
+    { key: 'reason', title: 'REASON', width: 140 },
+    { key: 'session', title: 'SESSION', width: 76 },
+    { key: 'gateDate', title: 'OUT DATE', width: 76 },
+    { key: 'returnDate', title: 'RETURN', width: 76 },
+    { key: 'status', title: 'STATUS', width: 70 }
+  ];
+
+  const formatDate = (value) => {
+    if (!value) return '—';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return String(value);
+    return date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+  };
+
+  const getStatusColor = (status) => {
+    const lower = String(status || '').toLowerCase();
+    if (lower.includes('approved')) return [22, 163, 74];
+    if (lower.includes('rejected')) return [220, 38, 38];
+    return [202, 138, 4];
+  };
+
+  newPage();
+  drawRect(0, 0, pageWidth, 86, [37, 99, 235]);
+  drawText(title, margin, 24, { font: 'F2', size: 24, color: [255, 255, 255] });
+  drawText(subtitle, margin, 54, { size: 11, color: [219, 234, 254] });
+  drawText(`Generated: ${new Date(generatedAt).toLocaleString('en-IN')}`, pageWidth - 220, 30, { size: 10, color: [219, 234, 254] });
+  y = 104;
+
+  drawRect(margin, y, pageWidth - (margin * 2), 46, [248, 250, 252], [203, 213, 225], 0.8);
+  let x = margin + 10;
+  columns.forEach((column) => {
+    drawText(column.title, x, y + 15, { font: 'F2', size: 9, color: [71, 85, 105] });
+    x += column.width;
+  });
+  y += 58;
+
+  gatePasses.forEach((entry, index) => {
+    const rowValues = {
+      id: entry.id || 'N/A',
+      student: entry.student || 'Anonymous',
+      registrationNumber: entry.registrationNumber || 'N/A',
+      reason: entry.reason || 'General',
+      session: entry.session || 'Morning',
+      gateDate: formatDate(entry.gateDate),
+      returnDate: formatDate(entry.returnDate),
+      status: entry.status || 'Pending'
+    };
+
+    const rowHeights = columns.map((column) => wrapPdfText(String(rowValues[column.key]), column.width - 10, 10).length);
+    const rowHeight = Math.max(30, (Math.max(...rowHeights) * 14) + 16);
+    ensureSpace(rowHeight + 8);
+
+    const fillColor = index % 2 === 0 ? [255, 255, 255] : [248, 250, 252];
+    drawRect(margin, y, pageWidth - (margin * 2), rowHeight, fillColor, [226, 232, 240], 0.6);
+
+    x = margin + 10;
+    columns.forEach((column) => {
+      const value = String(rowValues[column.key]);
+      const color = column.key === 'status' ? getStatusColor(value) : [15, 23, 42];
+      drawWrappedText(value, x, y + 12, column.width - 10, {
+        size: 10,
+        color,
+        font: column.key === 'status' ? 'F2' : 'F1',
+        lineHeight: 14
+      });
+      x += column.width;
+    });
+
+    y += rowHeight;
+  });
+
+  if (!gatePasses.length) {
+    drawRect(margin, y, pageWidth - (margin * 2), 64, [255, 255, 255], [203, 213, 225], 0.8);
+    drawText('No gate pass records available for this export.', margin + 20, y + 24, { size: 12, color: [100, 116, 139] });
+    y += 76;
+  }
+
+  pages.push(commands.join('\n'));
+
+  const objects = [];
+  const addObject = (content) => {
+    objects.push(content);
+    return objects.length;
+  };
+  const fontRegularId = addObject('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>');
+  const fontBoldId = addObject('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>');
+  const pageObjectIds = [];
+
+  pages.forEach((streamContent, pageIndex) => {
+    const footer = [
+      'BT',
+      '/F1 10 Tf',
+      `${rgb([100, 116, 139])} rg`,
+      `1 0 0 1 ${pageWidth - margin - 78} 18 Tm`,
+      `(Page ${pageIndex + 1} of ${pages.length}) Tj`,
+      'ET'
+    ].join('\n');
+    const stream = `${streamContent}\n${footer}`;
+    const contentObjectId = addObject(`<< /Length ${Buffer.byteLength(stream, 'utf8')} >>\nstream\n${stream}\nendstream`);
+    const pageObjectId = addObject(`<< /Type /Page /Parent 0 0 R /MediaBox [0 0 ${pageWidth} ${pageHeight}] /Contents ${contentObjectId} 0 R /Resources << /Font << /F1 ${fontRegularId} 0 R /F2 ${fontBoldId} 0 R >> >> >>`);
+    pageObjectIds.push(pageObjectId);
+  });
+
+  const pagesObjectId = addObject(`<< /Type /Pages /Count ${pageObjectIds.length} /Kids [${pageObjectIds.map((id) => `${id} 0 R`).join(' ')}] >>`);
+  pageObjectIds.forEach((pageObjectId) => {
+    objects[pageObjectId - 1] = objects[pageObjectId - 1].replace('/Parent 0 0 R', `/Parent ${pagesObjectId} 0 R`);
+  });
+  const catalogObjectId = addObject(`<< /Type /Catalog /Pages ${pagesObjectId} 0 R >>`);
+
+  let pdf = '%PDF-1.4\n';
+  const offsets = [0];
+  objects.forEach((object, index) => {
+    offsets.push(Buffer.byteLength(pdf, 'utf8'));
+    pdf += `${index + 1} 0 obj\n${object}\nendobj\n`;
+  });
+  const xrefOffset = Buffer.byteLength(pdf, 'utf8');
+  pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  for (let index = 1; index <= objects.length; index += 1) {
+    pdf += `${String(offsets[index]).padStart(10, '0')} 00000 n \n`;
+  }
+  pdf += `trailer\n<< /Size ${objects.length + 1} /Root ${catalogObjectId} 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;
+  return Buffer.from(pdf, 'utf8');
+}
+
+function createSingleGatePassPdfBuffer(gatePass) {
+  return new Promise((resolve, reject) => {
+    const doc = new PDFDocument({ size: 'A4', margin: 28 });
+    const buffers = [];
+    doc.on('data', (chunk) => buffers.push(chunk));
+    doc.on('end', () => resolve(Buffer.concat(buffers)));
+    doc.on('error', reject);
+
+    const status = String(gatePass.status || 'Pending');
+    const statusLower = status.toLowerCase();
+    const statusColor = (statusLower.includes('approved') || statusLower.includes('generated'))
+      ? '#15803d'
+      : statusLower.includes('rejected')
+        ? '#dc2626'
+        : '#ca8a04';
+
+    const formatDate = (value) => {
+      if (!value) return 'N/A';
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return String(value);
+      return date.toLocaleDateString('en-IN', {
+        day: '2-digit',
+        month: 'long',
+        year: 'numeric'
+      });
+    };
+
+    const imageMatch = String(gatePass.studentPhoto || '').match(/^data:image\/(png|jpeg|jpg);base64,([A-Za-z0-9+/=]+)$/i);
+    const imageBuffer = imageMatch ? Buffer.from(imageMatch[2], 'base64') : null;
+    const qrMatch = String(gatePass.qrImage || '').match(/^data:image\/png;base64,([A-Za-z0-9+/=]+)$/i);
+    const qrBuffer = qrMatch ? Buffer.from(qrMatch[1], 'base64') : null;
+
+    doc.rect(0, 0, doc.page.width, 74).fill('#2563eb');
+    doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(20).text('HOSTEL GATE PASS', 28, 18);
+    doc.fillColor('#dbeafe').font('Helvetica').fontSize(10).text('Submitted request details', 28, 44);
+
+    doc.roundedRect(28, 92, 539, 54, 10).fillAndStroke('#f8fafc', '#cbd5e1');
+    doc.fillColor('#475569').font('Helvetica-Bold').fontSize(8).text('Gate Pass ID', 40, 105);
+    doc.fillColor('#0f172a').fontSize(12).text(gatePass.id || 'N/A', 40, 118, { width: 300 });
+    doc.fillColor('#475569').font('Helvetica-Bold').fontSize(8).text('Status', 430, 105);
+    doc.fillColor(statusColor).font('Helvetica-Bold').fontSize(12).text(status, 430, 118);
+    doc.fillColor('#64748b').font('Helvetica').fontSize(8).text(`Submitted on ${new Date(gatePass.createdAt || Date.now()).toLocaleString('en-IN')}`, 40, 133);
+
+    const fields = [
+      ['Student Name', gatePass.student || 'N/A'],
+      ['Register Number', gatePass.registrationNumber || 'N/A'],
+      ['Hostel Block', gatePass.hostelBlock || 'N/A'],
+      ['Room Number', gatePass.roomNumber || 'N/A'],
+      ['Gate Pass Date', formatDate(gatePass.gateDate)],
+      ['Return Date', formatDate(gatePass.returnDate)],
+      ['Session', gatePass.session || 'N/A'],
+      ['Approved By', gatePass.approvedBy || 'Pending']
+    ];
+
+    const cardWidth = 254;
+    const cardHeight = 48;
+    const startY = 164;
+    fields.forEach((field, index) => {
+      const col = index % 2;
+      const row = Math.floor(index / 2);
+      const x = 28 + (col * 285);
+      const y = startY + (row * 58);
+      doc.roundedRect(x, y, cardWidth, cardHeight, 9).fillAndStroke('#ffffff', '#d9e5fb');
+      doc.fillColor('#64748b').font('Helvetica-Bold').fontSize(8).text(field[0], x + 10, y + 8, { width: cardWidth - 20 });
+      doc.fillColor('#14213d').font('Helvetica-Bold').fontSize(10).text(String(field[1]), x + 10, y + 22, { width: cardWidth - 20 });
+    });
+
+    doc.roundedRect(28, 404, 312, 82, 9).fillAndStroke('#ffffff', '#d9e5fb');
+    doc.fillColor('#64748b').font('Helvetica-Bold').fontSize(8).text('Reason for Gate Pass', 40, 416);
+    doc.fillColor('#14213d').font('Helvetica').fontSize(10).text(String(gatePass.reason || 'N/A'), 40, 431, {
+      width: 288,
+      lineGap: 1
+    });
+
+    doc.roundedRect(360, 404, 207, 82, 9).fillAndStroke('#ffffff', '#d9e5fb');
+    doc.fillColor('#64748b').font('Helvetica-Bold').fontSize(8).text('Student Photo', 372, 416);
+    if (imageBuffer) {
+      try {
+        doc.image(imageBuffer, 396, 430, { fit: [132, 44], align: 'center', valign: 'center' });
+      } catch (error) {
+        doc.fillColor('#94a3b8').font('Helvetica').fontSize(9).text('Unable to render photo', 394, 448, { width: 136, align: 'center' });
+      }
+    } else {
+      doc.fillColor('#94a3b8').font('Helvetica').fontSize(9).text('No photo uploaded', 394, 448, { width: 136, align: 'center' });
+    }
+
+    if (qrBuffer) {
+      doc.roundedRect(28, 500, 539, 148, 9).fillAndStroke('#ffffff', '#d9e5fb');
+      doc.fillColor('#475569').font('Helvetica-Bold').fontSize(10).text('Secure Gate Pass QR Code', 44, 516);
+      doc.fillColor('#64748b').font('Helvetica').fontSize(8).text('Show this code to security at exit and return. It is valid until the return date.', 44, 535, { width: 310 });
+      doc.fillColor('#0f172a').font('Helvetica-Bold').fontSize(9).text(`Gate Pass: ${gatePass.id}`, 44, 575);
+      try { doc.image(qrBuffer, 422, 514, { fit: [120, 120] }); } catch (error) { doc.fillColor('#94a3b8').font('Helvetica').fontSize(9).text('Unable to render QR', 420, 570, { width: 124, align: 'center' }); }
+      doc.roundedRect(28, 666, 539, 28, 9).fillAndStroke('#f8fafc', '#d9e5fb');
+      doc.fillColor('#64748b').font('Helvetica').fontSize(8).text('Downloaded from HostelFix', 40, 676);
+      doc.fillColor(statusColor).font('Helvetica-Bold').text(`Status: ${status}`, 455, 676, { width: 92, align: 'right' });
+    } else {
+      doc.roundedRect(28, 500, 539, 28, 9).fillAndStroke('#f8fafc', '#d9e5fb');
+      doc.fillColor('#64748b').font('Helvetica').fontSize(8).text('QR code will be generated after approval.', 40, 510);
+      doc.fillColor(statusColor).font('Helvetica-Bold').text(`Status: ${status}`, 455, 510, { width: 92, align: 'right' });
+    }
+
+    doc.end();
+  });
+}
+
 function normalizeEmail(email) {
   return (email || '').trim().toLowerCase();
+}
+
+function normalizeImageDataUrl(value) {
+  const trimmed = String(value || '').trim();
+  return /^data:image\/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=]+$/.test(trimmed) ? trimmed : '';
 }
 
 function generateUserId(users) {
@@ -408,7 +719,34 @@ function ensureAlertData(data) {
     data.alertHistory = [];
     changed = true;
   }
+  if (!Array.isArray(data.personalNotifications)) {
+    data.personalNotifications = [];
+    changed = true;
+  }
   return changed;
+}
+
+function generatePersonalNotificationId() {
+  return `NTF-${Date.now()}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+}
+
+function normalizeComparableValue(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function matchesStudentNotification(notification, identifiers = {}) {
+  if (!notification || typeof notification !== 'object') return false;
+  const email = normalizeComparableValue(identifiers.email);
+  const name = normalizeComparableValue(identifiers.name);
+  const registrationNumber = normalizeComparableValue(identifiers.registrationNumber);
+  const userId = normalizeComparableValue(identifiers.userId);
+
+  return (
+    (email && normalizeComparableValue(notification.targetEmail) === email)
+    || (name && normalizeComparableValue(notification.targetName) === name)
+    || (registrationNumber && normalizeComparableValue(notification.targetRegistrationNumber) === registrationNumber)
+    || (userId && normalizeComparableValue(notification.targetUserId) === userId)
+  );
 }
 
 function saveAlertSnapshot(imageDataUrl, alertId) {
@@ -430,7 +768,85 @@ function generateComplaintId() {
 }
 
 function generateGatePassId() {
-  return `GP-${Date.now()}-${Math.floor(Math.random() * 900 + 100)}`;
+  return `GP-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}${Math.floor(Math.random() * 90 + 10)}`;
+}
+
+function ensureGatePassData(data) {
+  let changed = false;
+  if (!Array.isArray(data.gatePasses)) { data.gatePasses = []; changed = true; }
+  if (!Array.isArray(data.gatePassScanLogs)) { data.gatePassScanLogs = []; changed = true; }
+  if (!Array.isArray(data.auditLogs)) { data.auditLogs = []; changed = true; }
+  return changed;
+}
+
+function addGatePassAudit(data, gatePass, action, actor = {}, remarks = '') {
+  data.auditLogs.unshift({
+    id: `AUD-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`,
+    gatePassId: gatePass.id,
+    user: actor.name || actor.id || 'System',
+    role: actor.role || 'system',
+    action,
+    remarks,
+    ipAddress: actor.ip || '',
+    timestamp: new Date().toISOString()
+  });
+}
+
+function createGatePassNotification(data, gatePass, type, title, message, role = 'Student') {
+  data.personalNotifications = Array.isArray(data.personalNotifications) ? data.personalNotifications : [];
+  const notification = {
+    id: generatePersonalNotificationId(), type, title, message, priority: 'Important', audience: role,
+    adminName: 'Gate Pass System', createdAt: new Date().toISOString(),
+    targetEmail: role === 'Student' ? gatePass.email || '' : '', targetName: role === 'Student' ? gatePass.student || '' : '',
+    targetRegistrationNumber: role === 'Student' ? gatePass.registrationNumber || '' : '', targetUserId: role === 'Student' ? gatePass.userId || '' : '',
+    relatedGatePassId: gatePass.id, receiverRole: role
+  };
+  data.personalNotifications.unshift(notification);
+  return notification;
+}
+
+function gatePassExpiry(returnDate) {
+  const expiry = new Date(`${returnDate}T23:59:59.999`);
+  return Number.isNaN(expiry.getTime()) ? new Date(Date.now() + 24 * 60 * 60 * 1000) : expiry;
+}
+
+async function provisionGatePassQr(gatePass, req) {
+  const expiresAt = gatePassExpiry(gatePass.returnDate);
+  const token = jwt.sign({ gp: gatePass.id, jti: crypto.randomUUID(), scope: 'gatepass-scan' }, GATEPASS_TOKEN_SECRET, { expiresIn: Math.max(60, Math.floor((expiresAt.getTime() - Date.now()) / 1000)) });
+  const baseUrl = `${req.protocol}://${req.get('host')}`;
+  const secureUrl = `${baseUrl}/qr/${encodeURIComponent(token)}`;
+  gatePass.token = token;
+  gatePass.secureUrl = secureUrl;
+  gatePass.qrUrl = secureUrl;
+  gatePass.qrImage = await QRCode.toDataURL(secureUrl, { errorCorrectionLevel: 'H', margin: 2, width: 420, color: { dark: '#0f172a', light: '#ffffff' } });
+  gatePass.qrGeneratedAt = new Date().toISOString();
+  gatePass.expiryDate = expiresAt.toISOString();
+}
+
+async function backfillApprovedGatePassQrs(data, req) {
+  const missingQrPasses = (data.gatePasses || []).filter((gatePass) => (
+    /^(approved|qr generated)$/i.test(String(gatePass.status || '')) && !gatePass.qrImage
+  ));
+  if (!missingQrPasses.length) return false;
+  for (const gatePass of missingQrPasses) {
+    await provisionGatePassQr(gatePass, req);
+    gatePass.status = 'QR GENERATED';
+    gatePass.workflowStatus = 'QR GENERATED';
+    addGatePassAudit(data, gatePass, 'QR Generated for Existing Approved Pass', { role: 'system', ip: req.ip });
+  }
+  return true;
+}
+
+function validateGatePassToken(token, data) {
+  let payload;
+  try { payload = jwt.verify(token, GATEPASS_TOKEN_SECRET); } catch (error) { return { error: error.name === 'TokenExpiredError' ? 'This QR code has expired.' : 'Invalid or modified QR code.' }; }
+  if (!payload || payload.scope !== 'gatepass-scan' || !payload.gp) return { error: 'Invalid QR code.' };
+  const gatePass = data.gatePasses.find((item) => item.id === payload.gp && item.token === token);
+  if (!gatePass) return { error: 'This QR code is no longer valid.' };
+  if (gatePass.status === 'COMPLETED') return { error: 'Gate Pass Already Completed.', gatePass };
+  if (gatePass.status === 'REJECTED' || gatePass.status === 'CANCELLED') return { error: 'This gate pass is not active.' };
+  if (!gatePass.expiryDate || new Date(gatePass.expiryDate) < new Date()) return { error: 'This QR code has expired.' };
+  return { gatePass };
 }
 
 function generateLaundryRequestId() {
@@ -547,7 +963,28 @@ app.get('/api/announcements', (req, res) => {
   res.json(announcements.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)));
 });
 
-app.post('/api/announcements', (req, res) => {
+app.get('/api/student-notifications', (req, res) => {
+  const data = readData();
+  const identifiers = {
+    email: normalizeEmail(req.query.email),
+    name: req.query.name,
+    registrationNumber: req.query.registrationNumber,
+    userId: req.query.userId
+  };
+
+  const hasIdentifier = Object.values(identifiers).some((value) => String(value || '').trim());
+  if (!hasIdentifier) {
+    return res.status(400).json({ error: 'A student identifier is required.' });
+  }
+
+  const notifications = (Array.isArray(data.personalNotifications) ? data.personalNotifications : [])
+    .filter((notification) => matchesStudentNotification(notification, identifiers))
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+  return res.json(notifications);
+});
+
+app.post('/api/announcements', async (req, res) => {
   const data = readData();
   const { title, message, priority, audience, adminName } = req.body;
 
@@ -569,11 +1006,27 @@ app.post('/api/announcements', (req, res) => {
   data.announcements.unshift(announcement);
   writeData(data);
 
+  let telegramDelivered = false;
+  const telegramConfigured = Boolean(getTelegramConfig());
+  if (getTelegramConfig()) {
+    try {
+      const telegramMessage = formatTelegramAnnouncement(announcement);
+      await sendTelegramMessage(telegramMessage);
+      telegramDelivered = true;
+    } catch (error) {
+      console.warn('Telegram live announcement delivery failed:', error.message);
+    }
+  }
+
   if (req.io) {
     req.io.emit('announcement.created', announcement);
   }
 
-  res.status(201).json(announcement);
+  res.status(201).json({
+    ...announcement,
+    telegramConfigured,
+    telegramDelivered
+  });
 });
 
 app.delete('/api/announcements/:id', (req, res) => {
@@ -589,15 +1042,28 @@ app.delete('/api/announcements/:id', (req, res) => {
   res.json({ success: true });
 });
 
-app.get('/api/gate-passes', (req, res) => {
+app.get('/api/gate-passes', async (req, res) => {
   const data = readData();
+  if (await backfillApprovedGatePassQrs(data, req)) writeData(data);
   res.json(data.gatePasses || []);
 });
 
 app.post('/api/gate-passes', (req, res) => {
   const data = readData();
+  const gateDate = req.body.gateDate || new Date().toISOString().split('T')[0];
+  const returnDate = req.body.returnDate || '';
+
+  if (!returnDate) {
+    return res.status(400).json({ error: 'Return date is required.' });
+  }
+
+  if (returnDate < gateDate) {
+    return res.status(400).json({ error: 'Return date must be the same day or later than the gate pass date.' });
+  }
+
   const gatePass = {
     id: generateGatePassId(),
+    userId: req.body.userId || '',
     student: req.body.student || 'Anonymous',
     email: normalizeEmail(req.body.email),
     registrationNumber: req.body.registrationNumber || '',
@@ -605,8 +1071,12 @@ app.post('/api/gate-passes', (req, res) => {
     roomNumber: req.body.roomNumber || 'Unknown',
     reason: req.body.reason || 'General',
     session: req.body.session || 'Morning',
-    gateDate: req.body.gateDate || new Date().toISOString().split('T')[0],
-    status: 'Pending',
+    gateDate,
+    returnDate,
+    studentPhoto: normalizeImageDataUrl(req.body.studentPhoto || req.body.photo || req.body.studentImage || ''),
+    status: 'REQUESTED',
+    workflowStatus: 'REQUESTED',
+    wardenVerified: false,
     createdAt: new Date().toISOString(),
     approvedBy: '',
     approvedAt: null
@@ -614,11 +1084,12 @@ app.post('/api/gate-passes', (req, res) => {
 
   data.gatePasses = Array.isArray(data.gatePasses) ? data.gatePasses : [];
   data.gatePasses.unshift(gatePass);
+  addGatePassAudit(data, gatePass, 'Student Applied', { id: gatePass.userId, role: 'student', ip: req.ip });
   writeData(data);
   res.status(201).json(gatePass);
 });
 
-app.put('/api/gate-passes/:id/status', (req, res) => {
+app.put('/api/gate-passes/:id/status', async (req, res) => {
   const data = readData();
   const gatePass = (data.gatePasses || []).find((item) => item.id === req.params.id);
   if (!gatePass) {
@@ -631,11 +1102,102 @@ app.put('/api/gate-passes/:id/status', (req, res) => {
     return res.status(400).json({ error: `Status is required and must be one of: ${validStatuses.join(', ')}` });
   }
 
-  gatePass.status = status;
+  gatePass.status = status === 'Approved' ? 'QR GENERATED' : status === 'Rejected' ? 'REJECTED' : 'REQUESTED';
+  gatePass.workflowStatus = gatePass.status;
   gatePass.approvedBy = req.body.approvedBy || 'Admin';
   gatePass.approvedAt = new Date().toISOString();
+  gatePass.facultyId = req.body.facultyId || '';
+  gatePass.facultyRemarks = String(req.body.remarks || '').trim();
+
+  let createdNotification = null;
+  if (status === 'Approved') {
+    await provisionGatePassQr(gatePass, req);
+    createdNotification = createGatePassNotification(data, gatePass, 'gate-pass-approved', 'Gate Pass Approved — QR Ready', `Your gate pass ${gatePass.id} has been approved. Your secure QR code is ready for gate scanning.`);
+    addGatePassAudit(data, gatePass, 'Faculty Approved & QR Generated', { name: gatePass.approvedBy, role: 'faculty', ip: req.ip }, gatePass.facultyRemarks);
+  } else {
+    createdNotification = createGatePassNotification(data, gatePass, 'gate-pass-rejected', 'Gate Pass Request Rejected', `Your gate pass ${gatePass.id} was rejected.${gatePass.facultyRemarks ? ` Remarks: ${gatePass.facultyRemarks}` : ''}`);
+    addGatePassAudit(data, gatePass, 'Faculty Rejected', { name: gatePass.approvedBy, role: 'faculty', ip: req.ip }, gatePass.facultyRemarks);
+  }
+
   writeData(data);
+
+  if (req.io && createdNotification) {
+    req.io.emit('student-notification.created', createdNotification);
+  }
+
   res.json(gatePass);
+});
+
+// API names used by the QR gate-pass workflow specification.
+app.post('/api/gatepass/apply', (req, res) => {
+  req.url = '/api/gate-passes';
+  app.handle(req, res);
+});
+
+app.post('/api/gatepass/approve', (req, res) => {
+  const id = String(req.body.id || req.body.gatePassId || '');
+  if (!id) return res.status(400).json({ error: 'A gate pass id is required.' });
+  req.method = 'PUT';
+  req.url = `/api/gate-passes/${encodeURIComponent(id)}/status`;
+  req.body.status = req.body.status || 'Approved';
+  app.handle(req, res);
+});
+
+app.get('/api/gatepass/:id', (req, res) => {
+  const data = readData();
+  const gatePass = data.gatePasses.find((item) => item.id === req.params.id);
+  if (!gatePass) return res.status(404).json({ error: 'Gate pass not found.' });
+  res.json({ ...gatePass, scanLogs: data.gatePassScanLogs.filter((log) => log.gatePassId === gatePass.id), auditLogs: data.auditLogs.filter((log) => log.gatePassId === gatePass.id) });
+});
+
+app.get('/api/gatepass/history', (req, res) => {
+  const data = readData();
+  const userId = String(req.query.userId || '');
+  res.json(userId ? data.gatePasses.filter((item) => item.userId === userId) : data.gatePasses);
+});
+
+app.post('/api/gatepass/scan', (req, res) => {
+  const token = String(req.body.token || '');
+  const key = `${req.ip}:${crypto.createHash('sha256').update(token).digest('hex').slice(0, 12)}`;
+  const recent = (gatePassScanAttempts.get(key) || []).filter((time) => Date.now() - time < 60000);
+  if (recent.length >= 12) return res.status(429).json({ error: 'Too many scan attempts. Please wait a minute.' });
+  recent.push(Date.now()); gatePassScanAttempts.set(key, recent);
+  const data = readData(); const validation = validateGatePassToken(token, data);
+  if (validation.error) return res.status(400).json({ error: validation.error });
+  const gatePass = validation.gatePass;
+  const guard = { id: String(req.body.guardId || 'guard'), name: String(req.body.guardName || req.body.guardId || 'Security Guard'), role: 'guard', ip: req.ip };
+  const log = { id: `GPS-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`, gatePassId: gatePass.id, guardId: guard.id, guardName: guard.name, scanTime: new Date().toISOString(), device: String(req.body.device || '').slice(0, 120), ipAddress: req.ip, location: String(req.body.location || 'Main Gate').slice(0, 120), remarks: '' };
+  let message;
+  if (!gatePass.outTime) {
+    gatePass.outTime = log.scanTime; gatePass.guardExitId = guard.id; gatePass.status = 'OUT'; gatePass.workflowStatus = 'OUT';
+    data.gatePassScanLogs.unshift({ ...log, scanType: 'OUT' }); addGatePassAudit(data, gatePass, 'Exit Scan', guard, log.location);
+    createGatePassNotification(data, gatePass, 'gate-pass-out', 'Exit Recorded', `Your exit at ${log.location} has been recorded.`); message = 'Exit Successfully Recorded.';
+  } else if (!gatePass.inTime) {
+    gatePass.inTime = log.scanTime; gatePass.guardEntryId = guard.id; gatePass.status = 'RETURNED'; gatePass.workflowStatus = 'RETURNED';
+    data.gatePassScanLogs.unshift({ ...log, scanType: 'IN' }); addGatePassAudit(data, gatePass, 'Return Scan', guard, log.location);
+    createGatePassNotification(data, gatePass, 'gate-pass-returned', 'Return Recorded', 'Your return has been recorded. Waiting for warden verification.');
+    createGatePassNotification(data, gatePass, 'warden-verification-required', 'Student Returned — Verification Required', `${gatePass.student} has returned and needs hostel-arrival verification.`, 'Warden');
+    message = 'Return Successfully Recorded. Waiting for Warden Verification.';
+  } else return res.status(409).json({ error: 'Return has already been recorded. Waiting for warden verification.' });
+  writeData(data);
+  res.json({ message, gatePass: { id: gatePass.id, student: gatePass.student, registrationNumber: gatePass.registrationNumber, hostelBlock: gatePass.hostelBlock, roomNumber: gatePass.roomNumber, status: gatePass.status, outTime: gatePass.outTime, inTime: gatePass.inTime } });
+});
+
+app.post('/api/gatepass/warden/approve', (req, res) => {
+  const data = readData(); const gatePass = data.gatePasses.find((item) => item.id === (req.body.id || req.body.gatePassId));
+  if (!gatePass) return res.status(404).json({ error: 'Gate pass not found.' });
+  if (!gatePass.inTime) return res.status(400).json({ error: 'The student has not returned through the gate yet.' });
+  const approved = req.body.approved !== false;
+  gatePass.wardenId = String(req.body.wardenId || ''); gatePass.wardenName = String(req.body.wardenName || 'Warden'); gatePass.wardenRemarks = String(req.body.remarks || ''); gatePass.wardenVerified = approved; gatePass.verifiedTime = new Date().toISOString();
+  gatePass.status = approved ? 'COMPLETED' : 'WARDEN VERIFICATION REJECTED'; gatePass.workflowStatus = gatePass.status;
+  addGatePassAudit(data, gatePass, approved ? 'Warden Approved Arrival' : 'Warden Rejected Verification', { id: gatePass.wardenId, name: gatePass.wardenName, role: 'warden', ip: req.ip }, gatePass.wardenRemarks);
+  createGatePassNotification(data, gatePass, 'gate-pass-completed', approved ? 'Gate Pass Completed' : 'Warden Verification Rejected', approved ? 'Your gate pass workflow is complete.' : 'Your hostel arrival verification was rejected. Please contact the warden.');
+  writeData(data); res.json(gatePass);
+});
+
+app.get('/qr/:token', (req, res) => {
+  const token = String(req.params.token || '').replace(/'/g, '');
+  res.type('html').send(`<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Gate Pass Scan</title><style>body{font-family:system-ui;background:#f1f5f9;display:grid;place-items:center;min-height:100vh;margin:0;color:#0f172a}.card{max-width:420px;background:white;border-radius:20px;padding:28px;box-shadow:0 12px 30px #0f172a20}button{width:100%;border:0;border-radius:10px;padding:14px;background:#0f766e;color:white;font-weight:700;font-size:16px}.muted{color:#64748b}.result{margin-top:16px;padding:14px;border-radius:10px;background:#f8fafc}</style><main class="card"><h1>Hostel Gate Pass</h1><p class="muted">Security scan verification. The action is recorded securely.</p><button id="scan">Record scan</button><div id="result" class="result">Ready to validate QR code.</div></main><script>document.getElementById('scan').onclick=async()=>{const r=document.getElementById('result');r.textContent='Validating…';const x=await fetch('/api/gatepass/scan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:'${token}',guardId:'QR Guard',location:'Main Gate',device:navigator.userAgent})});const d=await x.json();r.textContent=d.message||d.error||'Unable to scan.';if(d.gatePass)r.innerHTML+='<br><br><b>'+d.gatePass.student+'</b> · '+d.gatePass.status;};</script>`);
 });
 
 app.get('/api/laundry-requests', (req, res) => {
@@ -807,13 +1369,19 @@ async function sendTelegramEmergencyAlert(req, res) {
   const camera = String(req.body.camera || 'Hostel CCTV Camera 3').trim();
   const location = String(req.body.location || 'Hostel CCTV Location').trim();
   const data = readData();
-  const minConfidence = Math.min(99, Math.max(1, Math.round(Number(data.adminSettings?.alertMinConfidence ?? 50) || 50)));
+  const normalizedType = ['fire', 'smoke', 'fire and smoke'].includes(type) ? type : '';
+  const configuredMinConfidence = Math.min(99, Math.max(1, Math.round(Number(data.adminSettings?.alertMinConfidence ?? 50) || 50)));
+  const minConfidence = normalizedType === 'fire'
+    ? Math.min(configuredMinConfidence, FIRE_ALERT_MIN_CONFIDENCE)
+    : normalizedType === 'smoke'
+      ? Math.max(configuredMinConfidence, SMOKE_ALERT_MIN_CONFIDENCE)
+      : FIRE_ALERT_MIN_CONFIDENCE;
 
-  if (!['fire', 'smoke'].includes(type) || !Number.isFinite(confidence) || confidence < minConfidence || !camera || !location) {
-    return res.status(400).json({ error: `type (Fire or Smoke), confidence (${minConfidence} or higher), camera, and location are required.` });
+  if (!normalizedType || !Number.isFinite(confidence) || confidence < minConfidence || !camera || !location) {
+    return res.status(400).json({ error: `type (Fire, Smoke, or Fire and Smoke), confidence (${minConfidence} or higher), camera, and location are required.` });
   }
 
-  const cooldownKey = camera.toLowerCase();
+  const cooldownKey = `${camera.toLowerCase()}::${normalizedType}`;
   const lastSentAt = alertCooldowns.get(cooldownKey) || 0;
   const elapsed = Date.now() - lastSentAt;
   if (elapsed < ALERT_COOLDOWN_MS) {
@@ -831,7 +1399,11 @@ async function sendTelegramEmergencyAlert(req, res) {
   }
   const alert = {
     id: alertId,
-    detectionType: type === 'fire' ? 'Fire' : 'Smoke',
+    detectionType: normalizedType === 'fire'
+      ? 'Fire'
+      : normalizedType === 'smoke'
+        ? 'Smoke'
+        : 'Fire and Smoke',
     confidence,
     cameraName: camera,
     camera,
@@ -888,6 +1460,39 @@ app.post('/api/cctv-log-pdf', (req, res) => {
   }
 });
 
+app.post('/api/gate-passes/export-pdf', (req, res) => {
+  try {
+    const pdfBuffer = createGatePassPdfBuffer(req.body || {});
+    const fileName = `gate-pass-requests-${new Date().toISOString().slice(0, 10)}.pdf`;
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+    res.send(pdfBuffer);
+  } catch (error) {
+    console.error('Gate pass PDF export failed:', error);
+    res.status(500).json({ error: 'Unable to generate the gate pass PDF.' });
+  }
+});
+
+app.get('/api/gate-passes/:id/pdf', async (req, res) => {
+  try {
+    const data = readData();
+    const gatePass = (data.gatePasses || []).find((item) => item.id === req.params.id);
+    if (!gatePass) {
+      return res.status(404).json({ error: 'Gate pass not found.' });
+    }
+
+    if (await backfillApprovedGatePassQrs(data, req)) writeData(data);
+
+    const pdfBuffer = await createSingleGatePassPdfBuffer(gatePass);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${gatePass.id || 'gate-pass'}.pdf"`);
+    res.send(pdfBuffer);
+  } catch (error) {
+    console.error('Single gate pass PDF generation failed:', error);
+    res.status(500).json({ error: 'Unable to generate the gate pass PDF.' });
+  }
+});
+
 function getCCTVModelPath() {
   const modelCandidates = [
     path.join(__dirname, 'models', 'best.pt'),
@@ -905,6 +1510,12 @@ function getCrowdModelPath() {
 function rejectPendingCCTVRequests(error) {
   while (cctvInferenceRequests.length) {
     cctvInferenceRequests.shift().reject(error);
+  }
+}
+
+function rejectPendingFaceAuthRequests(error) {
+  while (faceAuthInferenceRequests.length) {
+    faceAuthInferenceRequests.shift().reject(error);
   }
 }
 
@@ -959,6 +1570,70 @@ function startCCTVInferenceProcess(modelPath, crowdModelPath) {
   return inferenceProcess;
 }
 
+function startFaceAuthInferenceProcess() {
+  if (faceAuthInferenceProcess) {
+    return faceAuthInferenceProcess;
+  }
+
+  const scriptPath = path.join(FACE_AUTH_DIR, 'inference_server.py');
+  const venvPython = process.platform === 'win32'
+    ? path.join(__dirname, '.venv', 'Scripts', 'python.exe')
+    : path.join(__dirname, '.venv', 'bin', 'python');
+  const pythonCmd = process.env.FACE_AUTH_PYTHON || process.env.PYTHON || 'python';
+  const inferenceProcess = spawn(
+    pythonCmd,
+    [scriptPath, '--embeddings-dir', FACE_AUTH_EMBEDDINGS_DIR],
+    {
+      cwd: FACE_AUTH_DIR,
+      env: {
+        ...process.env,
+        FACE_AUTH_EMBEDDINGS_DIR,
+        PYTHONUNBUFFERED: '1',
+        FACE_AUTH_PYTHON: pythonCmd,
+        FACE_AUTH_FALLBACK_PYTHON: fs.existsSync(venvPython) ? venvPython : ''
+      }
+    }
+  );
+  faceAuthInferenceProcess = inferenceProcess;
+
+  inferenceProcess.stdout.on('data', (data) => {
+    faceAuthInferenceBuffer += data.toString();
+    const lines = faceAuthInferenceBuffer.split(/\r?\n/);
+    faceAuthInferenceBuffer = lines.pop();
+    lines.filter(Boolean).forEach((line) => {
+      const trimmedLine = line.trim();
+      if (!trimmedLine.startsWith('{')) {
+        console.warn('Face auth stdout:', trimmedLine);
+        return;
+      }
+      const request = faceAuthInferenceRequests.shift();
+      if (!request) return;
+      try {
+        const payload = JSON.parse(trimmedLine);
+        if (payload.success) {
+          request.resolve(payload.result);
+        } else {
+          request.reject(new Error(payload.error || 'Face authentication inference failed.'));
+        }
+      } catch (error) {
+        request.reject(new Error(`Invalid face authentication output: ${error.message}`));
+      }
+    });
+  });
+
+  inferenceProcess.stderr.on('data', (data) => console.error('Face auth inference:', data.toString().trim()));
+  inferenceProcess.on('error', (error) => {
+    if (faceAuthInferenceProcess === inferenceProcess) faceAuthInferenceProcess = null;
+    rejectPendingFaceAuthRequests(error);
+  });
+  inferenceProcess.on('close', (code) => {
+    if (faceAuthInferenceProcess === inferenceProcess) faceAuthInferenceProcess = null;
+    rejectPendingFaceAuthRequests(new Error(`Face auth inference process stopped (code ${code}).`));
+  });
+
+  return inferenceProcess;
+}
+
 function runCCTVInference(image, options = {}) {
   const modelPath = getCCTVModelPath();
   const crowdModelPath = getCrowdModelPath();
@@ -982,6 +1657,28 @@ function runCCTVInference(image, options = {}) {
   });
 }
 
+function runFaceAuthInference(image, options = {}) {
+  const scriptPath = path.join(FACE_AUTH_DIR, 'inference_server.py');
+  if (!fs.existsSync(scriptPath)) {
+    return Promise.reject(new Error('Face authentication module is missing from /face_auth.'));
+  }
+
+  fs.mkdirSync(FACE_AUTH_EMBEDDINGS_DIR, { recursive: true });
+  const inferenceProcess = startFaceAuthInferenceProcess();
+  return new Promise((resolve, reject) => {
+    faceAuthInferenceRequests.push({ resolve, reject });
+    inferenceProcess.stdin.write(`${JSON.stringify({
+      image,
+      reloadKnownFaces: options.reloadKnownFaces === true
+    })}\n`, (error) => {
+      if (!error) return;
+      const requestIndex = faceAuthInferenceRequests.findIndex((request) => request.resolve === resolve);
+      if (requestIndex >= 0) faceAuthInferenceRequests.splice(requestIndex, 1);
+      reject(error);
+    });
+  });
+}
+
 app.post('/api/cctv-inference', async (req, res) => {
   const image = req.body.image;
   const includeCrowd = req.body.includeCrowd !== false;
@@ -996,6 +1693,22 @@ app.post('/api/cctv-inference', async (req, res) => {
   } catch (error) {
     console.error('CCTV inference failed:', error);
     res.status(500).json({ error: error.message || 'CCTV inference failed.' });
+  }
+});
+
+app.post('/api/face-auth-inference', async (req, res) => {
+  const image = req.body.image;
+  const reloadKnownFaces = req.body.reloadKnownFaces === true;
+  if (!image) {
+    return res.status(400).json({ error: 'Image data is required for face authentication.' });
+  }
+
+  try {
+    const result = await runFaceAuthInference(image, { reloadKnownFaces });
+    res.json(result);
+  } catch (error) {
+    console.error('Face authentication inference failed:', error);
+    res.status(500).json({ error: error.message || 'Face authentication inference failed.' });
   }
 });
 

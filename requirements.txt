@@ -5,3 +5,4 @@ Pillow
 numpy
 dill
 lap>=0.5.12
+-r face_auth/requirements.txt

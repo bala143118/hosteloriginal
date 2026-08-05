@@ -33,6 +33,47 @@ async function telegramRequest(config, method, options) {
   }
 }
 
+function formatTelegramAnnouncement({ title, message, priority, audience, adminName, createdAt }) {
+  const priorityText = String(priority || 'Normal').trim();
+  const heading = priorityText === 'Emergency'
+    ? 'YOU HAVE A NEW EMERGENCY LIVE ANNOUNCEMENT'
+    : 'YOU HAVE A NEW LIVE ANNOUNCEMENT';
+
+  return [
+    heading,
+    '',
+    `Title: ${String(title || 'Untitled Announcement').trim()}`,
+    `Message Type: Live Announcement`,
+    `Priority: ${priorityText}`,
+    `Audience: ${String(audience || 'All Students').trim()}`,
+    `Posted By: ${String(adminName || 'Admin').trim()}`,
+    `Time: ${new Date(createdAt || Date.now()).toLocaleString('en-IN')}`,
+    '',
+    'Message Details:',
+    String(message || '').trim()
+  ].join('\n');
+}
+
+async function sendTelegramMessage(text) {
+  const config = getTelegramConfig();
+  if (!config) throw new Error('Telegram is not configured. Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in .env.');
+
+  const message = await telegramRequest(config, 'sendMessage', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      chat_id: config.chatId,
+      text: String(text || '').trim(),
+      disable_notification: false
+    })
+  });
+
+  return {
+    messageId: message.message_id,
+    message: text
+  };
+}
+
 async function sendTelegramAlert({ alertType, confidence, cameraName, location, imagePath, timestamp }) {
   const config = getTelegramConfig();
   if (!config) throw new Error('Telegram is not configured. Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in .env.');
@@ -67,4 +108,4 @@ async function sendTelegramAlert({ alertType, confidence, cameraName, location, 
   return { messageId: message.message_id, message: messageText, delivery: 'text' };
 }
 
-module.exports = { getTelegramConfig, sendTelegramAlert };
+module.exports = { getTelegramConfig, sendTelegramAlert, sendTelegramMessage, formatTelegramAnnouncement };

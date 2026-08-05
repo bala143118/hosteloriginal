@@ -29,11 +29,31 @@
         }
     </style>
     <style>
-        .chat-launcher{
+        .chat-fab-stack{
             position:fixed;
             right:20px;
             bottom:20px;
             z-index:10000;
+            display:flex;
+            flex-direction:column;
+            align-items:center;
+            gap:12px;
+        }
+        .chat-shortcut{
+            width:56px;
+            height:56px;
+            border-radius:18px;
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            text-decoration:none;
+            color:#fff;
+            box-shadow:0 20px 40px rgba(15,23,42,.16);
+            transition:transform .24s ease,box-shadow .24s ease,opacity .22s ease;
+        }
+        .chat-shortcut:hover{transform:translateY(-2px);box-shadow:0 28px 55px rgba(15,23,42,.22);}
+        .whatsapp-shortcut{background:linear-gradient(135deg,#22C55E,#16A34A);}
+        .chat-launcher{
             width:60px;
             height:60px;
             border:none;
@@ -69,6 +89,7 @@
             z-index:9999;
         }
         @media (max-width: 576px) {
+            .chat-fab-stack{right:16px;bottom:16px;}
             .chat-panel{right:10px;bottom:90px;width:calc(100vw - 20px);height:65vh;}
         }
         .chat-panel.open{opacity:1;transform:translateY(0) scale(1);pointer-events:auto;}
@@ -98,11 +119,56 @@
         .dark .chat-input textarea:focus{border-color:#2563EB;box-shadow:0 0 0 3px rgba(37,99,235,.18);}
         .dark .chat-chip{background:#1F2937;border-color:#374151;color:#E5E7EB;}
         .dark .chat-chip:hover{background:#2563EB;border-color:#2563EB;color:#fff;}
-        .typing-indicator{display:inline-flex;gap:4px;align-items:center;padding:10px 12px;border-radius:16px;background:#EFF6FF;color:#0F172A;max-width:72%;}
-        .typing-dot{width:8px;height:8px;border-radius:999px;background:#2563EB;opacity:.65;animation:typingPulse 1.2s infinite ease-in-out;}
-        .typing-dot:nth-child(2){animation-delay:.15s;}
-        .typing-dot:nth-child(3){animation-delay:.3s;}
-        @keyframes typingPulse{0%,100%{transform:translateY(0);opacity:.5;}50%{transform:translateY(-3px);opacity:1;}}
+        .typing-indicator{
+            display:inline-flex;
+            align-items:center;
+            gap:10px;
+            padding:12px 14px;
+            border-radius:18px;
+            background:linear-gradient(135deg,#EEF4FF 0%,#ECFEF5 100%);
+            color:#0F172A;
+            max-width:72%;
+            border:1px solid rgba(37,99,235,.08);
+            box-shadow:0 10px 30px rgba(37,99,235,.08);
+        }
+        .typing-wave{
+            display:flex;
+            align-items:flex-end;
+            gap:4px;
+            height:18px;
+        }
+        .typing-bar{
+            width:4px;
+            border-radius:999px;
+            background:linear-gradient(180deg,#2563EB 0%,#10B981 100%);
+            animation:typingWave 1s infinite ease-in-out;
+            transform-origin:center bottom;
+        }
+        .typing-bar:nth-child(1){height:8px;animation-delay:0s;}
+        .typing-bar:nth-child(2){height:14px;animation-delay:.12s;}
+        .typing-bar:nth-child(3){height:10px;animation-delay:.24s;}
+        .typing-text{
+            font-size:13px;
+            font-weight:600;
+            color:#334155;
+            letter-spacing:.01em;
+            animation:typingTextGlow 1.6s infinite ease-in-out;
+        }
+        @keyframes typingWave{
+            0%,100%{transform:scaleY(.65);opacity:.45;}
+            50%{transform:scaleY(1.15);opacity:1;}
+        }
+        @keyframes typingTextGlow{
+            0%,100%{opacity:.65;}
+            50%{opacity:1;}
+        }
+        .dark .typing-indicator{
+            background:linear-gradient(135deg,rgba(30,41,59,.96) 0%,rgba(15,118,110,.35) 100%);
+            border-color:rgba(148,163,184,.14);
+            box-shadow:0 14px 34px rgba(2,6,23,.28);
+            color:#E5E7EB;
+        }
+        .dark .typing-text{color:#CBD5E1;}
         .chat-chips{display:flex;flex-wrap:wrap;gap:8px;}
         .chat-chip{padding:8px 12px;border-radius:999px;border:1px solid #E2E8F0;background:#F8FAFC;color:#0F172A;font-size:12px;cursor:pointer;transition:background .2s ease,border-color .2s ease;}
         .chat-chip:hover{background:#EFF6FF;border-color:#BFDBFE;}
@@ -676,7 +742,7 @@
                         <button onclick="navigateTo('laundry')" class="p-4 rounded-2xl border-2 border-border text-text font-semibold flex items-center justify-center gap-2 hover:border-primary hover:text-primary transition-all bg-surface">
                             <i class="fa-solid fa-shirt"></i> Laundry
                         </button>
-                        <button onclick="showModal('QR Code Scanner', '<div class=\'text-center p-8\'><img src=\'public/images/room-qr-code.jpg\' alt=\'Room QR code\' class=\'w-48 h-48 mx-auto mb-4 rounded-2xl border-2 border-border object-contain bg-white p-2\'><p class=\'text-text-secondary\'>Scan this QR code to access the room</p></div>')" class="p-4 rounded-2xl border-2 border-border text-text font-semibold flex items-center justify-center gap-2 hover:border-primary hover:text-primary transition-all bg-surface">
+                        <button onclick="showModal('QR Code Scanner', '<div class=\'text-center p-8\'><img src=\'public/images/room-qr-code.png\' alt=\'Room QR code\' class=\'w-48 h-48 mx-auto mb-4 rounded-2xl border-2 border-border object-contain bg-white p-2\'><p class=\'text-text-secondary mb-3\'>Scan this QR code to access the room</p><p class=\'text-text text-2xl font-bold\' style=\'font-family: sans-serif;\'>Anti-raging System</p></div>')" class="p-4 rounded-2xl border-2 border-border text-text font-semibold flex items-center justify-center gap-2 hover:border-primary hover:text-primary transition-all bg-surface">
                             <i class="fa-solid fa-camera"></i> Scan QR Code
                         </button>
                         <button onclick="navigateTo('complaint-tracking')" class="p-4 rounded-2xl border-2 border-border text-text font-semibold flex items-center justify-center gap-2 hover:border-primary hover:text-primary transition-all bg-surface">
@@ -918,9 +984,18 @@
                             <label class="block text-sm font-medium mb-2">Gate Pass Date</label>
                             <div class="date-pill-wrapper">
                                 <span class="date-pill-icon"><i class="fa-solid fa-calendar-days"></i></span>
-                                <input id="gatePassDate" type="date" class="input-focus date-pill-input w-full pl-14 pr-4 py-3 border border-border bg-surface-alt text-sm">
+                                <input id="gatePassDate" type="date" required class="input-focus date-pill-input w-full pl-14 pr-4 py-3 border border-border bg-surface-alt text-sm">
                             </div>
                         </div>
+                        <div>
+                            <label class="block text-sm font-medium mb-2">Return Date</label>
+                            <div class="date-pill-wrapper">
+                                <span class="date-pill-icon"><i class="fa-solid fa-calendar-check"></i></span>
+                                <input id="gatePassReturnDate" type="date" required class="input-focus date-pill-input w-full pl-14 pr-4 py-3 border border-border bg-surface-alt text-sm">
+                            </div>
+                        </div>
+                    </div>
+                    <div class="grid sm:grid-cols-2 gap-6">
                         <div>
                             <label class="block text-sm font-medium mb-2">Session</label>
                             <select id="gatePassSession" class="input-focus w-full pl-4 pr-4 py-3 rounded-xl border border-border bg-surface-alt text-sm appearance-none">
@@ -935,13 +1010,37 @@
                         <label class="block text-sm font-medium mb-2">Reason for Gate Pass</label>
                         <textarea id="gatePassReason" rows="4" placeholder="Enter the purpose of the gate pass..." class="input-focus w-full px-4 py-3 rounded-xl border border-border bg-surface-alt text-sm resize-none"></textarea>
                     </div>
-                    <div class="flex gap-4 pt-4">
+                    <div>
+                        <label class="block text-sm font-medium mb-2">Student Photo</label>
+                        <div class="flex flex-col gap-4 sm:flex-row sm:items-center">
+                            <label class="px-5 py-3 rounded-xl border border-border bg-surface-alt text-sm font-medium cursor-pointer hover:bg-surface transition-all inline-flex items-center gap-2 w-fit">
+                                <i class="fa-solid fa-camera"></i> Upload Photo
+                                <input id="gatePassPhoto" type="file" accept="image/*" class="hidden" onchange="handleGatePassPhotoChange(event)">
+                            </label>
+                            <div id="gatePassPhotoPreview" class="w-24 h-24 rounded-2xl border border-border bg-surface-alt flex items-center justify-center overflow-hidden text-text-secondary text-xs text-center px-2">
+                                No photo
+                            </div>
+                        </div>
+                        <p class="text-xs text-text-secondary mt-2">Upload a clear student photo for admin verification and PDF export.</p>
+                    </div>
+                    <div class="flex flex-wrap gap-4 pt-4">
                         <button type="submit" class="btn-primary flex-1 py-3 rounded-xl text-white font-semibold flex items-center justify-center gap-2">
                             <i class="fa-solid fa-passport"></i> Submit Gate Pass
+                        </button>
+                        <button type="button" onclick="downloadGatePassForm()" class="px-6 py-3 rounded-xl border border-border text-text font-medium hover:bg-surface-alt transition-all flex items-center justify-center gap-2">
+                            <i class="fa-solid fa-download"></i> Download Form
                         </button>
                         <button type="button" onclick="navigateTo('student-dashboard')" class="px-6 py-3 rounded-xl border border-border text-text font-medium hover:bg-surface-alt transition-all">Cancel</button>
                     </div>
                 </form>
+                <section id="gatePassQrCard" class="hidden mt-6 glass rounded-2xl border border-border p-6 text-center">
+                    <div class="flex items-center justify-center gap-2 text-primary mb-2"><i class="fa-solid fa-qrcode text-xl"></i><h2 class="font-bold text-lg">Your Secure Gate Pass</h2></div>
+                    <p id="gatePassQrStatus" class="text-sm text-text-secondary mb-4"></p>
+                    <img id="gatePassQrImage" alt="Secure gate pass QR code" class="hidden w-56 h-56 mx-auto rounded-xl border border-border bg-white p-2">
+                    <p id="gatePassQrExpiry" class="text-xs text-text-secondary mt-4"></p>
+                    <div id="gatePassTimeline" class="flex flex-wrap justify-center gap-2 mt-4 text-xs"></div>
+                    <button id="downloadGatePassQrButton" type="button" onclick="downloadGatePassQr()" class="hidden mt-5 px-5 py-2.5 rounded-xl bg-primary text-white font-medium"><i class="fa-solid fa-download mr-2"></i>Download QR Code</button>
+                </section>
             </div>
         </div>
         <div id="page-laundry" class="page">
@@ -1253,6 +1352,9 @@
                             <button onclick="openCCTVMonitoring()" class="inline-flex items-center gap-2 px-4 py-3 rounded-xl bg-primary text-white text-sm font-medium hover:bg-primary-dark transition-all">
                                 <i class="fa-solid fa-video"></i> Live CCTV
                             </button>
+                            <button onclick="openFaceAuthMonitoring()" class="inline-flex items-center gap-2 px-4 py-3 rounded-xl bg-emerald text-white text-sm font-medium hover:opacity-90 transition-all">
+                                <i class="fa-solid fa-user-shield"></i> Face Authentication
+                            </button>
                             <button onclick="toggleSidebar()" class="lg:hidden w-10 h-10 rounded-xl border border-border flex items-center justify-center">
                                 <i class="fa-solid fa-bars text-text-secondary"></i>
                             </button>
@@ -1311,9 +1413,15 @@
                         </div>
                     </div>
                     <div class="glass rounded-2xl border border-border overflow-hidden mb-8">
-                        <div class="p-6 border-b border-border flex items-center justify-between">
-                            <h3 class="font-semibold text-lg">Gate Pass Requests</h3>
-                            <span id="adminGatePassCount" class="text-sm font-medium text-primary">0</span>
+                        <div class="p-6 border-b border-border flex items-center justify-between gap-4">
+                            <div>
+                                <h3 class="font-semibold text-lg">Gate Pass Requests</h3>
+                                <p class="text-sm text-text-secondary mt-1">Download each gate pass record individually as a PDF.</p>
+                            </div>
+                            <div class="flex items-center gap-3">
+                                <button id="adminGatePassSeeAllButton" onclick="toggleAdminGatePassSeeAll()" class="hidden px-4 py-2 rounded-xl border border-border text-sm font-medium text-text-secondary hover:bg-surface-alt transition-all">See all</button>
+                                <span id="adminGatePassCount" class="text-sm font-medium text-primary">0</span>
+                            </div>
                         </div>
                         <div class="overflow-x-auto">
                             <table class="w-full">
@@ -1324,7 +1432,10 @@
                                         <th class="text-left px-6 py-4 text-xs font-semibold text-text-secondary uppercase tracking-wider">Reg. No</th>
                                         <th class="text-left px-6 py-4 text-xs font-semibold text-text-secondary uppercase tracking-wider">Reason</th>
                                         <th class="text-left px-6 py-4 text-xs font-semibold text-text-secondary uppercase tracking-wider">Session</th>
+                                        <th class="text-left px-6 py-4 text-xs font-semibold text-text-secondary uppercase tracking-wider">Out Date</th>
+                                        <th class="text-left px-6 py-4 text-xs font-semibold text-text-secondary uppercase tracking-wider">Return Date</th>
                                         <th class="text-left px-6 py-4 text-xs font-semibold text-text-secondary uppercase tracking-wider">Status</th>
+                                        <th class="text-left px-6 py-4 text-xs font-semibold text-text-secondary uppercase tracking-wider">Photo</th>
                                         <th class="text-left px-6 py-4 text-xs font-semibold text-text-secondary uppercase tracking-wider">Action</th>
                                     </tr>
                                 </thead>
@@ -2139,9 +2250,14 @@
         </div>
     </main>
 
-    <div class="chat-launcher" id="chatLauncher" aria-label="Open support chat">
-        <span class="chat-dot"></span>
-        <i class="fa-solid fa-comment-dots text-white text-lg"></i>
+    <div class="chat-fab-stack">
+        <a href="https://chat.whatsapp.com/JMnabXfkSoXBy2ywCEClyA" target="_blank" rel="noopener noreferrer" class="chat-shortcut whatsapp-shortcut" aria-label="Open WhatsApp group">
+            <i class="fa-brands fa-whatsapp text-white text-2xl"></i>
+        </a>
+        <div class="chat-launcher" id="chatLauncher" aria-label="Open support chat">
+            <span class="chat-dot"></span>
+            <i class="fa-solid fa-comment-dots text-white text-lg"></i>
+        </div>
     </div>
     <section class="chat-panel" id="chatPanel" aria-hidden="true">
         <div class="chat-head">
@@ -2438,9 +2554,12 @@
                 typing.className = 'bot typing-indicator';
                 typing.id = 'typingIndicator';
                 typing.innerHTML = `
-                    <div class="typing-dot"></div>
-                    <div class="typing-dot"></div>
-                    <div class="typing-dot"></div>
+                    <div class="typing-wave" aria-hidden="true">
+                        <div class="typing-bar"></div>
+                        <div class="typing-bar"></div>
+                        <div class="typing-bar"></div>
+                    </div>
+                    <span class="typing-text">Assistant is thinking</span>
                 `;
                 chatBody.appendChild(typing);
                 chatBody.scrollTop = chatBody.scrollHeight;

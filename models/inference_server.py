@@ -61,9 +61,10 @@ def main():
                         crowd_results = crowd_model.predict(
                             source=np.array(image),
                             classes=[0],
-                            conf=0.35,
-                            iou=0.5,
-                            imgsz=512,
+                            conf=0.2,
+                            iou=0.45,
+                            imgsz=960,
+                            max_det=30,
                             device='cpu',
                             verbose=False
                         )

@@ -19,7 +19,15 @@
     if (!normalized) {
       return false;
     }
-    if (normalized === 'fire') {
+    if (
+      normalized === 'fire' ||
+      normalized === 'flame' ||
+      normalized === 'blaze' ||
+      normalized === 'burning' ||
+      normalized === 'combustion' ||
+      normalized === 'embers' ||
+      normalized === 'ember'
+    ) {
       return true;
     }
     if (
@@ -31,7 +39,13 @@
     ) {
       return false;
     }
-    return normalized.includes('fire');
+    return (
+      normalized.includes('fire') ||
+      normalized.includes('flame') ||
+      normalized.includes('blaze') ||
+      normalized.includes('burning') ||
+      normalized.includes('combust')
+    );
   }
 
   function isSmokeLabel(label) {
@@ -54,7 +68,7 @@
       return null;
     }
 
-    return predictions
+    const matches = predictions
       .filter((item) => {
         const confidence = Number(item?.confidence ?? item?.score ?? item?.conf ?? 0) || 0;
         return confidence >= threshold && (isFireLabel(item?.label) || isSmokeLabel(item?.label));
@@ -68,7 +82,25 @@
           return secondIsFire - firstIsFire;
         }
         return secondConfidence - firstConfidence;
-      })[0] || null;
+      });
+
+    const primary = matches[0] || null;
+    if (!primary) {
+      return null;
+    }
+
+    const hasFire = matches.some((item) => isFireLabel(item?.label));
+    const hasSmoke = matches.some((item) => isSmokeLabel(item?.label));
+    const detectionType = hasFire && hasSmoke ? 'Fire and Smoke' : hasFire ? 'Fire' : 'Smoke';
+    const detectionLabel = detectionType.toLowerCase();
+
+    return {
+      ...primary,
+      detectionType,
+      detectionLabel,
+      hasFire,
+      hasSmoke
+    };
   }
 
   function shouldTriggerFireDetection(predictions, threshold = 0.05) {

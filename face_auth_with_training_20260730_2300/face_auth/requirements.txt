@@ -1,0 +1,13 @@
+# Core dependencies for the face_auth module.
+#
+# NOTE on GPU support:
+#   pip install onnxruntime        -> CPU only
+#   pip install onnxruntime-gpu    -> adds CUDA execution provider
+#                                      (requires a matching CUDA/cuDNN setup)
+# config.py auto-detects whichever is installed at runtime; you only need
+# to choose ONE of the two onnxruntime packages below.
+
+insightface>=0.7.3
+onnxruntime>=1.17.0        # swap for onnxruntime-gpu to enable CUDA
+opencv-python>=4.9.0
+numpy>=1.26.0
