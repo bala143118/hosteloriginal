@@ -1,4 +1,4 @@
-﻿const API_BASE_URL = (() => {
+const API_BASE_URL = (() => {
     if (window.location.protocol === 'file:') {
         return 'http://localhost:5000';
     }
@@ -550,6 +550,10 @@ function navigateTo(pageId, options = {}) {
     if (pageId === 'admin-settings') {
         loadEmergencyAlertSettings().catch((error) => console.error(error));
         loadAlertHistory().catch((error) => console.error(error));
+    }
+
+    if (pageId.startsWith('admin-') || pageId.startsWith('technician-')) {
+        loadDashboardData().catch((error) => console.error(error));
     }
 
     if (currentUser) {
@@ -1160,6 +1164,30 @@ function setupAnnouncementSocket() {
             showEmergencyBrowserNotification(alert);
             if (getActivePageId() === 'admin-settings') loadAlertHistory().catch(console.error);
         });
+        announcementSocket.on('gate-pass.created', (gatePass) => {
+            if (!gatePass || !gatePass.id) return;
+            latestGatePasses = [gatePass, ...latestGatePasses.filter((entry) => entry?.id !== gatePass.id)];
+            renderGatePassTable(latestGatePasses);
+            const gatePassCount = document.getElementById('adminGatePassCount');
+            if (gatePassCount) gatePassCount.textContent = `${latestGatePasses.length}`;
+            if (currentUser?.role === 'admin') {
+                showToast(`New gate pass submitted by ${gatePass.student || 'Student'}`, 'info');
+            }
+        });
+        announcementSocket.on('complaint.created', (complaint) => {
+            if (!complaint || !complaint.id) return;
+            loadDashboardData().catch(console.error);
+            if (currentUser?.role === 'admin' || currentUser?.role === 'technician') {
+                showToast(`New complaint #${complaint.id} logged`, 'info');
+            }
+        });
+        announcementSocket.on('complaint.updated', (complaint) => {
+            if (!complaint || !complaint.id) return;
+            loadDashboardData().catch(console.error);
+            if (isComplaintForCurrentUser(complaint)) {
+                showToast(`Complaint #${complaint.id} status updated to ${complaint.status}`, 'info');
+            }
+        });
     } catch (error) {
         console.error('Unable to initialize announcement socket:', error);
     }
@@ -1332,7 +1360,7 @@ function renderGatePassTable(gatePasses = []) {
                     : '<span class="text-xs">No photo</span>'}
             </td>
             <td class="px-6 py-4 text-sm text-text-secondary">
-                ${String(entry.status || '').toLowerCase() === 'pending'
+                ${['pending', 'requested'].includes(String(entry.status || '').toLowerCase())
                     ? `<div class="flex flex-wrap gap-2"><button onclick="approveGatePass('${entry.id}', 'Approved')" class="px-3 py-2 rounded-lg bg-emerald text-white text-xs font-medium hover:bg-emerald-dark transition-all">Approve</button><button onclick="approveGatePass('${entry.id}', 'Rejected')" class="px-3 py-2 rounded-lg border border-border text-xs font-medium hover:bg-surface-alt transition-all">Reject</button><button onclick="downloadGatePassPdf('${entry.id}')" class="px-3 py-2 rounded-lg border border-border text-xs font-medium hover:bg-surface-alt transition-all">Download PDF</button></div>`
                     : `<div class="flex flex-wrap items-center gap-2"><span>${formatComplaintDate(entry.createdAt)}</span><button onclick="downloadGatePassPdf('${entry.id}')" class="px-3 py-2 rounded-lg border border-border text-xs font-medium hover:bg-surface-alt transition-all">Download PDF</button></div>`}
             </td>
@@ -1865,6 +1893,114 @@ function renderAdminSummary(summary, complaints) {
     if (adminPending) adminPending.textContent = String(summary.pending || 0).toLocaleString();
     if (adminCompleted) adminCompleted.textContent = String(summary.completed || 0).toLocaleString();
     if (adminActiveTechnicians) adminActiveTechnicians.textContent = String(summary.activeTechnicians || 0).toLocaleString();
+}
+
+function renderAdminStudents(users = [], complaints = []) {
+    const tbody = document.getElementById('adminStudentsTableBody');
+    if (!tbody) return;
+    const students = users.filter((u) => u.role === 'student');
+    if (!students.length) {
+        tbody.innerHTML = '<tr><td colspan="5" class="px-6 py-6 text-center text-sm text-text-secondary">No registered students found.</td></tr>';
+        return;
+    }
+    tbody.innerHTML = students.map((s) => {
+        const studentComplaints = complaints.filter((c) => c.userEmail === s.email || c.student === s.name).length;
+        const initials = (s.name || 'ST').split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase();
+        return `
+            <tr class="table-row">
+                <td class="px-6 py-4"><div class="flex items-center gap-3"><div class="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary text-xs font-bold">${initials}</div><span class="font-medium text-sm">${s.name || 'Student'}</span></div></td>
+                <td class="px-6 py-4 text-sm">${s.registrationNumber || 'REG-2024001'}</td>
+                <td class="px-6 py-4 text-sm">${s.roomNumber || 'A-204'}</td>
+                <td class="px-6 py-4 text-sm font-medium">${studentComplaints}</td>
+                <td class="px-6 py-4"><span class="badge-completed px-2.5 py-1 rounded-full text-xs font-medium">Active</span></td>
+            </tr>
+        `;
+    }).join('');
+}
+
+function renderAdminTechnicians(users = [], complaints = []) {
+    const container = document.getElementById('adminTechniciansGrid');
+    if (!container) return;
+    const technicians = users.filter((u) => u.role === 'technician');
+    if (!technicians.length) {
+        container.innerHTML = '<div class="col-span-3 glass p-6 rounded-2xl text-sm text-text-secondary">No active technicians found.</div>';
+        return;
+    }
+    container.innerHTML = technicians.map((t) => {
+        const initials = (t.name || 'TC').split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase();
+        const done = complaints.filter((c) => c.technician === t.name && String(c.status).toLowerCase() === 'completed').length;
+        return `
+            <div class="glass rounded-2xl border border-border p-5 card-hover">
+                <div class="flex items-center gap-3 mb-4">
+                    <div class="w-12 h-12 rounded-full bg-gradient-to-br from-primary to-primary-light flex items-center justify-center text-white font-bold">${initials}</div>
+                    <div><h4 class="font-semibold">${t.name}</h4><p class="text-xs text-text-secondary">${t.email}</p></div>
+                </div>
+                <div class="grid grid-cols-3 gap-2 text-center mb-4">
+                    <div class="bg-surface-alt rounded-lg p-2"><p class="font-bold text-sm">${done}</p><p class="text-xs text-text-secondary">Done</p></div>
+                    <div class="bg-surface-alt rounded-lg p-2"><p class="font-bold text-sm">4.9</p><p class="text-xs text-text-secondary">Rating</p></div>
+                    <div class="bg-surface-alt rounded-lg p-2"><p class="font-bold text-sm">2.5h</p><p class="text-xs text-text-secondary">Avg</p></div>
+                </div>
+                <span class="badge-progress px-2.5 py-1 rounded-full text-xs font-medium">Active Duty</span>
+            </div>
+        `;
+    }).join('');
+}
+
+function renderAdminFullComplaintsTable(complaints = []) {
+    const tbody = document.getElementById('adminFullComplaintsTableBody');
+    if (!tbody) return;
+    if (!complaints.length) {
+        tbody.innerHTML = '<tr><td colspan="7" class="px-6 py-6 text-center text-sm text-text-secondary">No complaints registered yet.</td></tr>';
+        return;
+    }
+    tbody.innerHTML = complaints.map((c) => `
+        <tr class="table-row">
+            <td class="px-6 py-4 text-sm font-medium">${c.id}</td>
+            <td class="px-6 py-4 text-sm">${c.student || 'John Doe'}</td>
+            <td class="px-6 py-4 text-sm">${c.roomNumber || 'N/A'}</td>
+            <td class="px-6 py-4 text-sm">${c.category || 'General'}</td>
+            <td class="px-6 py-4"><span class="${getPriorityBadgeClass(c.priority)} px-2.5 py-1 rounded-full text-xs font-medium">${c.priority || 'Low'}</span></td>
+            <td class="px-6 py-4"><span class="${getStatusBadgeClass(c.status)} px-2.5 py-1 rounded-full text-xs font-medium">${c.status || 'Pending'}</span></td>
+            <td class="px-6 py-4 text-sm text-text-secondary">${formatComplaintDate(c.createdAt)}</td>
+        </tr>
+    `).join('');
+}
+
+function renderTechInventoryGrid(inventory = []) {
+    const container = document.getElementById('technicianInventoryGrid');
+    if (!container) return;
+    if (!inventory.length) {
+        container.innerHTML = '<div class="col-span-3 glass p-6 rounded-2xl text-sm text-text-secondary">No inventory items.</div>';
+        return;
+    }
+    container.innerHTML = inventory.map((item) => `
+        <div class="glass rounded-2xl border border-border p-5 card-hover">
+            <div class="flex items-center gap-3 mb-3">
+                <div class="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center"><i class="fa-solid ${item.icon || 'fa-box'} text-primary"></i></div>
+                <div><h4 class="font-semibold text-sm">${item.name}</h4><p class="text-xs text-text-secondary">${item.category}</p></div>
+            </div>
+            <div class="flex items-center justify-between">
+                <span class="text-2xl font-bold">${item.stock}</span>
+                <button onclick="restockInventory('${item.id}')" class="px-3 py-1 rounded-lg bg-surface border border-border text-xs font-medium hover:bg-surface-alt transition-all">Restock +10</button>
+            </div>
+        </div>
+    `).join('');
+}
+
+async function restockInventory(id) {
+    try {
+        const response = await apiRequest('/api/inventory/restock', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id, amount: 10 })
+        });
+        if (response.ok) {
+            showToast('Item restocked successfully!', 'success');
+            await loadDashboardData();
+        }
+    } catch (e) {
+        console.error(e);
+    }
 }
 
 function updateNavAfterLogin() {
@@ -2444,12 +2580,14 @@ async function searchComplaint() {
 
 async function loadDashboardData() {
     try {
-        const [summaryResponse, complaintsResponse, techniciansResponse, gatePassesResponse, laundryRequestsResponse] = await Promise.all([
+        const [summaryResponse, complaintsResponse, techniciansResponse, gatePassesResponse, laundryRequestsResponse, usersResponse, inventoryResponse] = await Promise.all([
             apiRequest('/api/summary'),
             apiRequest('/api/complaints'),
             apiRequest('/api/technicians'),
             apiRequest('/api/gate-passes'),
-            apiRequest('/api/laundry-requests')
+            apiRequest('/api/laundry-requests'),
+            apiRequest('/api/users'),
+            apiRequest('/api/inventory')
         ]);
 
         const summary = await parseJsonResponse(summaryResponse);
@@ -2457,6 +2595,8 @@ async function loadDashboardData() {
         const technicianList = await parseJsonResponse(techniciansResponse);
         const gatePasses = await parseJsonResponse(gatePassesResponse);
         const laundryRequests = await parseJsonResponse(laundryRequestsResponse);
+        const allUsers = usersResponse.ok ? await parseJsonResponse(usersResponse) : [];
+        const inventoryList = inventoryResponse.ok ? await parseJsonResponse(inventoryResponse) : [];
 
         if (!summaryResponse.ok || !complaintsResponse.ok || !techniciansResponse.ok || !gatePassesResponse.ok || !laundryRequestsResponse.ok) {
             const failed = [
@@ -2500,6 +2640,10 @@ async function loadDashboardData() {
         renderTechSummary(complaints);
         renderAdminSummary(summary, complaints);
         renderGatePassTable(gatePasses);
+        renderAdminStudents(allUsers, complaints);
+        renderAdminTechnicians(allUsers, complaints);
+        renderAdminFullComplaintsTable(complaints);
+        renderTechInventoryGrid(inventoryList);
 
         const gatePassCount = document.getElementById('adminGatePassCount');
         if (gatePassCount) gatePassCount.textContent = `${gatePasses.length}`;

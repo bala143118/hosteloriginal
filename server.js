@@ -1086,6 +1086,9 @@ app.post('/api/gate-passes', (req, res) => {
   data.gatePasses.unshift(gatePass);
   addGatePassAudit(data, gatePass, 'Student Applied', { id: gatePass.userId, role: 'student', ip: req.ip });
   writeData(data);
+  if (req.io) {
+    req.io.emit('gate-pass.created', gatePass);
+  }
   res.status(201).json(gatePass);
 });
 
@@ -1256,6 +1259,9 @@ app.post('/api/complaints', (req, res) => {
 
   data.complaints.unshift(complaint);
   writeData(data);
+  if (req.io) {
+    req.io.emit('complaint.created', complaint);
+  }
   res.status(201).json(complaint);
 });
 
@@ -1285,8 +1291,14 @@ app.put('/api/complaints/:id/status', (req, res) => {
   }
 
   complaint.status = status;
+  if (req.body.technician) {
+    complaint.technician = req.body.technician;
+  }
   complaint.timeline = Array.from(new Set([...complaint.timeline, status]));
   writeData(data);
+  if (req.io) {
+    req.io.emit('complaint.updated', complaint);
+  }
   res.json(complaint);
 });
 
@@ -1360,6 +1372,35 @@ app.get('/api/alert-history', (req, res) => {
 
 app.get('/api/telegram-status', (req, res) => {
   res.json({ configured: Boolean(getTelegramConfig()) });
+});
+
+app.get('/api/inventory', (req, res) => {
+  const data = readData();
+  const defaultInventory = [
+    { id: 'INV-101', name: 'Power Outlets', category: 'Electrical', stock: 24, status: 'In Stock', icon: 'fa-plug' },
+    { id: 'INV-102', name: 'Faucet Washers', category: 'Plumbing', stock: 18, status: 'In Stock', icon: 'fa-faucet' },
+    { id: 'INV-103', name: 'LED Bulbs 20W', category: 'Lighting', stock: 45, status: 'In Stock', icon: 'fa-lightbulb' },
+    { id: 'INV-104', name: 'Wi-Fi Routers', category: 'Network', stock: 6, status: 'Low Stock', icon: 'fa-wifi' },
+    { id: 'INV-105', name: 'Door Lock Cylinders', category: 'Security', stock: 12, status: 'In Stock', icon: 'fa-key' },
+    { id: 'INV-106', name: 'AC Filters', category: 'HVAC', stock: 3, status: 'Critical', icon: 'fa-snowflake' }
+  ];
+  if (!Array.isArray(data.inventory) || !data.inventory.length) {
+    data.inventory = defaultInventory;
+    writeData(data);
+  }
+  res.json(data.inventory);
+});
+
+app.post('/api/inventory/restock', (req, res) => {
+  const data = readData();
+  const id = String(req.body.id || '');
+  const amount = Number(req.body.amount || 10);
+  const item = (data.inventory || []).find((i) => i.id === id);
+  if (!item) return res.status(404).json({ error: 'Inventory item not found.' });
+  item.stock += amount;
+  item.status = item.stock > 10 ? 'In Stock' : item.stock > 4 ? 'Low Stock' : 'Critical';
+  writeData(data);
+  res.json({ success: true, item });
 });
 
 async function sendTelegramEmergencyAlert(req, res) {
