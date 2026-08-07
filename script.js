@@ -493,7 +493,9 @@ function navigateTo(pageId, options = {}) {
     const dashboardRoles = {
         'student-dashboard': 'student',
         'technician-dashboard': 'technician',
-        'admin-dashboard': 'admin'
+        'admin-dashboard': 'admin',
+        'warden-dashboard': 'warden',
+        'security-dashboard': 'security'
     };
 
     if (dashboardRoles[pageId] && (!currentUser || currentUser.role !== dashboardRoles[pageId])) {
@@ -522,6 +524,16 @@ function navigateTo(pageId, options = {}) {
         pageHistory.push(pageId);
     }
 
+    if (pageId === 'login') {
+        const loginForm = document.querySelector('#page-login form');
+        if (loginForm) loginForm.reset();
+    }
+
+    if (pageId === 'register') {
+        const registerForm = document.querySelector('#page-register form');
+        if (registerForm) registerForm.reset();
+    }
+
     if (pageId === 'complaint-registration') {
         prepareComplaintForm();
     }
@@ -532,10 +544,17 @@ function navigateTo(pageId, options = {}) {
         } else {
             clearGatePassPhotoSelection(false);
         }
+        updateGatePassAssignedWarden().catch(e=>console.error(e));
+        setTimeout(setupCustomDatePickers, 50);
     }
 
     if (pageId === 'laundry') {
         prepareLaundryForm();
+        setTimeout(setupCustomDatePickers, 50);
+    }
+
+    if (pageId === 'complaint-tracking') {
+        prepareComplaintTracking();
     }
 
     if (pageId === 'notifications') {
@@ -550,6 +569,14 @@ function navigateTo(pageId, options = {}) {
     if (pageId === 'admin-settings') {
         loadEmergencyAlertSettings().catch((error) => console.error(error));
         loadAlertHistory().catch((error) => console.error(error));
+    }
+
+    if (pageId === 'admin-wardens') {
+        loadWardensList().catch((error) => console.error(error));
+    }
+
+    if (pageId === 'admin-technicians') {
+        loadTechniciansList().catch((error) => console.error(error));
     }
 
     if (pageId.startsWith('admin-') || pageId.startsWith('technician-')) {
@@ -762,17 +789,10 @@ function prepareLaundryForm() {
     const blockInput = document.getElementById('laundryHostelBlock');
     const roomInput = document.getElementById('laundryRoomNumber');
 
-    if (currentUser) {
-        if (studentNameInput) studentNameInput.value = currentUser.name || '';
-        if (regInput) regInput.value = currentUser.registrationNumber || '';
-        if (blockInput) blockInput.value = currentUser.hostelBlock || '';
-        if (roomInput) roomInput.value = currentUser.roomNumber || '';
-    } else {
-        if (studentNameInput) studentNameInput.value = '';
-        if (regInput) regInput.value = '';
-        if (blockInput) blockInput.value = '';
-        if (roomInput) roomInput.value = '';
-    }
+    if (studentNameInput) studentNameInput.value = '';
+    if (regInput) regInput.value = '';
+    if (blockInput) blockInput.value = '';
+    if (roomInput) roomInput.value = '';
 }
 
 function fillStudentForm(user) {
@@ -791,12 +811,35 @@ function fillStudentForm(user) {
     if (regInput) regInput.value = user.registrationNumber || '';
     if (roomInput) roomInput.value = user.roomNumber || '';
     if (hostelBlockInput) hostelBlockInput.value = user.hostelBlock || 'Block A';
-    if (gatePassStudentNameInput) gatePassStudentNameInput.value = user.name || '';
-    if (gatePassRegInput) gatePassRegInput.value = user.registrationNumber || '';
-    if (gatePassRoomInput) gatePassRoomInput.value = user.roomNumber || '';
-    if (gatePassHostelBlockInput && user.hostelBlock) gatePassHostelBlockInput.value = user.hostelBlock;
+    if (gatePassStudentNameInput) gatePassStudentNameInput.value = '';
+    if (gatePassRegInput) gatePassRegInput.value = '';
+    if (gatePassRoomInput) gatePassRoomInput.value = '';
+    if (gatePassHostelBlockInput) gatePassHostelBlockInput.value = '';
     if (studentWelcomeText) studentWelcomeText.textContent = `Welcome back, ${user.name || 'Student'}! Here is your overview.`;
-    syncGatePassPhotoFromProfile(true);
+    clearGatePassPhotoSelection(false);
+}
+
+async function updateGatePassAssignedWarden() {
+    const blockSelect = document.getElementById('gatePassHostelBlock');
+    const wardenText = document.getElementById('gatePassAssignedWardenText');
+    if (!wardenText) return;
+    const selectedBlock = blockSelect?.value || currentUser?.hostelBlock || 'Block A';
+    try {
+        const response = await apiRequest('/api/wardens');
+        if (response.ok) {
+            const wardens = await parseJsonResponse(response);
+            const blockWarden = Array.isArray(wardens) 
+                ? (wardens.find(w => normalizeText(w.hostelBlock) === normalizeText(selectedBlock)) || wardens[0])
+                : null;
+            if (blockWarden) {
+                wardenText.innerHTML = `<strong class="text-indigo-600 font-bold">${blockWarden.name}</strong> <span class="text-xs font-medium text-text-secondary">(${blockWarden.hostelBlock || selectedBlock} Oversight • ${blockWarden.email} • ${blockWarden.phone || '+91 98765 43210'})</span>`;
+                return;
+            }
+        }
+    } catch (e) {
+        console.error(e);
+    }
+    wardenText.textContent = `Duty Warden (${selectedBlock} Oversight)`;
 }
 
 function renderGatePassPhotoPreview(photoDataUrl = '') {
@@ -804,7 +847,11 @@ function renderGatePassPhotoPreview(photoDataUrl = '') {
     if (!preview) return;
 
     if (photoDataUrl) {
-        preview.innerHTML = `<img src="${photoDataUrl}" alt="Student photo preview" class="w-full h-full object-cover">`;
+        preview.innerHTML = `
+            <img src="${photoDataUrl}" alt="Student photo preview" class="w-full h-full object-cover">
+            <button type="button" onclick="clearGatePassPhotoSelection(false)" title="Remove photo" class="absolute top-1.5 right-1.5 w-5 h-5 rounded-full bg-slate-900/85 hover:bg-rose-600 text-white flex items-center justify-center text-[10px] shadow-sm transition-all focus:outline-none z-10 border border-white/20">
+                <i class="fa-solid fa-xmark"></i>
+            </button>`;
         return;
     }
 
@@ -822,7 +869,7 @@ function syncGatePassPhotoFromProfile(force = false) {
     renderGatePassPhotoPreview(currentGatePassPhotoDataUrl);
 }
 
-function clearGatePassPhotoSelection(useProfileFallback = true) {
+function clearGatePassPhotoSelection(useProfileFallback = false) {
     currentGatePassPhotoDataUrl = '';
     const input = document.getElementById('gatePassPhoto');
     if (input) input.value = '';
@@ -877,13 +924,13 @@ async function resizeImageToJpeg(file, maxSize = 640, quality = 0.82) {
 async function handleGatePassPhotoChange(event) {
     const file = event.target.files?.[0];
     if (!file) {
-        clearGatePassPhotoSelection(true);
+        clearGatePassPhotoSelection(false);
         return;
     }
 
     if (!file.type.startsWith('image/')) {
         showToast('Please choose a valid image file for the student photo.', 'warning');
-        clearGatePassPhotoSelection(true);
+        clearGatePassPhotoSelection(false);
         return;
     }
 
@@ -899,7 +946,7 @@ async function handleGatePassPhotoChange(event) {
             showToast('Student photo added successfully.', 'success');
         } catch (fallbackError) {
             console.error('Gate pass photo fallback failed:', fallbackError);
-            clearGatePassPhotoSelection(true);
+            clearGatePassPhotoSelection(false);
             showToast('Unable to process that student photo.', 'error');
         }
     }
@@ -962,27 +1009,61 @@ function renderStudentNotifications() {
     const list = document.getElementById('studentNotificationsList');
     if (!list) return;
     if (!studentNotifications.length) {
-        list.innerHTML = '<div class="text-center py-20 text-text-secondary"><i class="fa-solid fa-bell-slash text-3xl mb-4"></i><p class="text-base font-medium">No notifications yet.</p><p class="text-sm mt-2">Gate pass approvals and admin notices will appear here.</p></div>';
+        list.innerHTML = `
+            <div class="glass rounded-2xl border border-border p-12 text-center text-text-secondary">
+                <i class="fa-solid fa-bell-slash text-2xl mb-3 text-text-muted"></i>
+                <p class="text-sm font-semibold text-text">No notifications yet</p>
+                <p class="text-xs mt-1 text-text-secondary">Gate pass approvals and admin notices will appear here.</p>
+            </div>`;
         renderDashboardAnnouncements();
         return;
     }
 
     list.innerHTML = studentNotifications.map((announcement) => {
-        const unreadBadge = announcement.read ? '' : '<span class="inline-flex items-center px-2 py-1 rounded-full bg-primary text-white text-[11px] font-semibold">NEW</span>';
+        const isEmergency = announcement.priority === 'Emergency';
+        const isImportant = announcement.priority === 'Important';
+        const unreadBadge = announcement.read ? '' : '<span class="inline-flex items-center px-2 py-0.5 rounded-full bg-primary text-white text-[10px] font-bold tracking-wide">NEW</span>';
+        
+        const priorityBadge = isEmergency 
+            ? '<span class="px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-danger text-white">Emergency</span>'
+            : isImportant 
+                ? '<span class="px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-amber-50 text-amber-700 border border-amber-200/60">Important</span>'
+                : '<span class="px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-surface-alt text-text-secondary border border-border">Normal</span>';
+
+        const iconClass = isEmergency
+            ? 'fa-triangle-exclamation text-danger bg-danger/10'
+            : isImportant
+                ? 'fa-circle-exclamation text-amber-600 bg-amber-500/10'
+                : 'fa-bell text-primary bg-primary/10';
+
+        const iconName = isEmergency ? 'fa-triangle-exclamation' : isImportant ? 'fa-circle-exclamation' : 'fa-bell';
+
         return `
-            <div class="glass rounded-3xl border border-border p-6 mb-4 shadow-sm ${announcement.priority === 'Emergency' ? 'border-danger/40 bg-danger/5' : ''}">
-                <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 mb-4">
-                    <div>
-                        <p class="text-sm text-text-secondary uppercase tracking-[0.2em] mb-2">${announcement.audience || 'All Students'}</p>
-                        <h3 class="text-lg font-semibold">${announcement.title || 'Untitled Announcement'}</h3>
-                        <p class="text-sm mt-1 text-text-secondary">Posted by ${announcement.adminName || 'Admin'} on ${new Date(announcement.createdAt).toLocaleString()}</p>
+            <div class="glass rounded-2xl border border-border p-4 sm:p-5 shadow-xs transition-all hover:border-border/80 ${isEmergency ? 'border-danger/30 bg-danger/[0.02]' : ''}">
+                <div class="flex items-start gap-3.5">
+                    <div class="w-8 h-8 rounded-xl ${iconClass} flex items-center justify-center text-xs shrink-0 mt-0.5">
+                        <i class="fa-solid ${iconName}"></i>
                     </div>
-                    <div class="flex items-center gap-2">
-                        ${unreadBadge}
-                        <span class="px-3 py-1 rounded-full text-xs font-semibold ${announcement.priority === 'Emergency' ? 'bg-danger text-white' : announcement.priority === 'Important' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-700'}">${announcement.priority || 'Normal'}</span>
+                    <div class="flex-1 min-w-0">
+                        <div class="flex flex-wrap items-center justify-between gap-2 mb-1">
+                            <div class="flex items-center gap-2 flex-wrap">
+                                <span class="text-[10px] font-bold tracking-wider text-text-secondary uppercase bg-surface-alt px-2 py-0.5 rounded-md border border-border/60">${announcement.audience || 'All Students'}</span>
+                                <h3 class="text-sm font-semibold text-text">${announcement.title || 'Notification'}</h3>
+                            </div>
+                            <div class="flex items-center gap-1.5 shrink-0">
+                                ${unreadBadge}
+                                ${priorityBadge}
+                            </div>
+                        </div>
+                        <p class="text-xs text-text-secondary leading-relaxed mb-2">${announcement.message || ''}</p>
+                        <p class="text-[11px] text-text-muted flex items-center gap-1.5">
+                            <i class="fa-regular fa-clock text-[10px]"></i>
+                            <span>${announcement.adminName || 'Gate Pass System'}</span>
+                            <span>•</span>
+                            <span>${new Date(announcement.createdAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
+                        </p>
                     </div>
                 </div>
-                <p class="text-text-secondary leading-relaxed">${announcement.message || ''}</p>
             </div>
         `;
     }).join('');
@@ -1168,10 +1249,12 @@ function setupAnnouncementSocket() {
             if (!gatePass || !gatePass.id) return;
             latestGatePasses = [gatePass, ...latestGatePasses.filter((entry) => entry?.id !== gatePass.id)];
             renderGatePassTable(latestGatePasses);
+            renderWardenDashboard();
+            renderSecurityDashboard();
             const gatePassCount = document.getElementById('adminGatePassCount');
             if (gatePassCount) gatePassCount.textContent = `${latestGatePasses.length}`;
-            if (currentUser?.role === 'admin') {
-                showToast(`New gate pass submitted by ${gatePass.student || 'Student'}`, 'info');
+            if (currentUser?.role === 'admin' || currentUser?.role === 'warden') {
+                showToast(`🔔 New Gate Pass request from ${gatePass.student || 'Student'} (${gatePass.hostelBlock || 'Hostel'})`, 'info');
             }
         });
         announcementSocket.on('complaint.created', (complaint) => {
@@ -1888,11 +1971,16 @@ function renderAdminSummary(summary, complaints) {
     const adminPending = document.getElementById('adminPendingComplaints');
     const adminCompleted = document.getElementById('adminCompletedComplaints');
     const adminActiveTechnicians = document.getElementById('adminActiveTechnicians');
+    const adminTotalWardens = document.getElementById('adminTotalWardens');
+
+    const techCount = users.filter(u => u.role === 'technician').length;
+    const wardenCount = users.filter(u => u.role === 'warden').length;
 
     if (adminTotal) adminTotal.textContent = String(summary.total || complaints.length || 0).toLocaleString();
     if (adminPending) adminPending.textContent = String(summary.pending || 0).toLocaleString();
     if (adminCompleted) adminCompleted.textContent = String(summary.completed || 0).toLocaleString();
-    if (adminActiveTechnicians) adminActiveTechnicians.textContent = String(summary.activeTechnicians || 0).toLocaleString();
+    if (adminActiveTechnicians) adminActiveTechnicians.textContent = String(summary.activeTechnicians || techCount || 0).toLocaleString();
+    if (adminTotalWardens) adminTotalWardens.textContent = String(wardenCount || 0).toLocaleString();
 }
 
 function renderAdminStudents(users = [], complaints = []) {
@@ -1918,29 +2006,95 @@ function renderAdminStudents(users = [], complaints = []) {
     }).join('');
 }
 
+function renderAdminWardens(users = []) {
+    const container = document.getElementById('adminWardensGrid');
+    if (!container) return;
+    const wardens = Array.isArray(users) ? users.filter((u) => u.role === 'warden' || u.hostelBlock || u.id?.startsWith('W-')) : [];
+    window.currentWardensList = wardens;
+    if (!wardens.length) {
+        container.innerHTML = '<div class="col-span-3 glass p-6 rounded-2xl text-sm text-text-secondary text-center">No registered wardens found. Click "Add New Warden" above to add one.</div>';
+        return;
+    }
+    container.innerHTML = wardens.map((w) => {
+        const initials = (w.name || 'WD').split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase();
+        return `
+            <div class="glass rounded-2xl border border-border p-5 card-hover relative group">
+                <div class="flex items-center justify-between mb-4">
+                    <div class="flex items-center gap-3">
+                        <div class="w-12 h-12 rounded-full bg-gradient-to-br from-indigo-600 to-primary flex items-center justify-center text-white font-bold text-sm shadow-md">${initials}</div>
+                        <div>
+                            <h4 class="font-bold text-sm text-text">${w.name}</h4>
+                            <p class="text-xs text-text-secondary">${w.email}</p>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-1.5">
+                        <button onclick="openEditWardenModal('${w.id || w.email}')" title="Edit Warden" class="w-8 h-8 rounded-xl bg-primary/10 text-primary hover:bg-primary hover:text-white flex items-center justify-center text-xs transition-all">
+                            <i class="fa-solid fa-pen-to-square"></i>
+                        </button>
+                        <button onclick="deleteWarden('${w.id || w.email}')" title="Remove Warden" class="w-8 h-8 rounded-xl bg-danger/10 text-danger hover:bg-danger hover:text-white flex items-center justify-center text-xs transition-all">
+                            <i class="fa-solid fa-trash"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="p-3 rounded-xl bg-surface-alt border border-border/60 space-y-2 mb-4 text-xs">
+                    <div class="flex items-center justify-between">
+                        <span class="text-text-secondary">Assigned Block</span>
+                        <span class="font-semibold text-text">${w.hostelBlock || 'Block A'}</span>
+                    </div>
+                    <div class="flex items-center justify-between">
+                        <span class="text-text-secondary">Phone</span>
+                        <span class="font-medium text-text">${w.phone || '+91 98765 43210'}</span>
+                    </div>
+                </div>
+                <div class="flex items-center justify-between">
+                    <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-600 border border-emerald-500/30">Active Oversight</span>
+                    <span class="text-[11px] text-text-muted">Live Warden</span>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
 function renderAdminTechnicians(users = [], complaints = []) {
     const container = document.getElementById('adminTechniciansGrid');
     if (!container) return;
-    const technicians = users.filter((u) => u.role === 'technician');
+    const technicians = Array.isArray(users) ? users.filter((u) => u.role === 'technician' || u.specialization || u.id?.startsWith('T-')) : [];
+    window.currentTechniciansList = technicians;
     if (!technicians.length) {
-        container.innerHTML = '<div class="col-span-3 glass p-6 rounded-2xl text-sm text-text-secondary">No active technicians found.</div>';
+        container.innerHTML = '<div class="col-span-3 glass p-6 rounded-2xl text-sm text-text-secondary text-center">No active technicians found. Click "Add New Technician" above to add one.</div>';
         return;
     }
     container.innerHTML = technicians.map((t) => {
         const initials = (t.name || 'TC').split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase();
-        const done = complaints.filter((c) => c.technician === t.name && String(c.status).toLowerCase() === 'completed').length;
+        const done = complaints.filter((c) => c.technician === t.name || c.assignedTo === t.name).filter((c) => String(c.status).toLowerCase() === 'completed').length;
         return `
-            <div class="glass rounded-2xl border border-border p-5 card-hover">
-                <div class="flex items-center gap-3 mb-4">
-                    <div class="w-12 h-12 rounded-full bg-gradient-to-br from-primary to-primary-light flex items-center justify-center text-white font-bold">${initials}</div>
-                    <div><h4 class="font-semibold">${t.name}</h4><p class="text-xs text-text-secondary">${t.email}</p></div>
+            <div class="glass rounded-2xl border border-border p-5 card-hover relative group">
+                <div class="flex items-center justify-between mb-4">
+                    <div class="flex items-center gap-3">
+                        <div class="w-12 h-12 rounded-full bg-gradient-to-br from-primary to-info flex items-center justify-center text-white font-bold text-sm shadow-md">${initials}</div>
+                        <div>
+                            <h4 class="font-bold text-sm text-text">${t.name}</h4>
+                            <p class="text-xs text-primary font-medium">${t.specialization || 'General Maintenance'}</p>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-1.5">
+                        <button onclick="openEditTechnicianModal('${t.id || t.email}')" title="Edit Technician" class="w-8 h-8 rounded-xl bg-primary/10 text-primary hover:bg-primary hover:text-white flex items-center justify-center text-xs transition-all">
+                            <i class="fa-solid fa-pen-to-square"></i>
+                        </button>
+                        <button onclick="deleteTechnician('${t.id || t.email}')" title="Remove Technician" class="w-8 h-8 rounded-xl bg-danger/10 text-danger hover:bg-danger hover:text-white flex items-center justify-center text-xs transition-all">
+                            <i class="fa-solid fa-trash"></i>
+                        </button>
+                    </div>
                 </div>
                 <div class="grid grid-cols-3 gap-2 text-center mb-4">
-                    <div class="bg-surface-alt rounded-lg p-2"><p class="font-bold text-sm">${done}</p><p class="text-xs text-text-secondary">Done</p></div>
-                    <div class="bg-surface-alt rounded-lg p-2"><p class="font-bold text-sm">4.9</p><p class="text-xs text-text-secondary">Rating</p></div>
-                    <div class="bg-surface-alt rounded-lg p-2"><p class="font-bold text-sm">2.5h</p><p class="text-xs text-text-secondary">Avg</p></div>
+                    <div class="bg-surface-alt rounded-xl p-2 border border-border/60"><p class="font-bold text-sm text-text">${t.completedCount || done}</p><p class="text-[10px] text-text-secondary">Done</p></div>
+                    <div class="bg-surface-alt rounded-xl p-2 border border-border/60"><p class="font-bold text-sm text-amber-500">${t.rating || 4.9}</p><p class="text-[10px] text-text-secondary">Rating</p></div>
+                    <div class="bg-surface-alt rounded-xl p-2 border border-border/60"><p class="font-bold text-sm text-text">${t.avgRepairTime || '2.5h'}</p><p class="text-[10px] text-text-secondary">Avg</p></div>
                 </div>
-                <span class="badge-progress px-2.5 py-1 rounded-full text-xs font-medium">Active Duty</span>
+                <div class="flex items-center justify-between">
+                    <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-500/10 text-blue-600 border border-blue-500/30">${t.status || 'Active Duty'}</span>
+                    <span class="text-[11px] text-text-muted">${t.phone || t.email || ''}</span>
+                </div>
             </div>
         `;
     }).join('');
@@ -2029,7 +2183,9 @@ function updateSidebarIdentity() {
     const roleLabels = {
         student: 'Student',
         technician: 'Technician',
-        admin: 'Administrator'
+        admin: 'Administrator',
+        warden: 'Hostel Warden',
+        security: 'Gate Security Guard'
     };
     const initials = (currentUser.name || 'User')
         .split(/\s+/)
@@ -2084,6 +2240,8 @@ function logoutCurrentUser() {
 function getCurrentUserDashboard() {
     if (currentUser?.role === 'technician') return 'technician-dashboard';
     if (currentUser?.role === 'admin') return 'admin-dashboard';
+    if (currentUser?.role === 'warden') return 'warden-dashboard';
+    if (currentUser?.role === 'security') return 'security-dashboard';
     return 'student-dashboard';
 }
 
@@ -2096,7 +2254,9 @@ function renderCurrentUserProfile() {
     const roleLabels = {
         student: 'Student',
         technician: 'Technician',
-        admin: 'Administrator'
+        admin: 'Administrator',
+        warden: 'Hostel Warden',
+        security: 'Gate Security Guard'
     };
     const roleLabel = roleLabels[currentUser.role] || 'User';
     const extraDetails = currentUser.role === 'student'
@@ -2189,7 +2349,6 @@ function selectRole(role) {
         active.classList.remove('border-border', 'text-text-secondary');
         active.classList.add('active', 'border-primary', 'bg-primary/5', 'text-primary');
     }
-
 }
 
 function togglePassword(btn) {
@@ -2237,7 +2396,9 @@ async function handleLogin(e) {
         updateNavAfterLogin();
         studentNotifications = [];
         showToast(`Welcome back, ${data.name}!`, 'success');
-        if (role === 'technician') {
+
+        const userRole = data.role || role;
+        if (userRole === 'technician') {
             const techSidebarName = document.getElementById('techSidebarName');
             const techSidebarRole = document.getElementById('techSidebarRole');
             const techWelcomeText = document.getElementById('techWelcomeText');
@@ -2245,16 +2406,21 @@ async function handleLogin(e) {
             if (techSidebarRole) techSidebarRole.textContent = 'Technician';
             if (techWelcomeText) techWelcomeText.textContent = `Welcome back, ${data.name || 'Technician'}! Here are your tasks for today.`;
         }
-        if (role === 'student') {
+
+        if (userRole === 'student') {
             fillStudentForm(data);
             await Promise.all([fetchAnnouncements(), fetchStudentNotifications()]);
             navigateTo('student-dashboard');
-        } else if (role === 'technician') {
+        } else if (userRole === 'technician') {
             navigateTo('technician-dashboard');
-        } else if (role === 'admin') {
+        } else if (userRole === 'admin') {
             navigateTo('admin-dashboard');
+        } else if (userRole === 'warden') {
+            navigateTo('warden-dashboard');
+        } else if (userRole === 'security') {
+            navigateTo('security-dashboard');
         } else {
-            navigateTo('student-dashboard');
+            navigateTo(getCurrentUserDashboard());
         }
     } catch (error) {
         hideLoading();
@@ -2374,10 +2540,10 @@ async function handleComplaintSubmit(e) {
 async function handleGatePassSubmit(e) {
     e.preventDefault();
     const form = e.target;
-    const studentName = currentUser?.name || document.getElementById('gatePassStudentName').value.trim();
-    const registrationNumber = currentUser?.registrationNumber || document.getElementById('gatePassRegistrationNumber').value.trim();
+    const studentName = document.getElementById('gatePassStudentName')?.value.trim() || currentUser?.name || '';
+    const registrationNumber = document.getElementById('gatePassRegistrationNumber')?.value.trim() || currentUser?.registrationNumber || '';
     const hostelBlock = document.getElementById('gatePassHostelBlock')?.value || 'Unknown';
-    const roomNumber = document.getElementById('gatePassRoomNumber').value.trim();
+    const roomNumber = document.getElementById('gatePassRoomNumber')?.value.trim() || currentUser?.roomNumber || '';
     const reason = document.getElementById('gatePassReason').value.trim();
     const session = document.getElementById('gatePassSession').value || 'Morning';
     const gateDate = document.getElementById('gatePassDate').value;
@@ -2549,30 +2715,60 @@ function handleFileSelect(input) {
     }
 }
 
-async function searchComplaint() {
+async function searchComplaint(targetId) {
     const queryInput = document.getElementById('complaintSearchInput');
-    const searchValue = queryInput ? queryInput.value.trim() : '';
+    const searchValue = (targetId || (queryInput ? queryInput.value.trim() : '')).toUpperCase();
     const trackingResult = document.getElementById('trackingResult');
 
+    if (queryInput && targetId) {
+        queryInput.value = targetId;
+    }
+
     if (!searchValue) {
-        showToast('Please enter a complaint ID to search.', 'warning');
+        showToast('Please enter a complaint ID to track.', 'warning');
         return;
     }
 
-    showLoading();
+    if (trackingResult) {
+        trackingResult.innerHTML = `
+            <div class="text-center py-10">
+                <div class="w-10 h-10 rounded-full bg-primary/10 text-primary flex items-center justify-center mx-auto mb-3 animate-spin">
+                    <i class="fa-solid fa-circle-notch text-lg"></i>
+                </div>
+                <p class="text-xs font-semibold text-text-secondary">Fetching complaint details for ${searchValue}...</p>
+            </div>
+        `;
+    }
+
     try {
         const response = await apiRequest(`/api/complaints/${encodeURIComponent(searchValue)}`);
         const data = await parseJsonResponse(response);
-        hideLoading();
 
         if (!response.ok) {
-            trackingResult.innerHTML = `<p class="text-danger font-semibold">${data.error || 'Complaint not found.'}</p>`;
+            if (trackingResult) {
+                trackingResult.innerHTML = `
+                    <div class="text-center py-10">
+                        <div class="w-16 h-16 rounded-full bg-rose-500/10 text-rose-500 flex items-center justify-center mx-auto mb-4 text-2xl">
+                            <i class="fa-solid fa-circle-exclamation"></i>
+                        </div>
+                        <h3 class="text-lg font-bold text-text mb-1">Complaint Not Found</h3>
+                        <p class="text-sm text-text-secondary max-w-sm mx-auto mb-6">No complaint matching ID "<strong class="text-text">${searchValue}</strong>" was found in the database.</p>
+                        <button onclick="prepareComplaintTracking()" class="px-5 py-2.5 rounded-xl bg-surface-alt border border-border text-xs font-semibold text-text hover:bg-border transition-all">
+                            View All Complaints
+                        </button>
+                    </div>
+                `;
+            }
             return;
         }
 
-        trackingResult.innerHTML = renderTrackingResult(data);
+        if (trackingResult) {
+            trackingResult.innerHTML = renderTrackingResult(data);
+        }
     } catch (error) {
-        hideLoading();
+        if (trackingResult) {
+            trackingResult.innerHTML = `<p class="text-danger font-semibold text-center py-8">Unable to fetch tracking data. Please try again.</p>`;
+        }
         showToast('Unable to reach server. Please try again.', 'error');
         console.error(error);
     }
@@ -2638,12 +2834,15 @@ async function loadDashboardData() {
         renderTechAssignedComplaints(complaints);
         renderTechCompletedComplaints(complaints);
         renderTechSummary(complaints);
-        renderAdminSummary(summary, complaints);
+        renderAdminSummary(summary, complaints, allUsers);
         renderGatePassTable(gatePasses);
         renderAdminStudents(allUsers, complaints);
+        renderAdminWardens(allUsers);
         renderAdminTechnicians(allUsers, complaints);
         renderAdminFullComplaintsTable(complaints);
         renderTechInventoryGrid(inventoryList);
+        renderWardenDashboard();
+        renderSecurityDashboard();
 
         const gatePassCount = document.getElementById('adminGatePassCount');
         if (gatePassCount) gatePassCount.textContent = `${gatePasses.length}`;
@@ -2656,37 +2855,357 @@ async function loadDashboardData() {
     }
 }
 
+function renderWardenDashboard() {
+    const pendingCount = document.getElementById('wardenPendingCount');
+    const approvedCount = document.getElementById('wardenApprovedCount');
+    const outCount = document.getElementById('wardenOutCount');
+    const list = document.getElementById('wardenGatePassList');
+
+    const pendingPasses = latestGatePasses.filter(p => !p.status || p.status === 'REQUESTED' || p.status === 'Pending');
+    const approvedPasses = latestGatePasses.filter(p => p.status === 'QR GENERATED' || p.status === 'Approved');
+    const outPasses = latestGatePasses.filter(p => p.status === 'OUT');
+
+    if (pendingCount) pendingCount.textContent = pendingPasses.length;
+    if (approvedCount) approvedCount.textContent = approvedPasses.length;
+    if (outCount) outCount.textContent = outPasses.length;
+
+    if (!list) return;
+
+    if (!latestGatePasses.length) {
+        list.innerHTML = '<div class="text-sm text-text-secondary py-6 text-center">No gate pass requests recorded yet.</div>';
+        return;
+    }
+
+    list.innerHTML = latestGatePasses.map((pass) => {
+        const status = pass.status || 'REQUESTED';
+        const isPending = status === 'REQUESTED' || status === 'Pending';
+        const isApproved = status === 'QR GENERATED' || status === 'Approved';
+
+        let badgeClass = 'bg-amber-100 text-amber-800';
+        if (isApproved) badgeClass = 'bg-emerald/10 text-emerald border border-emerald/20';
+        if (status === 'OUT') badgeClass = 'bg-blue-100 text-blue-800';
+        if (status === 'RETURNED' || status === 'COMPLETED') badgeClass = 'bg-purple-100 text-purple-800';
+        if (status === 'Rejected') badgeClass = 'bg-danger/10 text-danger';
+
+        return `
+            <div class="rounded-2xl border border-border p-4 bg-surface flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div class="space-y-1">
+                    <div class="flex items-center gap-2">
+                        <span class="font-bold text-sm text-text">${pass.student || 'Student'}</span>
+                        <span class="text-xs text-text-secondary">• ${pass.registrationNumber || 'REG-N/A'}</span>
+                        <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold ${badgeClass}">${status}</span>
+                    </div>
+                    <p class="text-xs text-text-secondary">Hostel: ${pass.hostelBlock || 'N/A'} • Room: ${pass.roomNumber || 'N/A'} • Date: ${pass.gateDate || '—'} to ${pass.returnDate || '—'}</p>
+                    <p class="text-xs text-text-muted italic">Reason: "${pass.reason || 'Not specified'}"</p>
+                </div>
+                <div class="flex items-center gap-2 shrink-0">
+                    ${isPending ? `
+                        <button onclick="updateGatePassStatus('${pass.id}', 'QR GENERATED')" class="px-3 py-1.5 rounded-xl bg-emerald text-white text-xs font-semibold hover:bg-emerald/90 transition-all flex items-center gap-1">
+                            <i class="fa-solid fa-check"></i> Approve
+                        </button>
+                        <button onclick="updateGatePassStatus('${pass.id}', 'Rejected')" class="px-3 py-1.5 rounded-xl bg-danger/10 text-danger hover:bg-danger hover:text-white text-xs font-semibold transition-all flex items-center gap-1">
+                            <i class="fa-solid fa-xmark"></i> Reject
+                        </button>
+                    ` : `
+                        <span class="text-xs font-mono text-text-muted">ID: ${pass.id}</span>
+                    `}
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+function renderSecurityDashboard() {
+    const list = document.getElementById('securityGatePassList');
+    if (!list) return;
+
+    const gatePasses = latestGatePasses.filter(p => p.status && p.status !== 'Pending' && p.status !== 'REQUESTED');
+
+    if (!gatePasses.length) {
+        list.innerHTML = '<div class="text-sm text-text-secondary py-6 text-center">No active approved gate passes to display.</div>';
+        return;
+    }
+
+    list.innerHTML = gatePasses.map((pass) => {
+        const status = pass.status || 'QR GENERATED';
+        const isApproved = status === 'QR GENERATED';
+        const isOut = status === 'OUT';
+
+        return `
+            <div class="rounded-2xl border border-border p-4 bg-surface flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div class="space-y-1">
+                    <div class="flex items-center gap-2">
+                        <span class="font-bold text-sm text-text">${pass.student || 'Student'}</span>
+                        <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold ${isOut ? 'bg-amber-100 text-amber-800' : 'bg-emerald/10 text-emerald'}">${status}</span>
+                    </div>
+                    <p class="text-xs text-text-secondary">Pass ID: <span class="font-mono font-semibold">${pass.id}</span> • Room: ${pass.roomNumber || 'N/A'}</p>
+                </div>
+                <div class="flex items-center gap-2 shrink-0">
+                    ${isApproved ? `
+                        <button onclick="updateGatePassStatus('${pass.id}', 'OUT')" class="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-semibold transition-all">
+                            Mark OUT
+                        </button>
+                    ` : ''}
+                    ${isOut ? `
+                        <button onclick="updateGatePassStatus('${pass.id}', 'RETURNED')" class="px-3 py-1.5 rounded-xl bg-emerald hover:bg-emerald/90 text-white text-xs font-semibold transition-all">
+                            Mark RETURNED
+                        </button>
+                    ` : ''}
+                    ${(!isApproved && !isOut) ? `<span class="text-xs font-mono text-text-muted">${status}</span>` : ''}
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+function handleSecurityScanSubmit(targetStatus) {
+    const input = document.getElementById('securityScanInput');
+    if (!input) return;
+    const passId = input.value.trim();
+    if (!passId) {
+        showToast('Please enter or scan a Gate Pass ID first.', 'warning');
+        return;
+    }
+    const pass = latestGatePasses.find(p => p.id === passId || p.id.toLowerCase() === passId.toLowerCase());
+    if (!pass) {
+        showToast(`Gate Pass ID '${passId}' not found.`, 'error');
+        return;
+    }
+    updateGatePassStatus(pass.id, targetStatus);
+    input.value = '';
+}
+
 function loadLandingStats() {
     return loadDashboardData();
 }
 
-function renderTrackingResult(complaint) {
-    return `
-        <div class="text-center mb-8">
-            <div class="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary/10 text-primary text-sm font-medium mb-4">
-                <i class="fa-solid fa-hashtag"></i> ${complaint.id}
-            </div>
-            <h2 class="text-xl font-bold mb-1">${complaint.category || 'Complaint'} - ${complaint.status}</h2>
-            <p class="text-text-secondary text-sm">${complaint.roomNumber || 'Room N/A'} | Reported on ${new Date(complaint.createdAt).toLocaleDateString()}</p>
-        </div>
-        <div class="relative pl-8">
-            <div class="timeline-line"></div>
-            ${complaint.timeline.map((step, index) => `
-                <div class="relative flex items-start gap-4">
-                    <div class="absolute left-[-20px] w-10 h-10 rounded-full bg-emerald flex items-center justify-center text-white shadow-lg z-10">
-                        <i class="fa-solid fa-check"></i>
-                    </div>
-                    <div class="ml-6 flex-1">
-                        <div class="glass rounded-xl p-4 border border-border">
-                            <div class="flex items-center justify-between mb-2">
-                                <h4 class="font-semibold">${step}</h4>
-                                <span class="text-xs text-text-muted">Step ${index + 1}</span>
-                            </div>
-                            <p class="text-sm text-text-secondary">${index === 0 ? 'Complaint recorded in the system.' : 'Status updated.'}</p>
+async function prepareComplaintTracking() {
+    const trackingResult = document.getElementById('trackingResult');
+    const queryInput = document.getElementById('complaintSearchInput');
+    if (!trackingResult) return;
+
+    // Check if search input has value
+    if (queryInput && queryInput.value.trim()) {
+        searchComplaint(queryInput.value.trim());
+        return;
+    }
+
+    try {
+        const response = await apiRequest('/api/complaints');
+        const complaints = await parseJsonResponse(response);
+
+        if (response.ok && Array.isArray(complaints) && complaints.length > 0) {
+            let targetComplaint = null;
+            if (currentUser && currentUser.email) {
+                targetComplaint = complaints.find(c => (c.email && c.email.toLowerCase() === currentUser.email.toLowerCase()) || (c.student && c.student.toLowerCase() === currentUser.name?.toLowerCase()));
+            }
+            if (!targetComplaint) targetComplaint = complaints[0];
+
+            if (targetComplaint && targetComplaint.id) {
+                if (queryInput) queryInput.value = targetComplaint.id;
+                trackingResult.innerHTML = renderTrackingResult(targetComplaint);
+
+                const chipsHtml = complaints.slice(0, 6).map(c => `
+                    <button onclick="searchComplaint('${c.id}')" class="px-3 py-1.5 rounded-full text-xs font-semibold border ${c.id === targetComplaint.id ? 'bg-primary text-white border-primary shadow-xs' : 'bg-surface-alt text-text-secondary border-border hover:border-primary hover:text-primary'} transition-all flex items-center gap-1.5 shrink-0">
+                        <i class="fa-solid fa-hashtag text-[10px]"></i> ${c.id} (${c.category || 'General'})
+                    </button>
+                `).join('');
+
+                trackingResult.insertAdjacentHTML('afterbegin', `
+                    <div class="mb-6 pb-6 border-b border-border">
+                        <p class="text-xs font-bold text-text-secondary uppercase tracking-wider mb-2.5">Recent Complaints Live Quick Switch:</p>
+                        <div class="flex items-center gap-2 overflow-x-auto pb-1">
+                            ${chipsHtml}
                         </div>
                     </div>
+                `);
+                return;
+            }
+        }
+    } catch (e) {
+        console.error('Error loading complaints for tracking:', e);
+    }
+
+    trackingResult.innerHTML = `
+        <div class="text-center py-10">
+            <div class="w-16 h-16 rounded-full bg-primary/10 text-primary flex items-center justify-center mx-auto mb-4 text-2xl">
+                <i class="fa-solid fa-route"></i>
+            </div>
+            <h3 class="text-lg font-bold text-text mb-1">Live Maintenance Tracking</h3>
+            <p class="text-sm text-text-secondary max-w-sm mx-auto mb-6">Enter a complaint ID above (e.g. <strong>CMP-2026-001</strong>) to view its real-time progress, technician assignment, and repair status history.</p>
+        </div>
+    `;
+}
+
+function renderTrackingResult(complaint) {
+    if (!complaint) {
+        return `<div class="text-center py-8 text-text-secondary">No complaint data found.</div>`;
+    }
+
+    const statusMap = {
+        'Pending': 1,
+        'Assigned': 2,
+        'Accepted': 3,
+        'In Progress': 4,
+        'Completed': 5,
+        'Resolved': 5
+    };
+
+    const currentStepIndex = statusMap[complaint.status] || (complaint.assignedTo && complaint.assignedTo !== 'Unassigned' ? 2 : 1);
+    const createdDateStr = complaint.createdAt ? new Date(complaint.createdAt).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Recently';
+
+    const priorityColors = {
+        'High': 'bg-rose-500/10 text-rose-600 border-rose-500/30',
+        'Emergency': 'bg-rose-600/20 text-rose-600 border-rose-600/40 animate-pulse',
+        'Medium': 'bg-amber-500/10 text-amber-600 border-amber-500/30',
+        'Low': 'bg-sky-500/10 text-sky-600 border-sky-500/30'
+    };
+    const priorityBadge = priorityColors[complaint.priority] || priorityColors['Low'];
+
+    const statusBadges = {
+        'Completed': 'bg-emerald-500/10 text-emerald-600 border-emerald-500/30',
+        'In Progress': 'bg-blue-500/10 text-blue-600 border-blue-500/30',
+        'Accepted': 'bg-indigo-500/10 text-indigo-600 border-indigo-500/30',
+        'Assigned': 'bg-purple-500/10 text-purple-600 border-purple-500/30',
+        'Pending': 'bg-amber-500/10 text-amber-600 border-amber-500/30'
+    };
+    const statusBadgeStyle = statusBadges[complaint.status] || statusBadges['Pending'];
+
+    const categoryIcons = {
+        'Electrical': 'fa-bolt text-amber-500',
+        'Plumbing': 'fa-faucet-drip text-blue-500',
+        'Furniture': 'fa-chair text-amber-700',
+        'Carpentry': 'fa-hammer text-amber-600',
+        'Appliance': 'fa-plug text-purple-500',
+        'Cleaning': 'fa-broom text-emerald-500',
+        'General': 'fa-wrench text-primary'
+    };
+    const catIcon = categoryIcons[complaint.category] || categoryIcons['General'];
+
+    const steps = [
+        {
+            title: 'Complaint Submitted',
+            desc: `Registered by ${complaint.student || 'Student'} (${complaint.roomNumber || 'Room N/A'}, ${complaint.hostelBlock || 'Hostel'}).`,
+            time: createdDateStr,
+            icon: 'fa-paper-plane',
+            completed: currentStepIndex >= 1
+        },
+        {
+            title: 'Assigned to Technician',
+            desc: complaint.assignedTo && complaint.assignedTo !== 'Unassigned' 
+                ? `Assigned to technician <strong class="text-primary">${complaint.assignedTo}</strong> (${complaint.category || 'Maintenance'} Specialist).`
+                : 'Awaiting admin assignment to designated block technician.',
+            time: currentStepIndex >= 2 ? 'Assigned' : 'Pending',
+            icon: 'fa-user-gear',
+            completed: currentStepIndex >= 2
+        },
+        {
+            title: 'Technician Accepted Job',
+            desc: currentStepIndex >= 3 
+                ? `Technician ${complaint.assignedTo || 'Specialist'} acknowledged work order and scheduled repair visit.`
+                : 'Technician will confirm job acceptance upon dispatch.',
+            time: currentStepIndex >= 3 ? 'Accepted' : 'Awaiting',
+            icon: 'fa-user-check',
+            completed: currentStepIndex >= 3
+        },
+        {
+            title: 'Repair Work In Progress',
+            desc: currentStepIndex >= 4 
+                ? `Technician actively servicing complaint in ${complaint.roomNumber || 'room'}. Estimated completion: ~1-2 hours.`
+                : 'Repair work will begin once technician arrives at room.',
+            time: currentStepIndex === 4 ? 'Active Now' : (currentStepIndex > 4 ? 'Done' : 'Scheduled'),
+            icon: 'fa-wrench',
+            completed: currentStepIndex >= 4,
+            current: currentStepIndex === 4
+        },
+        {
+            title: 'Resolution & Quality Verification',
+            desc: currentStepIndex >= 5 
+                ? 'Maintenance resolved successfully! Work order verified and closed.'
+                : 'Work will be closed and verified upon final testing.',
+            time: currentStepIndex >= 5 ? 'Resolved' : 'Final Step',
+            icon: 'fa-circle-check',
+            completed: currentStepIndex >= 5
+        }
+    ];
+
+    const progressPercent = Math.min(100, Math.max(20, currentStepIndex * 20));
+
+    return `
+        <!-- Complaint Summary Banner -->
+        <div class="glass rounded-2xl border border-border p-5 sm:p-6 mb-8 shadow-xs">
+            <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-5 border-b border-border">
+                <div class="flex items-center gap-4">
+                    <div class="w-12 h-12 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center text-xl shrink-0">
+                        <i class="fa-solid ${catIcon}"></i>
+                    </div>
+                    <div>
+                        <div class="flex items-center gap-2 flex-wrap mb-1">
+                            <span class="font-extrabold text-lg tracking-tight text-text">${complaint.id}</span>
+                            <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold border ${priorityBadge}">${complaint.priority} Priority</span>
+                            <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold border ${statusBadgeStyle}">${complaint.status}</span>
+                        </div>
+                        <p class="text-xs text-text-secondary font-medium">${complaint.category || 'General'} Repair • Room ${complaint.roomNumber || 'N/A'} (${complaint.hostelBlock || 'Hostel'})</p>
+                    </div>
                 </div>
-            `).join('')}
+                <div class="text-left md:text-right">
+                    <p class="text-xs text-text-muted">Reported Date</p>
+                    <p class="text-xs font-semibold text-text">${createdDateStr}</p>
+                </div>
+            </div>
+
+            <!-- Description & Dynamic Progress Bar -->
+            <div class="pt-5 space-y-4">
+                <div>
+                    <p class="text-xs font-semibold uppercase tracking-wider text-text-secondary mb-1">Issue Description</p>
+                    <p class="text-sm text-text leading-relaxed bg-surface-alt/70 p-3.5 rounded-xl border border-border/60">${complaint.description || 'No detailed description provided.'}</p>
+                </div>
+
+                <div>
+                    <div class="flex items-center justify-between text-xs font-semibold mb-1.5">
+                        <span class="text-text-secondary">Overall Resolution Progress</span>
+                        <span class="text-primary">${progressPercent}% Completed</span>
+                    </div>
+                    <div class="w-full bg-slate-200 dark:bg-slate-800 rounded-full h-2.5 overflow-hidden">
+                        <div class="bg-gradient-to-r from-primary to-emerald h-2.5 rounded-full transition-all duration-500" style="width: ${progressPercent}%;"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Dynamic Timeline Steps -->
+        <div class="relative pl-6 sm:pl-8">
+            <div class="absolute left-[19px] sm:left-[27px] top-6 bottom-6 w-0.5 bg-slate-200 dark:bg-slate-800"></div>
+            <div class="space-y-6">
+                ${steps.map((step) => {
+                    const isCompleted = step.completed;
+                    const isCurrent = step.current;
+                    
+                    let badgeClass = 'bg-slate-200 text-slate-500 border border-slate-300 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700';
+                    if (isCompleted) {
+                        badgeClass = 'bg-emerald text-white shadow-md shadow-emerald/20';
+                    } else if (isCurrent) {
+                        badgeClass = 'bg-primary text-white shadow-md shadow-primary/30 ring-4 ring-primary/20 animate-pulse';
+                    }
+
+                    return `
+                        <div class="relative flex items-start gap-4">
+                            <div class="absolute left-[-19px] sm:left-[-27px] w-9 h-9 sm:w-10 sm:h-10 rounded-full ${badgeClass} flex items-center justify-center font-bold text-sm shrink-0 z-10 transition-all">
+                                <i class="fa-solid ${isCompleted ? 'fa-check' : (isCurrent ? step.icon : 'fa-circle-dot')}"></i>
+                            </div>
+                            <div class="ml-6 sm:ml-8 flex-1">
+                                <div class="glass rounded-2xl p-4 sm:p-5 border ${isCurrent ? 'border-primary/40 bg-primary/5 shadow-md shadow-primary/5' : (isCompleted ? 'border-border bg-surface' : 'border-border/60 bg-surface/50 opacity-75')}">
+                                    <div class="flex items-center justify-between mb-1.5 flex-wrap gap-2">
+                                        <h4 class="font-bold text-sm sm:text-base ${isCurrent ? 'text-primary' : 'text-text'}">${step.title}</h4>
+                                        <span class="text-xs font-semibold ${isCurrent ? 'text-primary bg-primary/10 px-2.5 py-0.5 rounded-full' : (isCompleted ? 'text-emerald font-medium' : 'text-text-muted')}">${step.time}</span>
+                                    </div>
+                                    <p class="text-xs sm:text-sm text-text-secondary leading-relaxed">${step.desc}</p>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }).join('')}
+            </div>
         </div>
     `;
 }
@@ -2940,6 +3459,183 @@ function setupGatePassDateValidation() {
 
     gateDateInput.addEventListener('change', syncReturnDateMin);
     syncReturnDateMin();
+}
+
+// ===== CUSTOM PROFESSIONAL DATE PICKER WIDGET =====
+let activeDatePickerInput = null;
+let activeDatePickerPopover = null;
+let customDatePickerDate = new Date();
+
+function setupCustomDatePickers() {
+    const inputs = document.querySelectorAll('input[type="date"], input.custom-datepicker');
+    inputs.forEach((input) => {
+        if (input.dataset.customDatepickerInitialized) return;
+        input.dataset.customDatepickerInitialized = 'true';
+        
+        input.type = 'text';
+        input.readOnly = true;
+        input.classList.add('custom-datepicker', 'cursor-pointer');
+        if (!input.placeholder) input.placeholder = 'YYYY-MM-DD';
+
+        const wrapper = input.closest('.date-pill-wrapper') || input.parentElement;
+        
+        const openPicker = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            openCustomDatePicker(input);
+        };
+
+        input.addEventListener('click', openPicker);
+        if (wrapper && wrapper.classList.contains('date-pill-wrapper')) {
+            wrapper.addEventListener('click', (e) => {
+                if (e.target !== input) openPicker(e);
+            });
+        }
+    });
+}
+
+function openCustomDatePicker(input) {
+    if (activeDatePickerPopover) {
+        closeCustomDatePicker();
+    }
+
+    activeDatePickerInput = input;
+    const initialVal = input.value ? new Date(input.value) : new Date();
+    customDatePickerDate = isNaN(initialVal.getTime()) ? new Date() : initialVal;
+
+    const popover = document.createElement('div');
+    popover.id = 'customDatePickerPopover';
+    popover.className = 'absolute left-0 top-full z-50 mt-2 w-72 rounded-2xl border border-border bg-surface p-4 shadow-2xl backdrop-blur-xl animate-in fade-in zoom-in-95 duration-150';
+    
+    const parent = input.closest('.date-pill-wrapper') || input.parentElement;
+    if (parent && getComputedStyle(parent).position === 'static') {
+        parent.style.position = 'relative';
+    }
+    (parent || document.body).appendChild(popover);
+    activeDatePickerPopover = popover;
+
+    renderCustomDatePickerContent();
+
+    setTimeout(() => {
+        document.addEventListener('click', handleOutsideDatePickerClick);
+    }, 10);
+}
+
+function handleOutsideDatePickerClick(e) {
+    if (!activeDatePickerPopover) return;
+    if (!activeDatePickerPopover.contains(e.target) && e.target !== activeDatePickerInput) {
+        closeCustomDatePicker();
+    }
+}
+
+function closeCustomDatePicker() {
+    if (activeDatePickerPopover) {
+        activeDatePickerPopover.remove();
+        activeDatePickerPopover = null;
+    }
+    activeDatePickerInput = null;
+    document.removeEventListener('click', handleOutsideDatePickerClick);
+}
+
+function renderCustomDatePickerContent() {
+    if (!activeDatePickerPopover || !activeDatePickerInput) return;
+
+    const year = customDatePickerDate.getFullYear();
+    const month = customDatePickerDate.getMonth();
+    const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+    
+    const today = new Date();
+    const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+
+    let selectedStr = activeDatePickerInput.value || '';
+    if (selectedStr && !selectedStr.match(/^\d{4}-\d{2}-\d{2}$/)) {
+        const d = new Date(selectedStr);
+        if (!isNaN(d.getTime())) {
+            selectedStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        }
+    }
+
+    const firstDayIndex = new Date(year, month, 1).getDay();
+    const lastDateOfMonth = new Date(year, month + 1, 0).getDate();
+    const prevMonthLastDate = new Date(year, month, 0).getDate();
+
+    let daysHtml = '';
+
+    for (let i = firstDayIndex; i > 0; i--) {
+        daysHtml += `<div class="py-2 text-xs text-text-secondary/40 font-normal cursor-default text-center">${prevMonthLastDate - i + 1}</div>`;
+    }
+
+    for (let day = 1; day <= lastDateOfMonth; day++) {
+        const dayStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+        const isToday = dayStr === todayStr;
+        const isSelected = dayStr === selectedStr;
+
+        let dayClass = 'cursor-pointer py-1.5 text-xs font-medium text-text rounded-xl transition-all flex items-center justify-center ';
+        if (isSelected) {
+            dayClass += 'bg-primary text-white font-bold shadow-md scale-105';
+        } else if (isToday) {
+            dayClass += 'ring-1 ring-primary text-primary font-bold hover:bg-primary/10';
+        } else {
+            dayClass += 'hover:bg-primary/10 hover:text-primary';
+        }
+
+        daysHtml += `<div onclick="selectCustomDate('${dayStr}')" class="${dayClass}">${day}</div>`;
+    }
+
+    activeDatePickerPopover.innerHTML = `
+        <div class="flex items-center justify-between mb-3 pb-2 border-b border-border/60">
+            <button type="button" onclick="changeCustomDateMonth(-1)" class="w-8 h-8 rounded-xl bg-surface-alt hover:bg-primary/10 hover:text-primary border border-border/60 transition-all flex items-center justify-center text-xs text-text-secondary">
+                <i class="fa-solid fa-chevron-left"></i>
+            </button>
+            <span class="text-sm font-bold text-text">${monthNames[month]} ${year}</span>
+            <button type="button" onclick="changeCustomDateMonth(1)" class="w-8 h-8 rounded-xl bg-surface-alt hover:bg-primary/10 hover:text-primary border border-border/60 transition-all flex items-center justify-center text-xs text-text-secondary">
+                <i class="fa-solid fa-chevron-right"></i>
+            </button>
+        </div>
+        <div class="grid grid-cols-7 gap-1 mb-2 text-center">
+            <span class="text-[10px] font-bold uppercase tracking-wider text-text-secondary">Su</span>
+            <span class="text-[10px] font-bold uppercase tracking-wider text-text-secondary">Mo</span>
+            <span class="text-[10px] font-bold uppercase tracking-wider text-text-secondary">Tu</span>
+            <span class="text-[10px] font-bold uppercase tracking-wider text-text-secondary">We</span>
+            <span class="text-[10px] font-bold uppercase tracking-wider text-text-secondary">Th</span>
+            <span class="text-[10px] font-bold uppercase tracking-wider text-text-secondary">Fr</span>
+            <span class="text-[10px] font-bold uppercase tracking-wider text-text-secondary">Sa</span>
+        </div>
+        <div class="grid grid-cols-7 gap-1 mb-3">
+            ${daysHtml}
+        </div>
+        <div class="flex items-center justify-between pt-2 border-t border-border/60 text-xs">
+            <button type="button" onclick="clearCustomDate()" class="text-text-secondary hover:text-danger font-medium transition-colors">Clear</button>
+            <button type="button" onclick="selectTodayCustomDate()" class="text-primary font-semibold hover:underline">Today</button>
+        </div>
+    `;
+}
+
+function changeCustomDateMonth(delta) {
+    customDatePickerDate.setMonth(customDatePickerDate.getMonth() + delta);
+    renderCustomDatePickerContent();
+}
+
+function selectCustomDate(dateStr) {
+    if (!activeDatePickerInput) return;
+    activeDatePickerInput.value = dateStr;
+    activeDatePickerInput.dispatchEvent(new Event('input', { bubbles: true }));
+    activeDatePickerInput.dispatchEvent(new Event('change', { bubbles: true }));
+    closeCustomDatePicker();
+}
+
+function selectTodayCustomDate() {
+    const today = new Date();
+    const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    selectCustomDate(todayStr);
+}
+
+function clearCustomDate() {
+    if (!activeDatePickerInput) return;
+    activeDatePickerInput.value = '';
+    activeDatePickerInput.dispatchEvent(new Event('input', { bubbles: true }));
+    activeDatePickerInput.dispatchEvent(new Event('change', { bubbles: true }));
+    closeCustomDatePicker();
 }
 
 function releaseCCTVVideoUpload() {
@@ -3996,6 +4692,7 @@ document.addEventListener('DOMContentLoaded', function() {
     fetchAnnouncements();
     setupAnnouncementSocket();
     setupGatePassDateValidation();
+    setupCustomDatePickers();
     if (window.location.protocol === 'file:') {
         setTimeout(() => {
             showToast('Open HostelFix from http://localhost:5000 instead of the local file so gate pass photos and downloads work correctly.', 'warning');
@@ -4005,4 +4702,250 @@ document.addEventListener('DOMContentLoaded', function() {
         setTimeout(animateNumbers, 500);
     }
 });
+
+// Warden & Technician Admin Modal & CRUD Handlers
+async function loadWardensList() {
+    const container = document.getElementById('adminWardensGrid');
+    if (!container) return;
+    try {
+        const response = await apiRequest('/api/wardens');
+        if (!response.ok) throw new Error('Failed to fetch wardens');
+        const wardens = await parseJsonResponse(response);
+        const wardenArray = Array.isArray(wardens) ? wardens : [];
+        renderAdminWardens(wardenArray);
+        
+        const countEl = document.getElementById('adminTotalWardens');
+        if (countEl) countEl.textContent = String(wardenArray.length);
+    } catch (error) {
+        console.error('Error loading wardens:', error);
+        container.innerHTML = `<div class="col-span-3 glass p-6 rounded-2xl text-center text-danger font-medium">Unable to load wardens list. Please check server connection.</div>`;
+    }
+}
+
+async function loadTechniciansList() {
+    const container = document.getElementById('adminTechniciansGrid');
+    if (!container) return;
+    try {
+        const [techRes, compRes] = await Promise.all([
+            apiRequest('/api/technicians'),
+            apiRequest('/api/complaints')
+        ]);
+        if (!techRes.ok) throw new Error('Failed to fetch technicians');
+        const technicians = await parseJsonResponse(techRes);
+        const complaints = compRes.ok ? await parseJsonResponse(compRes) : [];
+        const techArray = Array.isArray(technicians) ? technicians : [];
+        renderAdminTechnicians(techArray, complaints);
+        populateTechnicianDropdown(techArray);
+        
+        const countEl = document.getElementById('adminActiveTechnicians');
+        if (countEl) countEl.textContent = String(techArray.length);
+    } catch (error) {
+        console.error('Error loading technicians:', error);
+        container.innerHTML = `<div class="col-span-3 glass p-6 rounded-2xl text-center text-danger font-medium">Unable to load technicians list. Please check server connection.</div>`;
+    }
+}
+
+function openAddWardenModal() {
+    const modal = document.getElementById('addWardenModal');
+    if (modal) modal.classList.remove('hidden');
+}
+
+function closeAddWardenModal() {
+    const modal = document.getElementById('addWardenModal');
+    if (modal) modal.classList.add('hidden');
+}
+
+async function handleAddWarden(event) {
+    event.preventDefault();
+    const name = document.getElementById('wardenName')?.value.trim();
+    const email = document.getElementById('wardenEmail')?.value.trim();
+    const hostelBlock = document.getElementById('wardenHostelBlock')?.value;
+    const phone = document.getElementById('wardenPhone')?.value.trim();
+    const password = document.getElementById('wardenPassword')?.value;
+
+    if (!name || !email) {
+        showToast('Please enter both name and email.', 'warning');
+        return;
+    }
+
+    try {
+        const response = await apiRequest('/api/wardens', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, email, password, hostelBlock, phone })
+        });
+        const data = await parseJsonResponse(response);
+        if (!response.ok) throw new Error(data.error || 'Failed to create warden');
+
+        showToast(`Warden ${data.name} added successfully!`, 'success');
+        closeAddWardenModal();
+        event.target.reset();
+        await loadWardensList();
+        loadDashboardData().catch(e=>console.error(e));
+    } catch (error) {
+        showToast(error.message || 'Error creating warden account.', 'error');
+    }
+}
+
+async function deleteWarden(id) {
+    if (!confirm('Are you sure you want to remove this warden account?')) return;
+    try {
+        const response = await apiRequest(`/api/wardens/${encodeURIComponent(id)}`, { method: 'DELETE' });
+        const data = await parseJsonResponse(response);
+        if (!response.ok) throw new Error(data.error || 'Failed to delete warden');
+        showToast('Warden removed successfully.', 'success');
+        await loadWardensList();
+        loadDashboardData().catch(e=>console.error(e));
+    } catch (error) {
+        showToast(error.message || 'Error deleting warden.', 'error');
+    }
+}
+
+function openAddTechnicianModal() {
+    const modal = document.getElementById('addTechnicianModal');
+    if (modal) modal.classList.remove('hidden');
+}
+
+function closeAddTechnicianModal() {
+    const modal = document.getElementById('addTechnicianModal');
+    if (modal) modal.classList.add('hidden');
+}
+
+async function handleAddTechnician(event) {
+    event.preventDefault();
+    const name = document.getElementById('techName')?.value.trim();
+    const email = document.getElementById('techEmail')?.value.trim();
+    const specialization = document.getElementById('techSpecialization')?.value;
+    const phone = document.getElementById('techPhone')?.value.trim();
+    const password = document.getElementById('techPassword')?.value;
+
+    if (!name || !email) {
+        showToast('Please enter both name and email.', 'warning');
+        return;
+    }
+
+    try {
+        const response = await apiRequest('/api/technicians', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, email, password, specialization, phone })
+        });
+        const data = await parseJsonResponse(response);
+        if (!response.ok) throw new Error(data.error || 'Failed to create technician');
+
+        showToast(`Technician ${data.name} added successfully!`, 'success');
+        closeAddTechnicianModal();
+        event.target.reset();
+        await loadTechniciansList();
+        loadDashboardData().catch(e=>console.error(e));
+    } catch (error) {
+        showToast(error.message || 'Error creating technician account.', 'error');
+    }
+}
+
+async function deleteTechnician(id) {
+    if (!confirm('Are you sure you want to remove this technician account?')) return;
+    try {
+        const response = await apiRequest(`/api/technicians/${encodeURIComponent(id)}`, { method: 'DELETE' });
+        const data = await parseJsonResponse(response);
+        if (!response.ok) throw new Error(data.error || 'Failed to delete technician');
+        showToast('Technician removed successfully.', 'success');
+        await loadTechniciansList();
+        loadDashboardData().catch(e=>console.error(e));
+    } catch (error) {
+        showToast(error.message || 'Error deleting technician.', 'error');
+    }
+}
+
+function openEditWardenModal(id) {
+    const wardens = window.currentWardensList || [];
+    const warden = wardens.find(w => w.id === id || w.email === id);
+    if (!warden) return;
+    document.getElementById('editWardenId').value = warden.id || warden.email;
+    document.getElementById('editWardenName').value = warden.name || '';
+    document.getElementById('editWardenEmail').value = warden.email || '';
+    document.getElementById('editWardenHostelBlock').value = warden.hostelBlock || 'Block A';
+    document.getElementById('editWardenPhone').value = warden.phone || '+91 98765 43210';
+    
+    const modal = document.getElementById('editWardenModal');
+    if (modal) modal.classList.remove('hidden');
+}
+
+function closeEditWardenModal() {
+    const modal = document.getElementById('editWardenModal');
+    if (modal) modal.classList.add('hidden');
+}
+
+async function handleEditWarden(event) {
+    event.preventDefault();
+    const id = document.getElementById('editWardenId')?.value;
+    const name = document.getElementById('editWardenName')?.value.trim();
+    const email = document.getElementById('editWardenEmail')?.value.trim();
+    const hostelBlock = document.getElementById('editWardenHostelBlock')?.value;
+    const phone = document.getElementById('editWardenPhone')?.value.trim();
+
+    if (!id || !name || !email) return;
+
+    try {
+        const response = await apiRequest(`/api/wardens/${encodeURIComponent(id)}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, email, hostelBlock, phone })
+        });
+        const data = await parseJsonResponse(response);
+        if (!response.ok) throw new Error(data.error || 'Failed to update warden');
+
+        showToast(`Warden ${data.name} updated successfully!`, 'success');
+        closeEditWardenModal();
+        await loadWardensList();
+    } catch (error) {
+        showToast(error.message || 'Error updating warden.', 'error');
+    }
+}
+
+function openEditTechnicianModal(id) {
+    const techs = window.currentTechniciansList || [];
+    const tech = techs.find(t => t.id === id || t.email === id);
+    if (!tech) return;
+    document.getElementById('editTechId').value = tech.id || tech.email;
+    document.getElementById('editTechName').value = tech.name || '';
+    document.getElementById('editTechEmail').value = tech.email || '';
+    document.getElementById('editTechSpecialization').value = tech.specialization || 'General Maintenance';
+    document.getElementById('editTechPhone').value = tech.phone || '+91 98765 12345';
+    
+    const modal = document.getElementById('editTechnicianModal');
+    if (modal) modal.classList.remove('hidden');
+}
+
+function closeEditTechnicianModal() {
+    const modal = document.getElementById('editTechnicianModal');
+    if (modal) modal.classList.add('hidden');
+}
+
+async function handleEditTechnician(event) {
+    event.preventDefault();
+    const id = document.getElementById('editTechId')?.value;
+    const name = document.getElementById('editTechName')?.value.trim();
+    const email = document.getElementById('editTechEmail')?.value.trim();
+    const specialization = document.getElementById('editTechSpecialization')?.value;
+    const phone = document.getElementById('editTechPhone')?.value.trim();
+
+    if (!id || !name || !email) return;
+
+    try {
+        const response = await apiRequest(`/api/technicians/${encodeURIComponent(id)}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, email, specialization, phone })
+        });
+        const data = await parseJsonResponse(response);
+        if (!response.ok) throw new Error(data.error || 'Failed to update technician');
+
+        showToast(`Technician ${data.name} updated successfully!`, 'success');
+        closeEditTechnicianModal();
+        await loadTechniciansList();
+    } catch (error) {
+        showToast(error.message || 'Error updating technician.', 'error');
+    }
+}
 

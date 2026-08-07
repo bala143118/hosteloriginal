@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">HostelFix</string>
+    <string name="default_server_url">http://10.20.27.31:5000</string>
+</resources>

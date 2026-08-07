@@ -1,5 +1,3 @@
-<<<<<<< HEAD
-<<<<<<< HEAD
 # HostelFix
 
 HostelFix is a Node.js + browser-based hostel management app with CCTV fire/smoke detection, Telegram emergency alerts, complaint handling, gate passes, laundry requests, and announcements.
@@ -52,9 +50,4 @@ http://localhost:5000
 - `telegram_service.js`: Telegram delivery logic
 - `models/inference_server.py`: Persistent Python inference worker
 - `data/db.json`: Local app data and alert history
-=======
-# smart-hostel-monitoring-system
->>>>>>> ed131f8f8631779e1387a6adb93155e75baf578b
-=======
-# hostel01
->>>>>>> b1f882b22c734c96652eb0ca990ff43dc678ac8c
+

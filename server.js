@@ -678,6 +678,21 @@ function generateUserId(users) {
 function ensureUserIds(data) {
   let changed = false;
 
+  const defaultSeedUsers = [
+    { email: 'warden@hostelfix.edu', password: 'warden123', role: 'warden', name: 'Warden Officer' },
+    { email: 'security@hostelfix.edu', password: 'security123', role: 'security', name: 'Gate Security Guard' }
+  ];
+
+  defaultSeedUsers.forEach((defUser) => {
+    if (!data.users.some(u => u.email === defUser.email || u.role === defUser.role)) {
+      data.users.push({
+        ...defUser,
+        userId: generateUserId(data.users)
+      });
+      changed = true;
+    }
+  });
+
   data.users.forEach((user) => {
     if (!user.userId) {
       user.userId = generateUserId(data.users);
@@ -890,7 +905,7 @@ app.post('/api/register', (req, res) => {
   const email = normalizeEmail(req.body.email);
   const password = String(req.body.password || '');
   const role = String(req.body.role || '').trim().toLowerCase();
-  const validRoles = ['student', 'technician', 'admin'];
+  const validRoles = ['student', 'technician', 'admin', 'warden', 'security'];
 
   if (!name || !email || !password || !role) {
     return res.status(400).json({ error: 'Name, email, password, and role are required.' });
@@ -932,7 +947,7 @@ app.post('/api/login', (req, res) => {
   const identifier = normalizeEmail(req.body.email);
   const password = req.body.password || '';
   const role = (req.body.role || '').trim().toLowerCase();
-  const validRoles = ['student', 'technician', 'admin'];
+  const validRoles = ['student', 'technician', 'admin', 'warden', 'security'];
 
   console.info(`[LOGIN] attempt for=${identifier || '<missing>'} role=${role || '<missing>'}`);
 
@@ -1328,6 +1343,125 @@ app.get('/api/technicians', (req, res) => {
   const data = readData();
   const technicians = data.users.filter((user) => user.role === 'technician').map(sanitizeUser);
   res.json(technicians);
+});
+
+app.post('/api/technicians', (req, res) => {
+  const data = readData();
+  const { name, email, password, specialization, phone } = req.body;
+  if (!name || !email) {
+    return res.status(400).json({ error: 'Name and email are required' });
+  }
+  const normEmail = normalizeEmail(email);
+  if (data.users.some(u => normalizeEmail(u.email) === normEmail)) {
+    return res.status(409).json({ error: 'User with this email already exists' });
+  }
+  const technician = {
+    id: `T-${Date.now().toString().slice(-4)}`,
+    name: name.trim(),
+    email: normEmail,
+    password: password || 'tech123',
+    role: 'technician',
+    specialization: specialization || 'General Maintenance',
+    phone: phone || '+91 98765 12345',
+    status: 'Active',
+    completedCount: 0,
+    rating: 5.0,
+    avgRepairTime: '2.5h',
+    createdAt: new Date().toISOString()
+  };
+  data.users.push(technician);
+  writeData(data);
+  res.status(201).json(sanitizeUser(technician));
+});
+
+app.delete('/api/technicians/:id', (req, res) => {
+  const data = readData();
+  const index = data.users.findIndex(u => u.id === req.params.id && u.role === 'technician');
+  if (index === -1) {
+    return res.status(404).json({ error: 'Technician not found' });
+  }
+  data.users.splice(index, 1);
+  writeData(data);
+  res.json({ message: 'Technician removed successfully' });
+});
+
+app.get('/api/wardens', (req, res) => {
+  const data = readData();
+  const wardens = data.users.filter((user) => user.role === 'warden').map(sanitizeUser);
+  res.json(wardens);
+});
+
+app.post('/api/wardens', (req, res) => {
+  const data = readData();
+  const { name, email, password, hostelBlock, phone } = req.body;
+  if (!name || !email) {
+    return res.status(400).json({ error: 'Name and email are required' });
+  }
+  const normEmail = normalizeEmail(email);
+  if (data.users.some(u => normalizeEmail(u.email) === normEmail)) {
+    return res.status(409).json({ error: 'User with this email already exists' });
+  }
+  const warden = {
+    id: `W-${Date.now().toString().slice(-4)}`,
+    name: name.trim(),
+    email: normEmail,
+    password: password || 'warden123',
+    role: 'warden',
+    hostelBlock: hostelBlock || 'Block A',
+    phone: phone || '+91 98765 43210',
+    status: 'Active',
+    createdAt: new Date().toISOString()
+  };
+  data.users.push(warden);
+  writeData(data);
+  res.status(201).json(sanitizeUser(warden));
+});
+
+app.put('/api/wardens/:id', (req, res) => {
+  const data = readData();
+  const warden = data.users.find(u => (u.id === req.params.id || normalizeEmail(u.email) === normalizeEmail(req.params.id)) && u.role === 'warden');
+  if (!warden) {
+    return res.status(404).json({ error: 'Warden not found' });
+  }
+  const { name, email, password, hostelBlock, phone, status } = req.body;
+  if (name) warden.name = name.trim();
+  if (email) warden.email = normalizeEmail(email);
+  if (password) warden.password = password;
+  if (hostelBlock) warden.hostelBlock = hostelBlock;
+  if (phone) warden.phone = phone.trim();
+  if (status) warden.status = status;
+  
+  writeData(data);
+  res.json(sanitizeUser(warden));
+});
+
+app.delete('/api/wardens/:id', (req, res) => {
+  const data = readData();
+  const index = data.users.findIndex(u => (u.id === req.params.id || normalizeEmail(u.email) === normalizeEmail(req.params.id)) && u.role === 'warden');
+  if (index === -1) {
+    return res.status(404).json({ error: 'Warden not found' });
+  }
+  data.users.splice(index, 1);
+  writeData(data);
+  res.json({ message: 'Warden removed successfully' });
+});
+
+app.put('/api/technicians/:id', (req, res) => {
+  const data = readData();
+  const technician = data.users.find(u => (u.id === req.params.id || normalizeEmail(u.email) === normalizeEmail(req.params.id)) && u.role === 'technician');
+  if (!technician) {
+    return res.status(404).json({ error: 'Technician not found' });
+  }
+  const { name, email, password, specialization, phone, status } = req.body;
+  if (name) technician.name = name.trim();
+  if (email) technician.email = normalizeEmail(email);
+  if (password) technician.password = password;
+  if (specialization) technician.specialization = specialization;
+  if (phone) technician.phone = phone.trim();
+  if (status) technician.status = status;
+
+  writeData(data);
+  res.json(sanitizeUser(technician));
 });
 
 app.get('/api/summary', (req, res) => {
@@ -1772,9 +1906,23 @@ io.on('connection', (socket) => {
   });
 });
 
+const os = require('os');
 const port = process.env.PORT || 5000;
 server.listen(port, () => {
-  console.log(`Server running at http://localhost:${port} and http://127.0.0.1:${port}`);
+  console.log(`\n==================================================`);
+  console.log(`HostelFix Server is RUNNING!`);
+  console.log(`Local Access: http://localhost:${port}`);
+  console.log(`Mobile / Wi-Fi Access URLs:`);
+  
+  const interfaces = os.networkInterfaces();
+  for (const name of Object.keys(interfaces)) {
+    for (const iface of interfaces[name]) {
+      if (iface.family === 'IPv4' && !iface.internal) {
+        console.log(`  -> http://${iface.address}:${port}`);
+      }
+    }
+  }
+  console.log(`==================================================\n`);
 });
 
 app.use((err, req, res, next) => {
