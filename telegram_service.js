@@ -4,9 +4,9 @@ const path = require('path');
 const TELEGRAM_API_URL = 'https://api.telegram.org';
 const REQUEST_TIMEOUT_MS = 15_000;
 
-function getTelegramConfig() {
-  const token = String(process.env.TELEGRAM_BOT_TOKEN || '').trim();
-  const chatId = String(process.env.TELEGRAM_CHAT_ID || '').trim();
+function getTelegramConfig(customConfig = null) {
+  const token = String(customConfig?.telegramBotToken || customConfig?.botToken || process.env.TELEGRAM_BOT_TOKEN || '').trim();
+  const chatId = String(customConfig?.telegramChatId || customConfig?.chatId || process.env.TELEGRAM_CHAT_ID || '').trim();
   return token && chatId ? { token, chatId } : null;
 }
 
@@ -33,6 +33,34 @@ async function telegramRequest(config, method, options) {
   }
 }
 
+async function testTelegramConnection(customConfig = null) {
+  const config = getTelegramConfig(customConfig);
+  if (!config) {
+    throw new Error('Telegram Bot Token and Chat ID are not configured.');
+  }
+
+  const botInfo = await telegramRequest(config, 'getMe', { method: 'GET' });
+  const testMessage = `✅ HostelFix Alert Connection Test\n\nBot: @${botInfo.username || 'HostelFixBot'}\nStatus: Active & Verified\nTime: ${new Date().toLocaleString('en-IN')}`;
+
+  const message = await telegramRequest(config, 'sendMessage', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      chat_id: config.chatId,
+      text: testMessage,
+      disable_notification: false
+    })
+  });
+
+  return {
+    success: true,
+    botUsername: botInfo.username || 'HostelFixBot',
+    botName: botInfo.first_name || 'HostelFix Bot',
+    messageId: message.message_id,
+    message: 'Test message delivered to Telegram successfully.'
+  };
+}
+
 function formatTelegramAnnouncement({ title, message, priority, audience, adminName, createdAt }) {
   const priorityText = String(priority || 'Normal').trim();
   const heading = priorityText === 'Emergency'
@@ -54,9 +82,9 @@ function formatTelegramAnnouncement({ title, message, priority, audience, adminN
   ].join('\n');
 }
 
-async function sendTelegramMessage(text) {
-  const config = getTelegramConfig();
-  if (!config) throw new Error('Telegram is not configured. Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in .env.');
+async function sendTelegramMessage(text, customConfig = null) {
+  const config = getTelegramConfig(customConfig);
+  if (!config) throw new Error('Telegram is not configured. Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in .env or Admin Settings.');
 
   const message = await telegramRequest(config, 'sendMessage', {
     method: 'POST',
@@ -74,9 +102,9 @@ async function sendTelegramMessage(text) {
   };
 }
 
-async function sendTelegramAlert({ alertType, confidence, cameraName, location, imagePath, timestamp }) {
-  const config = getTelegramConfig();
-  if (!config) throw new Error('Telegram is not configured. Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in .env.');
+async function sendTelegramAlert({ alertType, confidence, cameraName, location, imagePath, timestamp, customConfig = null }) {
+  const config = getTelegramConfig(customConfig);
+  if (!config) throw new Error('Telegram is not configured. Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in .env or Admin Settings.');
 
   const messageText = formatTelegramAlert({ alertType, confidence, cameraName, location, timestamp });
   const message = await telegramRequest(config, 'sendMessage', {
@@ -108,4 +136,96 @@ async function sendTelegramAlert({ alertType, confidence, cameraName, location, 
   return { messageId: message.message_id, message: messageText, delivery: 'text' };
 }
 
-module.exports = { getTelegramConfig, sendTelegramAlert, sendTelegramMessage, formatTelegramAnnouncement };
+function formatTelegramAdminApproval({ student, registrationNumber, gatePassId, certificateId, gateDate, returnDate }) {
+  return [
+    '🎫 GATE PASS APPROVED',
+    '',
+    `Student: ${student || 'Student'}`,
+    `Register: ${registrationNumber || 'N/A'}`,
+    `Pass ID: ${gatePassId || 'N/A'}`,
+    certificateId ? `Certificate: ${certificateId}` : '',
+    `Leave Date: ${gateDate || 'Today'}`,
+    `Expected Return: ${returnDate || 'Same Day'}`,
+    '',
+    'Status: APPROVED (QR Code Generated)',
+    'Next Step: Security Gate Verification'
+  ].filter(Boolean).join('\n');
+}
+
+function formatTelegramSecurityExit({ student, registrationNumber, exitTime, securityName }) {
+  const formattedTime = exitTime ? new Date(exitTime).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true }) : new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
+  return [
+    '🚪 STUDENT EXIT VERIFIED',
+    '',
+    `Student:\n${student || 'Student'}`,
+    '',
+    `Register:\n${registrationNumber || 'N/A'}`,
+    '',
+    `Exit Time:\n${formattedTime}`,
+    '',
+    `Verified By:\n${securityName || 'Security'}`,
+    '',
+    'Status:\nOUTSIDE'
+  ].join('\n');
+}
+
+function formatTelegramSecurityRejection({ student, registrationNumber, securityName, reason }) {
+  return [
+    '❌ GATE PASS EXIT REJECTED',
+    '',
+    `Student:\n${student || 'Student'}`,
+    '',
+    `Register:\n${registrationNumber || 'N/A'}`,
+    '',
+    `Rejected By:\n${securityName || 'Security'}`,
+    '',
+    `Reason:\n${reason || 'Unauthorized / Verification failed'}`,
+    '',
+    'Status:\nSECURITY_REJECTED'
+  ].join('\n');
+}
+
+function formatTelegramWardenArrival({ student, registrationNumber, arrivalTime, wardenName }) {
+  const formattedTime = arrivalTime ? new Date(arrivalTime).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true }) : new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
+  return [
+    '🏠 HOSTEL ARRIVAL VERIFIED',
+    '',
+    `Student:\n${student || 'Student'}`,
+    '',
+    `Arrival Time:\n${formattedTime}`,
+    '',
+    `Verified By:\n${wardenName || 'Warden'}`,
+    '',
+    'Status:\nCOMPLETED'
+  ].join('\n');
+}
+
+function formatTelegramWardenRejection({ student, registrationNumber, exitTime, wardenName, reason }) {
+  const formattedExit = exitTime ? new Date(exitTime).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true }) : 'N/A';
+  return [
+    '⚠️ HOSTEL ARRIVAL NOT VERIFIED',
+    '',
+    `Student:\n${student || 'Student'}`,
+    '',
+    `Security Exit:\n${formattedExit}`,
+    '',
+    `Warden Status:\nREJECTED`,
+    '',
+    `Reason:\n${reason || 'Student did not arrive at hostel.'}`,
+    '',
+    'Status:\nOUTSIDE_NOT_RETURNED'
+  ].join('\n');
+}
+
+module.exports = {
+  getTelegramConfig,
+  sendTelegramAlert,
+  sendTelegramMessage,
+  testTelegramConnection,
+  formatTelegramAnnouncement,
+  formatTelegramAdminApproval,
+  formatTelegramSecurityExit,
+  formatTelegramSecurityRejection,
+  formatTelegramWardenArrival,
+  formatTelegramWardenRejection
+};

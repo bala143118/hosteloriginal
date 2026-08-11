@@ -52,20 +52,17 @@ def prepare_cctv_frame(image):
     if width <= 0 or height <= 0:
         return image, 1.0
 
-    scale = max(
-        1.0,
-        CCTV_TARGET_MIN_WIDTH / float(width),
-        CCTV_TARGET_MIN_HEIGHT / float(height)
-    )
-    if scale <= 1.01:
-        return image, 1.0
+    max_dim = max(width, height)
+    if max_dim > 960:
+        scale = 960.0 / float(max_dim)
+        resized = cv2.resize(
+            image,
+            (int(round(width * scale)), int(round(height * scale))),
+            interpolation=cv2.INTER_LINEAR
+        )
+        return resized, scale
 
-    resized = cv2.resize(
-        image,
-        (max(1, int(round(width * scale))), max(1, int(round(height * scale)))),
-        interpolation=cv2.INTER_CUBIC
-    )
-    return resized, scale
+    return image, 1.0
 
 
 def serialize_face(result):

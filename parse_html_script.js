@@ -1,6 +1,6 @@
 const fs = require('fs');
 const vm = require('vm');
-const html = fs.readFileSync('hostel_maintenance.html', 'utf8');
+const html = fs.readFileSync('index.html', 'utf8');
 const start = html.indexOf('<script>');
 const end = html.indexOf('</script>', start);
 if (start === -1 || end === -1) {

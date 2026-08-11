@@ -10,8 +10,18 @@ const { Server } = require('socket.io');
 const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const QRCode = require('qrcode');
-require('dotenv').config();
-const { getTelegramConfig, sendTelegramAlert, sendTelegramMessage, formatTelegramAnnouncement } = require('./telegram_service');
+const {
+  getTelegramConfig,
+  sendTelegramAlert,
+  sendTelegramMessage,
+  testTelegramConnection,
+  formatTelegramAnnouncement,
+  formatTelegramAdminApproval,
+  formatTelegramSecurityExit,
+  formatTelegramSecurityRejection,
+  formatTelegramWardenArrival,
+  formatTelegramWardenRejection
+} = require('./telegram_service');
 
 const DATA_DIR = path.join(__dirname, 'data');
 const DATA_PATH = path.join(DATA_DIR, 'db.json');
@@ -582,74 +592,118 @@ function createSingleGatePassPdfBuffer(gatePass) {
     const qrMatch = String(gatePass.qrImage || '').match(/^data:image\/png;base64,([A-Za-z0-9+/=]+)$/i);
     const qrBuffer = qrMatch ? Buffer.from(qrMatch[1], 'base64') : null;
 
-    doc.rect(0, 0, doc.page.width, 74).fill('#2563eb');
-    doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(20).text('HOSTEL GATE PASS', 28, 18);
-    doc.fillColor('#dbeafe').font('Helvetica').fontSize(10).text('Submitted request details', 28, 44);
+    // Header Background
+    doc.rect(0, 0, doc.page.width, 86).fill('#0f172a');
+    doc.rect(0, 84, doc.page.width, 4).fill('#4f46e5');
 
-    doc.roundedRect(28, 92, 539, 54, 10).fillAndStroke('#f8fafc', '#cbd5e1');
-    doc.fillColor('#475569').font('Helvetica-Bold').fontSize(8).text('Gate Pass ID', 40, 105);
-    doc.fillColor('#0f172a').fontSize(12).text(gatePass.id || 'N/A', 40, 118, { width: 300 });
-    doc.fillColor('#475569').font('Helvetica-Bold').fontSize(8).text('Status', 430, 105);
-    doc.fillColor(statusColor).font('Helvetica-Bold').fontSize(12).text(status, 430, 118);
-    doc.fillColor('#64748b').font('Helvetica').fontSize(8).text(`Submitted on ${new Date(gatePass.createdAt || Date.now()).toLocaleString('en-IN')}`, 40, 133);
+    // Header Texts
+    doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(18).text('HOSTEL RESIDENCE GATE PASS', 32, 20);
+    doc.fillColor('#94a3b8').font('Helvetica').fontSize(9).text('Campus Digital Security & Student Movement Authorization', 32, 44);
+    doc.fillColor('#38bdf8').font('Helvetica-Bold').fontSize(8).text('OFFICIAL VERIFIED DOCUMENT', 32, 60);
 
-    const fields = [
-      ['Student Name', gatePass.student || 'N/A'],
-      ['Register Number', gatePass.registrationNumber || 'N/A'],
-      ['Hostel Block', gatePass.hostelBlock || 'N/A'],
+    // Header Right Pass ID & Status
+    doc.fillColor('#cbd5e1').font('Helvetica').fontSize(8).text('PASS ID', 380, 22, { width: 180, align: 'right' });
+    doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(12).text(gatePass.id || 'N/A', 380, 34, { width: 180, align: 'right' });
+    doc.fillColor(statusColor).font('Helvetica-Bold').fontSize(10).text(`● ${status.toUpperCase()}`, 380, 52, { width: 180, align: 'right' });
+
+    // Main Content Box
+    const leftMargin = 32;
+    const contentWidth = 531;
+
+    // Student Info Bar
+    doc.roundedRect(leftMargin, 102, contentWidth, 38, 8).fillAndStroke('#f8fafc', '#e2e8f0');
+    doc.fillColor('#64748b').font('Helvetica').fontSize(8).text('STUDENT NAME', leftMargin + 14, 110);
+    doc.fillColor('#0f172a').font('Helvetica-Bold').fontSize(12).text(gatePass.student || 'N/A', leftMargin + 14, 122);
+
+    doc.fillColor('#64748b').font('Helvetica').fontSize(8).text('REGISTER NUMBER', leftMargin + 200, 110);
+    doc.fillColor('#0f172a').font('Helvetica-Bold').fontSize(12).text(gatePass.registrationNumber || 'N/A', leftMargin + 200, 122);
+
+    doc.fillColor('#64748b').font('Helvetica').fontSize(8).text('SUBMITTED DATE', leftMargin + 370, 110);
+    doc.fillColor('#0f172a').font('Helvetica').fontSize(10).text(new Date(gatePass.createdAt || Date.now()).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }), leftMargin + 370, 122);
+
+    // Details Grid Left Column & Right Photo Box
+    const startY = 150;
+    const gridFields = [
+      ['Hostel Block', gatePass.hostelBlock || 'Block A'],
       ['Room Number', gatePass.roomNumber || 'N/A'],
       ['Gate Pass Date', formatDate(gatePass.gateDate)],
       ['Return Date', formatDate(gatePass.returnDate)],
-      ['Session', gatePass.session || 'N/A'],
-      ['Approved By', gatePass.approvedBy || 'Pending']
+      ['Session Timing', gatePass.session || 'General'],
+      ['Authorized By', gatePass.approvedBy || 'Warden (Pending)']
     ];
 
-    const cardWidth = 254;
-    const cardHeight = 48;
-    const startY = 164;
-    fields.forEach((field, index) => {
+    const colWidth = 176;
+    const rowHeight = 44;
+    gridFields.forEach((field, index) => {
       const col = index % 2;
       const row = Math.floor(index / 2);
-      const x = 28 + (col * 285);
-      const y = startY + (row * 58);
-      doc.roundedRect(x, y, cardWidth, cardHeight, 9).fillAndStroke('#ffffff', '#d9e5fb');
-      doc.fillColor('#64748b').font('Helvetica-Bold').fontSize(8).text(field[0], x + 10, y + 8, { width: cardWidth - 20 });
-      doc.fillColor('#14213d').font('Helvetica-Bold').fontSize(10).text(String(field[1]), x + 10, y + 22, { width: cardWidth - 20 });
+      const x = leftMargin + (col * (colWidth + 10));
+      const y = startY + (row * (rowHeight + 8));
+
+      doc.roundedRect(x, y, colWidth, rowHeight, 6).fillAndStroke('#ffffff', '#e2e8f0');
+      doc.fillColor('#64748b').font('Helvetica').fontSize(7.5).text(field[0].toUpperCase(), x + 10, y + 8);
+      doc.fillColor('#0f172a').font('Helvetica-Bold').fontSize(10).text(String(field[1]), x + 10, y + 22, { width: colWidth - 20 });
     });
 
-    doc.roundedRect(28, 404, 312, 82, 9).fillAndStroke('#ffffff', '#d9e5fb');
-    doc.fillColor('#64748b').font('Helvetica-Bold').fontSize(8).text('Reason for Gate Pass', 40, 416);
-    doc.fillColor('#14213d').font('Helvetica').fontSize(10).text(String(gatePass.reason || 'N/A'), 40, 431, {
-      width: 288,
-      lineGap: 1
-    });
+    // Student Photo Box (Right side)
+    const photoX = leftMargin + (colWidth * 2) + 24;
+    const photoWidth = 145;
+    const photoHeight = 148;
+    doc.roundedRect(photoX, startY, photoWidth, photoHeight, 8).fillAndStroke('#f8fafc', '#cbd5e1');
+    doc.fillColor('#475569').font('Helvetica-Bold').fontSize(8).text('STUDENT PHOTO', photoX + 10, startY + 10);
 
-    doc.roundedRect(360, 404, 207, 82, 9).fillAndStroke('#ffffff', '#d9e5fb');
-    doc.fillColor('#64748b').font('Helvetica-Bold').fontSize(8).text('Student Photo', 372, 416);
     if (imageBuffer) {
       try {
-        doc.image(imageBuffer, 396, 430, { fit: [132, 44], align: 'center', valign: 'center' });
-      } catch (error) {
-        doc.fillColor('#94a3b8').font('Helvetica').fontSize(9).text('Unable to render photo', 394, 448, { width: 136, align: 'center' });
+        doc.image(imageBuffer, photoX + 15, startY + 26, { fit: [115, 110], align: 'center', valign: 'center' });
+      } catch (err) {
+        doc.fillColor('#94a3b8').font('Helvetica').fontSize(8).text('Photo Verified', photoX + 10, startY + 70, { width: photoWidth - 20, align: 'center' });
       }
     } else {
-      doc.fillColor('#94a3b8').font('Helvetica').fontSize(9).text('No photo uploaded', 394, 448, { width: 136, align: 'center' });
+      doc.fillColor('#94a3b8').font('Helvetica').fontSize(8).text('No Photo Uploaded', photoX + 10, startY + 70, { width: photoWidth - 20, align: 'center' });
     }
 
+    // Reason Box
+    const reasonY = startY + (3 * (rowHeight + 8)) + 6;
+    doc.roundedRect(leftMargin, reasonY, contentWidth, 54, 8).fillAndStroke('#f8fafc', '#e2e8f0');
+    doc.fillColor('#475569').font('Helvetica-Bold').fontSize(8).text('REASON FOR LEAVE / PURPOSE', leftMargin + 14, reasonY + 10);
+    doc.fillColor('#1e293b').font('Helvetica').fontSize(9.5).text(String(gatePass.reason || 'Not specified'), leftMargin + 14, reasonY + 24, { width: contentWidth - 28, lineGap: 2 });
+
+    // QR Verification & Security Section
+    const qrSectionY = reasonY + 66;
+    const qrBoxHeight = 160;
+    doc.roundedRect(leftMargin, qrSectionY, contentWidth, qrBoxHeight, 10).fillAndStroke('#ffffff', '#cbd5e1');
+
+    // Left info in QR Box
+    doc.fillColor('#0f172a').font('Helvetica-Bold').fontSize(12).text('Digital Security & Verification QR', leftMargin + 20, qrSectionY + 18);
+    doc.fillColor('#475569').font('Helvetica').fontSize(8.5).text(
+      'Security officers must scan this QR code at campus entry/exit points.\n' +
+      'This document is non-transferable and valid only for the approved movement window.',
+      leftMargin + 20, qrSectionY + 36, { width: 330, lineGap: 3 }
+    );
+
+    doc.roundedRect(leftMargin + 20, qrSectionY + 80, 330, 60, 6).fill('#f1f5f9');
+    doc.fillColor('#475569').font('Helvetica-Bold').fontSize(7.5).text('OFFICIAL VERIFICATION CODE', leftMargin + 30, qrSectionY + 88);
+    doc.fillColor('#0f172a').font('Helvetica-Bold').fontSize(11).text(gatePass.id || 'N/A', leftMargin + 30, qrSectionY + 99);
+    doc.fillColor('#4f46e5').font('Helvetica-Bold').fontSize(7.5).text(`CERT: ${gatePass.certificateId || 'CERT-N/A'}`, leftMargin + 30, qrSectionY + 114);
+    doc.fillColor(statusColor).font('Helvetica-Bold').fontSize(8).text(`STATUS: ${status.toUpperCase()}`, leftMargin + 30, qrSectionY + 126);
+
+    // QR Code Image on right
     if (qrBuffer) {
-      doc.roundedRect(28, 500, 539, 148, 9).fillAndStroke('#ffffff', '#d9e5fb');
-      doc.fillColor('#475569').font('Helvetica-Bold').fontSize(10).text('Secure Gate Pass QR Code', 44, 516);
-      doc.fillColor('#64748b').font('Helvetica').fontSize(8).text('Show this code to security at exit and return. It is valid until the return date.', 44, 535, { width: 310 });
-      doc.fillColor('#0f172a').font('Helvetica-Bold').fontSize(9).text(`Gate Pass: ${gatePass.id}`, 44, 575);
-      try { doc.image(qrBuffer, 422, 514, { fit: [120, 120] }); } catch (error) { doc.fillColor('#94a3b8').font('Helvetica').fontSize(9).text('Unable to render QR', 420, 570, { width: 124, align: 'center' }); }
-      doc.roundedRect(28, 666, 539, 28, 9).fillAndStroke('#f8fafc', '#d9e5fb');
-      doc.fillColor('#64748b').font('Helvetica').fontSize(8).text('Downloaded from HostelFix', 40, 676);
-      doc.fillColor(statusColor).font('Helvetica-Bold').text(`Status: ${status}`, 455, 676, { width: 92, align: 'right' });
+      try {
+        doc.image(qrBuffer, leftMargin + 375, qrSectionY + 18, { fit: [125, 125] });
+      } catch (err) {
+        doc.fillColor('#94a3b8').font('Helvetica').fontSize(8).text('QR Code Ready', leftMargin + 375, qrSectionY + 70, { width: 125, align: 'center' });
+      }
     } else {
-      doc.roundedRect(28, 500, 539, 28, 9).fillAndStroke('#f8fafc', '#d9e5fb');
-      doc.fillColor('#64748b').font('Helvetica').fontSize(8).text('QR code will be generated after approval.', 40, 510);
-      doc.fillColor(statusColor).font('Helvetica-Bold').text(`Status: ${status}`, 455, 510, { width: 92, align: 'right' });
+      doc.roundedRect(leftMargin + 375, qrSectionY + 18, 125, 125, 6).fillAndStroke('#f8fafc', '#e2e8f0');
+      doc.fillColor('#94a3b8').font('Helvetica').fontSize(8).text('QR Code Generated Upon Approval', leftMargin + 380, qrSectionY + 68, { width: 115, align: 'center' });
     }
+
+    // Security Footer Strip
+    const footerY = 574;
+    doc.rect(leftMargin, footerY, contentWidth, 1).fill('#e2e8f0');
+    doc.fillColor('#94a3b8').font('Helvetica').fontSize(7.5).text('Generated securely via HostelFix Student Residence System • Valid with institutional ID', leftMargin, footerY + 8);
+    doc.fillColor('#64748b').font('Helvetica-Bold').fontSize(7.5).text(`CONFIDENTIAL • ${new Date().getFullYear()}`, leftMargin, footerY + 8, { width: contentWidth, align: 'right' });
 
     doc.end();
   });
@@ -814,10 +868,38 @@ function createGatePassNotification(data, gatePass, type, title, message, role =
     adminName: 'Gate Pass System', createdAt: new Date().toISOString(),
     targetEmail: role === 'Student' ? gatePass.email || '' : '', targetName: role === 'Student' ? gatePass.student || '' : '',
     targetRegistrationNumber: role === 'Student' ? gatePass.registrationNumber || '' : '', targetUserId: role === 'Student' ? gatePass.userId || '' : '',
-    relatedGatePassId: gatePass.id, receiverRole: role
+    relatedGatePassId: gatePass.id, receiverRole: role,
+    student: gatePass.student || '',
+    registrationNumber: gatePass.registrationNumber || '',
+    hostelBlock: gatePass.hostelBlock || '',
+    roomNumber: gatePass.roomNumber || '',
+    gateDate: gatePass.gateDate || '',
+    returnDate: gatePass.returnDate || '',
+    status: gatePass.status || 'REQUESTED'
   };
   data.personalNotifications.unshift(notification);
   return notification;
+}
+
+function generateCertificateId(gatePassId) {
+  const hash = crypto.randomBytes(3).toString('hex').toUpperCase();
+  const year = new Date().getFullYear();
+  const shortId = (gatePassId || '').replace(/^GP-/, '').slice(-6) || String(Date.now()).slice(-6);
+  return `CERT-${year}-${shortId}-${hash}`;
+}
+
+function addGatePassTimelineEvent(gatePass, stage, title, description, actor = 'System', role = 'system', extra = {}) {
+  gatePass.timeline = Array.isArray(gatePass.timeline) ? gatePass.timeline : [];
+  gatePass.timeline.push({
+    id: `TL-${Date.now()}-${crypto.randomBytes(2).toString('hex')}`,
+    stage,
+    title,
+    description,
+    actor: actor?.name || (typeof actor === 'string' ? actor : 'System'),
+    role: actor?.role || (typeof role === 'string' ? role : 'system'),
+    timestamp: new Date().toISOString(),
+    ...extra
+  });
 }
 
 function gatePassExpiry(returnDate) {
@@ -826,42 +908,74 @@ function gatePassExpiry(returnDate) {
 }
 
 async function provisionGatePassQr(gatePass, req) {
+  if (!gatePass.certificateId) {
+    gatePass.certificateId = generateCertificateId(gatePass.id);
+  }
   const expiresAt = gatePassExpiry(gatePass.returnDate);
-  const token = jwt.sign({ gp: gatePass.id, jti: crypto.randomUUID(), scope: 'gatepass-scan' }, GATEPASS_TOKEN_SECRET, { expiresIn: Math.max(60, Math.floor((expiresAt.getTime() - Date.now()) / 1000)) });
+  const token = jwt.sign({
+    gp: gatePass.id,
+    cert: gatePass.certificateId,
+    jti: crypto.randomUUID(),
+    scope: 'gatepass-scan'
+  }, GATEPASS_TOKEN_SECRET, { expiresIn: Math.max(60, Math.floor((expiresAt.getTime() - Date.now()) / 1000)) });
+
   const baseUrl = `${req.protocol}://${req.get('host')}`;
   const secureUrl = `${baseUrl}/qr/${encodeURIComponent(token)}`;
   gatePass.token = token;
+  gatePass.qrToken = token;
   gatePass.secureUrl = secureUrl;
   gatePass.qrUrl = secureUrl;
-  gatePass.qrImage = await QRCode.toDataURL(secureUrl, { errorCorrectionLevel: 'H', margin: 2, width: 420, color: { dark: '#0f172a', light: '#ffffff' } });
+  gatePass.qrImage = await QRCode.toDataURL(secureUrl, {
+    errorCorrectionLevel: 'H',
+    margin: 2,
+    width: 420,
+    color: { dark: '#0f172a', light: '#ffffff' }
+  });
   gatePass.qrGeneratedAt = new Date().toISOString();
   gatePass.expiryDate = expiresAt.toISOString();
 }
 
 async function backfillApprovedGatePassQrs(data, req) {
   const missingQrPasses = (data.gatePasses || []).filter((gatePass) => (
-    /^(approved|qr generated)$/i.test(String(gatePass.status || '')) && !gatePass.qrImage
+    /^(approved|qr generated|security_pending|outside|warden_pending)$/i.test(String(gatePass.status || '')) && !gatePass.qrImage
   ));
   if (!missingQrPasses.length) return false;
   for (const gatePass of missingQrPasses) {
     await provisionGatePassQr(gatePass, req);
-    gatePass.status = 'QR GENERATED';
-    gatePass.workflowStatus = 'QR GENERATED';
+    if (!gatePass.certificateId) gatePass.certificateId = generateCertificateId(gatePass.id);
     addGatePassAudit(data, gatePass, 'QR Generated for Existing Approved Pass', { role: 'system', ip: req.ip });
   }
   return true;
 }
 
 function validateGatePassToken(token, data) {
-  let payload;
-  try { payload = jwt.verify(token, GATEPASS_TOKEN_SECRET); } catch (error) { return { error: error.name === 'TokenExpiredError' ? 'This QR code has expired.' : 'Invalid or modified QR code.' }; }
-  if (!payload || payload.scope !== 'gatepass-scan' || !payload.gp) return { error: 'Invalid QR code.' };
-  const gatePass = data.gatePasses.find((item) => item.id === payload.gp && item.token === token);
-  if (!gatePass) return { error: 'This QR code is no longer valid.' };
-  if (gatePass.status === 'COMPLETED') return { error: 'Gate Pass Already Completed.', gatePass };
-  if (gatePass.status === 'REJECTED' || gatePass.status === 'CANCELLED') return { error: 'This gate pass is not active.' };
-  if (!gatePass.expiryDate || new Date(gatePass.expiryDate) < new Date()) return { error: 'This QR code has expired.' };
-  return { gatePass };
+  if (!token) return { error: 'A QR token or Gate Pass ID is required.' };
+  const rawToken = String(token).trim();
+
+  let gatePass = (data.gatePasses || []).find((item) => item.id === rawToken || item.token === rawToken || item.qrToken === rawToken);
+
+  let payload = null;
+  if (!gatePass) {
+    try {
+      payload = jwt.verify(rawToken, GATEPASS_TOKEN_SECRET);
+    } catch (error) {
+      return { error: error.name === 'TokenExpiredError' ? 'This QR code has expired.' : 'Invalid or modified QR code.' };
+    }
+    if (!payload || payload.scope !== 'gatepass-scan' || !payload.gp) return { error: 'Invalid QR code.' };
+    gatePass = (data.gatePasses || []).find((item) => item.id === payload.gp);
+  }
+
+  if (!gatePass) return { error: 'This QR code is no longer valid or Gate Pass was not found.' };
+  if (gatePass.status === 'COMPLETED' || gatePass.currentStatus === 'COMPLETED') {
+    return { error: 'Gate Pass Already Completed.', gatePass, isCompleted: true };
+  }
+  if (gatePass.status === 'REJECTED' || gatePass.status === 'CANCELLED') {
+    return { error: 'This gate pass is not active (Rejected/Cancelled).' };
+  }
+  if (gatePass.expiryDate && new Date(gatePass.expiryDate) < new Date()) {
+    return { error: 'This QR code has expired.' };
+  }
+  return { gatePass, payload };
 }
 
 function generateLaundryRequestId() {
@@ -999,6 +1113,73 @@ app.get('/api/student-notifications', (req, res) => {
   return res.json(notifications);
 });
 
+app.get('/api/warden-notifications', (req, res) => {
+  const data = readData();
+  const notifications = (Array.isArray(data.personalNotifications) ? data.personalNotifications : [])
+    .filter((n) => !n.receiverRole || n.receiverRole.toLowerCase() === 'warden' || n.audience === 'Warden' || n.audience === 'All')
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  res.json(notifications);
+});
+
+app.get('/api/gatepass/returns-summary', (req, res) => {
+  const data = readData();
+  const today = new Date().toISOString().split('T')[0];
+  const passes = Array.isArray(data.gatePasses) ? data.gatePasses : [];
+
+  const returningToday = [];
+  const returningTomorrow = [];
+  const upcoming = [];
+  const overdue = [];
+  const returnedAwaitingVerification = [];
+
+  const tomorrowDateObj = new Date();
+  tomorrowDateObj.setDate(tomorrowDateObj.getDate() + 1);
+  const tomorrow = tomorrowDateObj.toISOString().split('T')[0];
+
+  passes.forEach((pass) => {
+    const rawStatus = String(pass.status || 'REQUESTED').toUpperCase();
+    if (rawStatus === 'REJECTED' || rawStatus === 'COMPLETED' || rawStatus === 'WARDEN VERIFICATION REJECTED') {
+      return;
+    }
+
+    if (rawStatus === 'RETURNED' || (pass.inTime && !pass.wardenVerified)) {
+      returnedAwaitingVerification.push(pass);
+      return;
+    }
+
+    const ret = String(pass.returnDate || '').slice(0, 10);
+    if (!ret) return;
+
+    if (ret === today) {
+      returningToday.push(pass);
+    } else if (ret === tomorrow) {
+      returningTomorrow.push(pass);
+    } else if (ret > today) {
+      upcoming.push(pass);
+    } else if (ret < today) {
+      overdue.push(pass);
+    }
+  });
+
+  res.json({
+    today,
+    tomorrow,
+    counts: {
+      returningToday: returningToday.length,
+      returningTomorrow: returningTomorrow.length,
+      upcoming: upcoming.length,
+      overdue: overdue.length,
+      awaitingVerification: returnedAwaitingVerification.length,
+      totalActive: returningToday.length + returningTomorrow.length + upcoming.length + overdue.length + returnedAwaitingVerification.length
+    },
+    returningToday,
+    returningTomorrow,
+    upcoming,
+    overdue,
+    returnedAwaitingVerification
+  });
+});
+
 app.post('/api/announcements', async (req, res) => {
   const data = readData();
   const { title, message, priority, audience, adminName } = req.body;
@@ -1078,6 +1259,7 @@ app.post('/api/gate-passes', (req, res) => {
 
   const gatePass = {
     id: generateGatePassId(),
+    certificateId: '',
     userId: req.body.userId || '',
     student: req.body.student || 'Anonymous',
     email: normalizeEmail(req.body.email),
@@ -1085,13 +1267,45 @@ app.post('/api/gate-passes', (req, res) => {
     hostelBlock: req.body.hostelBlock || 'Unknown',
     roomNumber: req.body.roomNumber || 'Unknown',
     reason: req.body.reason || 'General',
+    destination: req.body.destination || req.body.reason || 'Home / Out of campus',
     session: req.body.session || 'Morning',
     gateDate,
     returnDate,
     studentPhoto: normalizeImageDataUrl(req.body.studentPhoto || req.body.photo || req.body.studentImage || ''),
-    status: 'REQUESTED',
-    workflowStatus: 'REQUESTED',
+    status: 'PENDING_ADMIN',
+    workflowStatus: 'PENDING_ADMIN',
+    currentStatus: 'PENDING_ADMIN',
+    adminApproval: { status: 'PENDING', approvedBy: '', approvedAt: null, remarks: '' },
+    securityVerification: { status: 'PENDING', verifiedBy: '', verifiedAt: null, rejectionReason: '' },
+    wardenVerification: { status: 'PENDING', verifiedBy: '', verifiedAt: null, rejectionReason: '' },
+    securityVerified: false,
     wardenVerified: false,
+    gateCrossed: false,
+    hostelArrivalConfirmed: false,
+    exitTime: null,
+    hostelArrivalTime: null,
+    outTime: null,
+    inTime: null,
+    qrUsedForSecurity: false,
+    qrUsedForWarden: false,
+    token: null,
+    qrToken: null,
+    secureUrl: null,
+    qrUrl: null,
+    qrImage: null,
+    qrGeneratedAt: null,
+    expiryDate: null,
+    timeline: [
+      {
+        id: `TL-${Date.now()}-01`,
+        stage: 'APPLIED',
+        title: 'Gate Pass Applied',
+        description: `Student applied for Gate Pass (${gateDate} to ${returnDate})`,
+        actor: req.body.student || 'Student',
+        role: 'student',
+        timestamp: new Date().toISOString()
+      }
+    ],
     createdAt: new Date().toISOString(),
     approvedBy: '',
     approvedAt: null
@@ -1099,10 +1313,21 @@ app.post('/api/gate-passes', (req, res) => {
 
   data.gatePasses = Array.isArray(data.gatePasses) ? data.gatePasses : [];
   data.gatePasses.unshift(gatePass);
+
+  const wardenNotification = createGatePassNotification(
+    data,
+    gatePass,
+    'gate-pass-scheduled-return',
+    `Expected Return: ${gatePass.student} (${returnDate})`,
+    `Student ${gatePass.student} (${gatePass.registrationNumber || 'N/A'}, Room ${gatePass.roomNumber}, ${gatePass.hostelBlock}) applied for a gate pass from ${gateDate} to ${returnDate}. Expected return date: ${returnDate}. Reason: "${gatePass.reason}".`,
+    'Warden'
+  );
+
   addGatePassAudit(data, gatePass, 'Student Applied', { id: gatePass.userId, role: 'student', ip: req.ip });
   writeData(data);
   if (req.io) {
     req.io.emit('gate-pass.created', gatePass);
+    req.io.emit('warden-notification.created', wardenNotification);
   }
   res.status(201).json(gatePass);
 });
@@ -1115,32 +1340,89 @@ app.put('/api/gate-passes/:id/status', async (req, res) => {
   }
 
   const status = (req.body.status || '').trim();
-  const validStatuses = ['Pending', 'Approved', 'Rejected'];
-  if (!status || !validStatuses.includes(status)) {
-    return res.status(400).json({ error: `Status is required and must be one of: ${validStatuses.join(', ')}` });
+  const validStatuses = ['Pending', 'Approved', 'Rejected', 'SECURITY_PENDING', 'REJECTED'];
+  if (!status || !validStatuses.map(s => s.toLowerCase()).includes(status.toLowerCase())) {
+    return res.status(400).json({ error: `Status is required and must be one of: Pending, Approved, Rejected` });
   }
 
-  gatePass.status = status === 'Approved' ? 'QR GENERATED' : status === 'Rejected' ? 'REJECTED' : 'REQUESTED';
-  gatePass.workflowStatus = gatePass.status;
-  gatePass.approvedBy = req.body.approvedBy || 'Admin';
+  const isApproval = /^(approved|security_pending)$/i.test(status);
+  const isRejection = /^rejected$/i.test(status);
+
+  gatePass.approvedBy = req.body.approvedBy || req.body.adminName || 'Admin User';
   gatePass.approvedAt = new Date().toISOString();
   gatePass.facultyId = req.body.facultyId || '';
   gatePass.facultyRemarks = String(req.body.remarks || '').trim();
 
   let createdNotification = null;
-  if (status === 'Approved') {
+  if (isApproval) {
+    gatePass.status = 'SECURITY_PENDING';
+    gatePass.workflowStatus = 'SECURITY_PENDING';
+    gatePass.currentStatus = 'SECURITY_PENDING';
+    gatePass.certificateId = gatePass.certificateId || generateCertificateId(gatePass.id);
+    gatePass.adminApproval = {
+      status: 'APPROVED',
+      approvedBy: gatePass.approvedBy,
+      approvedAt: gatePass.approvedAt,
+      remarks: gatePass.facultyRemarks
+    };
+    gatePass.securityVerification = gatePass.securityVerification || { status: 'PENDING', verifiedBy: '', verifiedAt: null, rejectionReason: '' };
+    gatePass.wardenVerification = gatePass.wardenVerification || { status: 'PENDING', verifiedBy: '', verifiedAt: null, rejectionReason: '' };
+
     await provisionGatePassQr(gatePass, req);
-    createdNotification = createGatePassNotification(data, gatePass, 'gate-pass-approved', 'Gate Pass Approved — QR Ready', `Your gate pass ${gatePass.id} has been approved. Your secure QR code is ready for gate scanning.`);
-    addGatePassAudit(data, gatePass, 'Faculty Approved & QR Generated', { name: gatePass.approvedBy, role: 'faculty', ip: req.ip }, gatePass.facultyRemarks);
-  } else {
+
+    addGatePassTimelineEvent(gatePass, 'ADMIN_APPROVED', 'Admin Approved', `Gate Pass approved by ${gatePass.approvedBy}. Secure QR Certificate ${gatePass.certificateId} generated.`, gatePass.approvedBy, 'admin');
+    addGatePassAudit(data, gatePass, 'Admin Approved & QR Generated', { name: gatePass.approvedBy, role: 'admin', ip: req.ip }, gatePass.facultyRemarks);
+
+    createdNotification = createGatePassNotification(data, gatePass, 'gate-pass-approved', 'Gate Pass Approved — QR Ready', `Your gate pass ${gatePass.id} has been approved. Your secure QR code is ready for gate security exit scanning.`);
+
+    // Dispatch Telegram Alert if configured
+    if (getTelegramConfig()) {
+      try {
+        const msg = formatTelegramAdminApproval({
+          student: gatePass.student,
+          registrationNumber: gatePass.registrationNumber,
+          gatePassId: gatePass.id,
+          certificateId: gatePass.certificateId,
+          gateDate: gatePass.gateDate,
+          returnDate: gatePass.returnDate
+        });
+        sendTelegramMessage(msg).catch((e) => console.warn('Telegram approval alert warning:', e.message));
+      } catch (err) {
+        console.warn('Telegram format error:', err.message);
+      }
+    }
+  } else if (isRejection) {
+    gatePass.status = 'REJECTED';
+    gatePass.workflowStatus = 'REJECTED';
+    gatePass.currentStatus = 'REJECTED';
+    gatePass.adminApproval = {
+      status: 'REJECTED',
+      approvedBy: gatePass.approvedBy,
+      approvedAt: gatePass.approvedAt,
+      remarks: gatePass.facultyRemarks
+    };
+    gatePass.qrImage = null;
+    gatePass.token = null;
+    gatePass.qrToken = null;
+    gatePass.secureUrl = null;
+    gatePass.qrUrl = null;
+    gatePass.qrGeneratedAt = null;
+    gatePass.expiryDate = null;
+
+    addGatePassTimelineEvent(gatePass, 'ADMIN_REJECTED', 'Admin Rejected', gatePass.facultyRemarks || 'Gate pass request was rejected by admin.', gatePass.approvedBy, 'admin');
+    addGatePassAudit(data, gatePass, 'Admin Rejected', { name: gatePass.approvedBy, role: 'admin', ip: req.ip }, gatePass.facultyRemarks);
     createdNotification = createGatePassNotification(data, gatePass, 'gate-pass-rejected', 'Gate Pass Request Rejected', `Your gate pass ${gatePass.id} was rejected.${gatePass.facultyRemarks ? ` Remarks: ${gatePass.facultyRemarks}` : ''}`);
-    addGatePassAudit(data, gatePass, 'Faculty Rejected', { name: gatePass.approvedBy, role: 'faculty', ip: req.ip }, gatePass.facultyRemarks);
+  } else {
+    gatePass.status = 'PENDING_ADMIN';
+    gatePass.workflowStatus = 'PENDING_ADMIN';
+    gatePass.currentStatus = 'PENDING_ADMIN';
   }
 
   writeData(data);
 
-  if (req.io && createdNotification) {
-    req.io.emit('student-notification.created', createdNotification);
+  if (req.io) {
+    req.io.emit('gate-pass.updated', gatePass);
+    if (createdNotification) req.io.emit('student-notification.created', createdNotification);
   }
 
   res.json(gatePass);
@@ -1152,71 +1434,737 @@ app.post('/api/gatepass/apply', (req, res) => {
   app.handle(req, res);
 });
 
-app.post('/api/gatepass/approve', (req, res) => {
-  const id = String(req.body.id || req.body.gatePassId || '');
+app.post('/api/gatepass/approve', async (req, res) => {
+  const id = String(req.body.id || req.body.gatePassId || req.body.passId || '').trim();
   if (!id) return res.status(400).json({ error: 'A gate pass id is required.' });
-  req.method = 'PUT';
-  req.url = `/api/gate-passes/${encodeURIComponent(id)}/status`;
-  req.body.status = req.body.status || 'Approved';
-  app.handle(req, res);
+
+  const data = readData();
+  const gatePass = (data.gatePasses || []).find((entry) => entry.id === id || String(entry.id).toLowerCase() === id.toLowerCase());
+  if (!gatePass) return res.status(404).json({ error: 'Gate pass not found.' });
+
+  gatePass.approvedBy = req.body.approvedBy || req.body.adminName || 'Admin User';
+  gatePass.approvedAt = new Date().toISOString();
+  gatePass.facultyId = req.body.facultyId || '';
+  gatePass.facultyRemarks = String(req.body.remarks || '').trim();
+
+  gatePass.status = 'SECURITY_PENDING';
+  gatePass.workflowStatus = 'SECURITY_PENDING';
+  gatePass.currentStatus = 'SECURITY_PENDING';
+  gatePass.certificateId = gatePass.certificateId || generateCertificateId(gatePass.id);
+  gatePass.adminApproval = {
+    status: 'APPROVED',
+    approvedBy: gatePass.approvedBy,
+    approvedAt: gatePass.approvedAt,
+    remarks: gatePass.facultyRemarks
+  };
+  gatePass.securityVerification = gatePass.securityVerification || { status: 'PENDING', verifiedBy: '', verifiedAt: null, rejectionReason: '' };
+  gatePass.wardenVerification = gatePass.wardenVerification || { status: 'PENDING', verifiedBy: '', verifiedAt: null, rejectionReason: '' };
+
+  await provisionGatePassQr(gatePass, req);
+
+  addGatePassTimelineEvent(gatePass, 'ADMIN_APPROVED', 'Admin Approved', `Gate Pass approved by ${gatePass.approvedBy}. Secure QR Certificate ${gatePass.certificateId} generated.`, gatePass.approvedBy, 'admin');
+  addGatePassAudit(data, gatePass, 'Admin Approved & QR Generated', { name: gatePass.approvedBy, role: 'admin', ip: req.ip }, gatePass.facultyRemarks);
+
+  const createdNotification = createGatePassNotification(data, gatePass, 'gate-pass-approved', 'Gate Pass Approved — QR Ready', `Your gate pass ${gatePass.id} has been approved. Your secure QR code is ready for gate security exit scanning.`);
+
+  if (getTelegramConfig()) {
+    try {
+      const msg = formatTelegramAdminApproval({
+        student: gatePass.student,
+        registrationNumber: gatePass.registrationNumber,
+        gatePassId: gatePass.id,
+        certificateId: gatePass.certificateId,
+        gateDate: gatePass.gateDate,
+        returnDate: gatePass.returnDate
+      });
+      sendTelegramMessage(msg).catch((e) => console.warn('Telegram approval alert warning:', e.message));
+    } catch (err) {
+      console.warn('Telegram format error:', err.message);
+    }
+  }
+
+  writeData(data);
+
+  if (req.io) {
+    req.io.emit('gate-pass.updated', gatePass);
+    if (createdNotification) req.io.emit('student-notification.created', createdNotification);
+  }
+
+  res.json({ success: true, gatePass });
+});
+
+// Unified Preview for Security or Warden QR Scan
+app.post('/api/gatepass/verify-preview', (req, res) => {
+  const token = String(req.body.token || req.body.qrToken || req.body.gatePassId || req.body.id || '').trim();
+  const role = String(req.body.role || req.body.user?.role || 'security').toLowerCase();
+  const data = readData();
+
+  const validation = validateGatePassToken(token, data);
+  if (validation.error && !validation.gatePass) {
+    return res.status(400).json({ error: validation.error });
+  }
+
+  const gatePass = validation.gatePass;
+  const isApproved = /^(approved|qr generated|security_pending|outside|warden_pending|outside_not_returned|completed)$/i.test(String(gatePass.status || ''));
+
+  if (!isApproved) {
+    return res.status(400).json({
+      error: 'GATE_PASS_NOT_APPROVED',
+      message: 'This gate pass has not been approved by an administrator yet.',
+      gatePass
+    });
+  }
+
+  if (role === 'security') {
+    return res.json({
+      success: true,
+      phase: 'SECURITY',
+      allowed: true,
+      gatePass,
+      message: 'Gate pass verified and ready for Security Exit review.'
+    });
+  }
+
+  if (role === 'warden') {
+    return res.json({
+      success: true,
+      phase: 'WARDEN',
+      allowed: true,
+      gatePass,
+      message: 'Student gate pass verified. Ready for Warden Hostel Return confirmation.'
+    });
+  }
+
+  res.json({ success: true, phase: 'GENERAL', allowed: true, gatePass });
+});
+
+// Security Scan Verification (Approve Exit / Reject Exit)
+app.post('/api/gatepass/security/verify', (req, res) => {
+  const callerRole = String(req.body.role || req.body.user?.role || '').toLowerCase();
+  if (callerRole && !['security', 'admin'].includes(callerRole)) {
+    return res.status(403).json({ error: 'Forbidden. Only Security Officers or Admins can perform security exit verification.' });
+  }
+
+  const token = String(req.body.token || req.body.gatePassId || req.body.id || '').trim();
+  const data = readData();
+  const validation = validateGatePassToken(token, data);
+  if (validation.error && !validation.gatePass) {
+    return res.status(400).json({ error: validation.error });
+  }
+
+  const gatePass = validation.gatePass;
+  const action = String(req.body.action || 'APPROVE').toUpperCase();
+  const guardName = String(req.body.guardName || req.body.securityName || req.body.user?.name || 'Gate Security Guard').trim();
+  const guardId = String(req.body.guardId || req.body.user?.userId || 'SEC-001');
+  const location = String(req.body.location || 'Main Campus Gate').trim();
+
+  if (action === 'APPROVE') {
+    const timestamp = new Date().toISOString();
+    gatePass.securityVerified = true;
+    gatePass.securityStatus = 'APPROVED';
+    gatePass.securityName = guardName;
+    gatePass.securityVerifiedAt = timestamp;
+    gatePass.exitTime = timestamp;
+    gatePass.outTime = timestamp;
+    gatePass.gateCrossed = true;
+    gatePass.qrUsedForSecurity = true;
+    gatePass.status = 'OUTSIDE';
+    gatePass.workflowStatus = 'OUTSIDE';
+    gatePass.currentStatus = 'OUTSIDE';
+    gatePass.securityVerification = {
+      status: 'APPROVED',
+      verifiedBy: guardName,
+      verifiedAt: timestamp,
+      rejectionReason: ''
+    };
+
+    addGatePassTimelineEvent(gatePass, 'SECURITY_APPROVED', 'Security Exit Approved', `Student confirmed as having crossed the gate at ${location}.`, guardName, 'security');
+    addGatePassAudit(data, gatePass, 'Security Approved Exit', { id: guardId, name: guardName, role: 'security', ip: req.ip }, location);
+
+    data.gatePassScanLogs = Array.isArray(data.gatePassScanLogs) ? data.gatePassScanLogs : [];
+    data.gatePassScanLogs.unshift({
+      id: `GPS-${Date.now()}-${crypto.randomBytes(2).toString('hex')}`,
+      gatePassId: gatePass.id,
+      guardId,
+      guardName,
+      scanTime: timestamp,
+      scanType: 'OUT',
+      location,
+      device: String(req.body.device || '').slice(0, 100),
+      remarks: 'Exit verified by security officer'
+    });
+
+    createGatePassNotification(data, gatePass, 'gate-pass-out', 'Exit Verified by Security', `Your campus exit was verified at ${location}. Please return by ${gatePass.returnDate}.`);
+    createGatePassNotification(data, gatePass, 'student-outside', `Student Outside: ${gatePass.student}`, `Student ${gatePass.student} (Room ${gatePass.roomNumber}) has crossed the gate at ${new Date(timestamp).toLocaleTimeString('en-IN')}.`, 'Warden');
+
+    // Telegram Notification
+    if (getTelegramConfig()) {
+      try {
+        const msg = formatTelegramSecurityExit({
+          student: gatePass.student,
+          registrationNumber: gatePass.registrationNumber,
+          exitTime: timestamp,
+          securityName: guardName
+        });
+        sendTelegramMessage(msg).catch((e) => console.warn('Telegram security exit send warning:', e.message));
+      } catch (err) {
+        console.warn('Telegram security format error:', err.message);
+      }
+    }
+
+    writeData(data);
+    if (req.io) req.io.emit('gate-pass.updated', gatePass);
+
+    return res.json({
+      success: true,
+      message: 'EXIT APPROVED. Student has successfully crossed the gate.',
+      gatePass
+    });
+  } else {
+    // REJECT EXIT
+    const timestamp = new Date().toISOString();
+    const rejectionReason = String(req.body.rejectionReason || req.body.reason || 'Verification rejected at security gate').trim();
+    gatePass.securityVerified = false;
+    gatePass.securityStatus = 'REJECTED';
+    gatePass.securityName = guardName;
+    gatePass.securityRejectedAt = timestamp;
+    gatePass.securityRejectionReason = rejectionReason;
+    gatePass.gateCrossed = false;
+    gatePass.status = 'SECURITY_REJECTED';
+    gatePass.workflowStatus = 'SECURITY_REJECTED';
+    gatePass.currentStatus = 'SECURITY_REJECTED';
+    gatePass.securityVerification = {
+      status: 'REJECTED',
+      verifiedBy: guardName,
+      verifiedAt: timestamp,
+      rejectionReason
+    };
+
+    addGatePassTimelineEvent(gatePass, 'SECURITY_REJECTED', 'Security Exit Rejected', rejectionReason, guardName, 'security');
+    addGatePassAudit(data, gatePass, 'Security Rejected Exit', { id: guardId, name: guardName, role: 'security', ip: req.ip }, rejectionReason);
+
+    createGatePassNotification(data, gatePass, 'gate-pass-rejected', 'Gate Exit Rejected', `Security rejected your gate exit. Reason: "${rejectionReason}".`);
+
+    // Telegram Notification
+    if (getTelegramConfig()) {
+      try {
+        const msg = formatTelegramSecurityRejection({
+          student: gatePass.student,
+          registrationNumber: gatePass.registrationNumber,
+          securityName: guardName,
+          reason: rejectionReason
+        });
+        sendTelegramMessage(msg).catch((e) => console.warn('Telegram security rejection send warning:', e.message));
+      } catch (err) {
+        console.warn('Telegram rejection format error:', err.message);
+      }
+    }
+
+    writeData(data);
+    if (req.io) req.io.emit('gate-pass.updated', gatePass);
+
+    return res.json({
+      success: true,
+      message: 'EXIT REJECTED. Student is not permitted to cross the gate.',
+      gatePass
+    });
+  }
+});
+
+// Warden Scan Verification (Approve Hostel Arrival / Reject Hostel Arrival)
+app.post(['/api/gatepass/warden/verify', '/api/gatepass/warden/approve'], (req, res) => {
+  const callerRole = String(req.body.role || req.body.user?.role || '').toLowerCase();
+  if (callerRole && !['warden', 'admin'].includes(callerRole)) {
+    return res.status(403).json({ error: 'Forbidden. Only Wardens or Admins can perform hostel arrival verification.' });
+  }
+
+  const token = String(req.body.token || req.body.gatePassId || req.body.id || '').trim();
+  const data = readData();
+  const validation = validateGatePassToken(token, data);
+  if (validation.error && !validation.gatePass) {
+    return res.status(400).json({ error: validation.error });
+  }
+
+  const gatePass = validation.gatePass;
+  // Direct Warden return verification on approved student gate pass
+  if (!gatePass.status || ['REJECTED', 'CANCELLED'].includes(String(gatePass.status).toUpperCase())) {
+    return res.status(400).json({
+      error: 'INVALID_GATE_PASS_STATUS',
+      message: 'This gate pass is not active or has been rejected.'
+    });
+  }
+
+  const action = String(req.body.action || (req.body.approved === false ? 'REJECT' : 'APPROVE')).toUpperCase();
+  const wardenName = String(req.body.wardenName || req.body.user?.name || 'Hostel Warden').trim();
+  const wardenId = String(req.body.wardenId || req.body.user?.userId || 'WRD-001');
+
+  if (action === 'APPROVE') {
+    const timestamp = new Date().toISOString();
+    gatePass.wardenVerified = true;
+    gatePass.wardenStatus = 'APPROVED';
+    gatePass.wardenName = wardenName;
+    gatePass.wardenVerifiedAt = timestamp;
+    gatePass.hostelArrivalTime = timestamp;
+    gatePass.inTime = timestamp;
+    gatePass.hostelArrivalConfirmed = true;
+    gatePass.qrUsedForWarden = true;
+    gatePass.status = 'COMPLETED';
+    gatePass.workflowStatus = 'COMPLETED';
+    gatePass.currentStatus = 'COMPLETED';
+    gatePass.wardenVerification = {
+      status: 'APPROVED',
+      verifiedBy: wardenName,
+      verifiedAt: timestamp,
+      remarks: String(req.body.remarks || '').trim(),
+      rejectionReason: ''
+    };
+
+    addGatePassTimelineEvent(gatePass, 'WARDEN_APPROVED', 'Hostel Arrival Verified', `Student confirmed as having reached hostel block ${gatePass.hostelBlock}.`, wardenName, 'warden');
+    addGatePassAudit(data, gatePass, 'Warden Approved Arrival', { id: wardenId, name: wardenName, role: 'warden', ip: req.ip }, gatePass.wardenVerification.remarks);
+
+    createGatePassNotification(data, gatePass, 'gate-pass-completed', 'Hostel Arrival Confirmed', `Warden ${wardenName} has verified your safe arrival at hostel. Gate pass completed.`);
+
+    // Telegram Notification
+    if (getTelegramConfig()) {
+      try {
+        const msg = formatTelegramWardenArrival({
+          student: gatePass.student,
+          registrationNumber: gatePass.registrationNumber,
+          arrivalTime: timestamp,
+          wardenName
+        });
+        sendTelegramMessage(msg).catch((e) => console.warn('Telegram warden arrival send warning:', e.message));
+      } catch (err) {
+        console.warn('Telegram warden arrival format error:', err.message);
+      }
+    }
+
+    writeData(data);
+    if (req.io) req.io.emit('gate-pass.updated', gatePass);
+
+    return res.json({
+      success: true,
+      message: 'HOSTEL ARRIVAL VERIFIED. Student has successfully reached the hostel.',
+      gatePass
+    });
+  } else {
+    // REJECT HOSTEL ARRIVAL -> OUTSIDE_NOT_RETURNED
+    const timestamp = new Date().toISOString();
+    const rejectionReason = String(req.body.rejectionReason || req.body.reason || 'Student did not arrive at hostel.').trim();
+    gatePass.wardenVerified = false;
+    gatePass.wardenStatus = 'REJECTED';
+    gatePass.wardenName = wardenName;
+    gatePass.wardenRejectedAt = timestamp;
+    gatePass.hostelArrivalConfirmed = false;
+    gatePass.wardenRejectionReason = rejectionReason;
+    gatePass.status = 'OUTSIDE_NOT_RETURNED';
+    gatePass.workflowStatus = 'OUTSIDE_NOT_RETURNED';
+    gatePass.currentStatus = 'OUTSIDE_NOT_RETURNED';
+    gatePass.wardenVerification = {
+      status: 'REJECTED',
+      verifiedBy: wardenName,
+      verifiedAt: timestamp,
+      rejectionReason
+    };
+
+    addGatePassTimelineEvent(gatePass, 'WARDEN_REJECTED', 'Hostel Arrival Not Confirmed', `Student crossed gate but not confirmed at hostel. Reason: ${rejectionReason}`, wardenName, 'warden');
+    addGatePassAudit(data, gatePass, 'Warden Rejected Arrival', { id: wardenId, name: wardenName, role: 'warden', ip: req.ip }, rejectionReason);
+
+    createGatePassNotification(data, gatePass, 'warden-arrival-rejected', 'Hostel Arrival Not Verified', `Hostel arrival not confirmed by warden. Please report to Warden immediately.`);
+
+    // Telegram Notification
+    if (getTelegramConfig()) {
+      try {
+        const msg = formatTelegramWardenRejection({
+          student: gatePass.student,
+          registrationNumber: gatePass.registrationNumber,
+          exitTime: gatePass.exitTime || gatePass.outTime,
+          wardenName,
+          reason: rejectionReason
+        });
+        sendTelegramMessage(msg).catch((e) => console.warn('Telegram warden rejection send warning:', e.message));
+      } catch (err) {
+        console.warn('Telegram warden rejection format error:', err.message);
+      }
+    }
+
+    writeData(data);
+    if (req.io) req.io.emit('gate-pass.updated', gatePass);
+
+    return res.json({
+      success: true,
+      message: 'HOSTEL ARRIVAL NOT VERIFIED. Student marked as OUTSIDE_NOT_RETURNED.',
+      gatePass
+    });
+  }
+});
+
+// Admin Monitoring for Two-Step Gate Pass Verification
+app.get('/api/gatepass/verification-monitoring', (req, res) => {
+  const data = readData();
+  const list = (data.gatePasses || []).map((pass) => ({
+    id: pass.id,
+    certificateId: pass.certificateId || '',
+    student: pass.student,
+    registrationNumber: pass.registrationNumber,
+    hostelBlock: pass.hostelBlock,
+    roomNumber: pass.roomNumber,
+    reason: pass.reason,
+    gateDate: pass.gateDate,
+    returnDate: pass.returnDate,
+    studentPhoto: pass.studentPhoto || '',
+    adminStatus: pass.adminApproval?.status || (/^(approved|qr generated|security_pending|outside|warden_pending|outside_not_returned|completed)$/i.test(pass.status) ? 'APPROVED' : pass.status === 'REJECTED' ? 'REJECTED' : 'PENDING'),
+    adminApprovedAt: pass.approvedAt || pass.adminApproval?.approvedAt || null,
+    adminApprovedBy: pass.approvedBy || 'Admin',
+    securityStatus: pass.securityVerification?.status || (pass.securityVerified ? 'APPROVED' : pass.securityStatus || 'PENDING'),
+    securityVerifiedAt: pass.securityVerifiedAt || pass.exitTime || null,
+    securityName: pass.securityName || pass.guardExitId || '',
+    securityRejectionReason: pass.securityRejectionReason || '',
+    exitTime: pass.exitTime || pass.outTime || null,
+    wardenStatus: pass.wardenVerification?.status || (pass.wardenVerified ? 'APPROVED' : pass.status === 'OUTSIDE_NOT_RETURNED' ? 'REJECTED' : 'PENDING'),
+    wardenVerifiedAt: pass.wardenVerifiedAt || pass.hostelArrivalTime || null,
+    wardenName: pass.wardenName || '',
+    wardenRejectionReason: pass.wardenRejectionReason || '',
+    hostelArrivalTime: pass.hostelArrivalTime || pass.inTime || null,
+    finalStatus: pass.currentStatus || pass.status || 'PENDING_ADMIN',
+    gateCrossed: Boolean(pass.gateCrossed || pass.exitTime),
+    hostelArrivalConfirmed: Boolean(pass.hostelArrivalConfirmed || pass.hostelArrivalTime),
+    timeline: pass.timeline || []
+  }));
+
+  const metrics = {
+    total: list.length,
+    pendingAdmin: list.filter(p => p.adminStatus === 'PENDING').length,
+    securityPending: list.filter(p => p.adminStatus === 'APPROVED' && p.securityStatus === 'PENDING').length,
+    outside: list.filter(p => p.securityStatus === 'APPROVED' && p.finalStatus === 'OUTSIDE').length,
+    outsideNotReturned: list.filter(p => p.finalStatus === 'OUTSIDE_NOT_RETURNED').length,
+    completed: list.filter(p => p.finalStatus === 'COMPLETED').length,
+    rejected: list.filter(p => ['REJECTED', 'SECURITY_REJECTED'].includes(p.finalStatus)).length
+  };
+
+  res.json({ metrics, stats: metrics, passes: list });
 });
 
 app.get('/api/gatepass/:id', (req, res) => {
   const data = readData();
-  const gatePass = data.gatePasses.find((item) => item.id === req.params.id);
+  const gatePass = (data.gatePasses || []).find((item) => item.id === req.params.id || item.token === req.params.id);
   if (!gatePass) return res.status(404).json({ error: 'Gate pass not found.' });
-  res.json({ ...gatePass, scanLogs: data.gatePassScanLogs.filter((log) => log.gatePassId === gatePass.id), auditLogs: data.auditLogs.filter((log) => log.gatePassId === gatePass.id) });
+  res.json({
+    ...gatePass,
+    scanLogs: (data.gatePassScanLogs || []).filter((log) => log.gatePassId === gatePass.id),
+    auditLogs: (data.auditLogs || []).filter((log) => log.gatePassId === gatePass.id)
+  });
 });
 
 app.get('/api/gatepass/history', (req, res) => {
   const data = readData();
   const userId = String(req.query.userId || '');
-  res.json(userId ? data.gatePasses.filter((item) => item.userId === userId) : data.gatePasses);
+  res.json(userId ? (data.gatePasses || []).filter((item) => item.userId === userId) : (data.gatePasses || []));
 });
 
-app.post('/api/gatepass/scan', (req, res) => {
-  const token = String(req.body.token || '');
-  const key = `${req.ip}:${crypto.createHash('sha256').update(token).digest('hex').slice(0, 12)}`;
-  const recent = (gatePassScanAttempts.get(key) || []).filter((time) => Date.now() - time < 60000);
-  if (recent.length >= 12) return res.status(429).json({ error: 'Too many scan attempts. Please wait a minute.' });
-  recent.push(Date.now()); gatePassScanAttempts.set(key, recent);
-  const data = readData(); const validation = validateGatePassToken(token, data);
-  if (validation.error) return res.status(400).json({ error: validation.error });
-  const gatePass = validation.gatePass;
-  const guard = { id: String(req.body.guardId || 'guard'), name: String(req.body.guardName || req.body.guardId || 'Security Guard'), role: 'guard', ip: req.ip };
-  const log = { id: `GPS-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`, gatePassId: gatePass.id, guardId: guard.id, guardName: guard.name, scanTime: new Date().toISOString(), device: String(req.body.device || '').slice(0, 120), ipAddress: req.ip, location: String(req.body.location || 'Main Gate').slice(0, 120), remarks: '' };
-  let message;
-  if (!gatePass.outTime) {
-    gatePass.outTime = log.scanTime; gatePass.guardExitId = guard.id; gatePass.status = 'OUT'; gatePass.workflowStatus = 'OUT';
-    data.gatePassScanLogs.unshift({ ...log, scanType: 'OUT' }); addGatePassAudit(data, gatePass, 'Exit Scan', guard, log.location);
-    createGatePassNotification(data, gatePass, 'gate-pass-out', 'Exit Recorded', `Your exit at ${log.location} has been recorded.`); message = 'Exit Successfully Recorded.';
-  } else if (!gatePass.inTime) {
-    gatePass.inTime = log.scanTime; gatePass.guardEntryId = guard.id; gatePass.status = 'RETURNED'; gatePass.workflowStatus = 'RETURNED';
-    data.gatePassScanLogs.unshift({ ...log, scanType: 'IN' }); addGatePassAudit(data, gatePass, 'Return Scan', guard, log.location);
-    createGatePassNotification(data, gatePass, 'gate-pass-returned', 'Return Recorded', 'Your return has been recorded. Waiting for warden verification.');
-    createGatePassNotification(data, gatePass, 'warden-verification-required', 'Student Returned — Verification Required', `${gatePass.student} has returned and needs hostel-arrival verification.`, 'Warden');
-    message = 'Return Successfully Recorded. Waiting for Warden Verification.';
-  } else return res.status(409).json({ error: 'Return has already been recorded. Waiting for warden verification.' });
-  writeData(data);
-  res.json({ message, gatePass: { id: gatePass.id, student: gatePass.student, registrationNumber: gatePass.registrationNumber, hostelBlock: gatePass.hostelBlock, roomNumber: gatePass.roomNumber, status: gatePass.status, outTime: gatePass.outTime, inTime: gatePass.inTime } });
+// Standalone Web Verification Page (for Phone / QR Scan)
+app.get(['/qr/:token', '/gatepass/verify/:token'], (req, res) => {
+  const token = String(req.params.token || '').replace(/['"]/g, '');
+  const data = readData();
+  const validation = validateGatePassToken(token, data);
+  const pass = validation.gatePass || {};
+  const studentName = pass.student || 'Student';
+  const regNo = pass.registrationNumber || '';
+  const room = (pass.hostelBlock ? pass.hostelBlock + ' • Room ' : 'Room ') + (pass.roomNumber || 'N/A');
+
+  res.type('html').send(`<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>HostelFix • Two-Step Gate Pass Verification</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <style>
+    body { font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #f8fafc; }
+    .glass-card { background: rgba(30, 41, 59, 0.85); backdrop-filter: blur(16px); border: 1px solid rgba(255, 255, 255, 0.1); }
+  </style>
+</head>
+<body class="min-h-screen flex items-center justify-center p-4">
+  <div class="glass-card rounded-3xl p-6 sm:p-8 max-w-lg w-full shadow-2xl space-y-6">
+    <div class="flex items-center justify-between border-b border-slate-700/60 pb-4">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-2xl bg-indigo-600 flex items-center justify-center text-white font-bold text-lg shadow-lg">
+          <i class="fa-solid fa-shield-halved"></i>
+        </div>
+        <div>
+          <h1 class="text-lg font-bold">HostelFix Smart Gate Pass</h1>
+          <p class="text-xs text-slate-400">Two-Step Gate Pass Verification Portal</p>
+        </div>
+      </div>
+      <span id="headerBadge" class="px-3 py-1 rounded-full text-xs font-bold ${pass.id ? 'bg-indigo-500/20 text-indigo-300' : 'bg-slate-800 text-slate-300'}">${pass.status || 'Validating...'}</span>
+    </div>
+
+    <div id="loadingState" class="${pass.id ? 'hidden' : ''} py-12 text-center space-y-3">
+      <i class="fa-solid fa-circle-notch fa-spin text-3xl text-indigo-400"></i>
+      <p class="text-sm text-slate-400">Verifying secure QR cryptographic token...</p>
+    </div>
+
+    <div id="errorState" class="hidden py-8 text-center space-y-4">
+      <div class="w-16 h-16 rounded-full bg-rose-500/20 text-rose-400 flex items-center justify-center mx-auto text-2xl">
+        <i class="fa-solid fa-triangle-exclamation"></i>
+      </div>
+      <h2 id="errorTitle" class="text-base font-bold text-rose-400">Invalid or Expired QR</h2>
+      <p id="errorMsg" class="text-xs text-slate-400"></p>
+    </div>
+
+    <div id="passDetails" class="${pass.id ? '' : 'hidden'} space-y-5">
+      <div class="flex items-center gap-4 bg-slate-800/80 p-4 rounded-2xl border border-slate-700/50">
+        <div id="studentPhotoContainer" class="w-16 h-16 rounded-2xl bg-slate-700 overflow-hidden shrink-0 border border-slate-600 flex items-center justify-center">
+          ${pass.studentPhoto ? `<img src="${pass.studentPhoto}" class="w-full h-full object-cover">` : '<i class="fa-solid fa-user text-2xl text-slate-400"></i>'}
+        </div>
+        <div class="min-w-0 flex-1">
+          <h2 id="studentName" class="text-base font-bold text-white truncate">${studentName}</h2>
+          <p id="studentReg" class="text-xs text-indigo-300 font-mono">${regNo}</p>
+          <p id="studentRoom" class="text-xs text-slate-400">${room}</p>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-2 gap-2 text-xs">
+        <div class="bg-slate-800/50 p-3 rounded-xl border border-slate-700/40">
+          <span class="text-slate-400 block text-[10px]">Pass ID</span>
+          <span id="passIdText" class="font-mono font-bold text-white">${pass.id || ''}</span>
+        </div>
+        <div class="bg-slate-800/50 p-3 rounded-xl border border-slate-700/40">
+          <span class="text-slate-400 block text-[10px]">Certificate ID</span>
+          <span id="certIdText" class="font-mono font-bold text-emerald-400 text-[11px] truncate block">${pass.certificateId || ''}</span>
+        </div>
+        <div class="bg-slate-800/50 p-3 rounded-xl border border-slate-700/40">
+          <span class="text-slate-400 block text-[10px]">Leave Date</span>
+          <span id="gateDateText" class="font-semibold text-white">${pass.gateDate || ''}</span>
+        </div>
+        <div class="bg-slate-800/50 p-3 rounded-xl border border-slate-700/40">
+          <span class="text-slate-400 block text-[10px]">Expected Return</span>
+          <span id="returnDateText" class="font-semibold text-amber-400">${pass.returnDate || ''}</span>
+        </div>
+      </div>
+
+      <div id="twoStepStatusBox" class="p-3.5 rounded-2xl bg-slate-800/90 border border-slate-700 space-y-2 text-xs">
+        <div class="flex items-center justify-between">
+          <span class="text-slate-400 flex items-center gap-1.5"><i class="fa-solid fa-user-shield text-indigo-400"></i> Admin Status:</span>
+          <span id="adminStatusBadge" class="font-bold text-emerald-400">Approved</span>
+        </div>
+        <div class="flex items-center justify-between">
+          <span class="text-slate-400 flex items-center gap-1.5"><i class="fa-solid fa-door-open text-blue-400"></i> Security Exit:</span>
+          <span id="securityStatusBadge" class="font-bold">Pending</span>
+        </div>
+        <div class="flex items-center justify-between">
+          <span class="text-slate-400 flex items-center gap-1.5"><i class="fa-solid fa-hotel text-purple-400"></i> Warden Arrival:</span>
+          <span id="wardenStatusBadge" class="font-bold">Pending</span>
+        </div>
+      </div>
+
+      <div class="space-y-3 pt-2">
+        <div class="flex gap-2">
+          <button id="roleSecurityBtn" onclick="selectRole('security')" class="flex-1 py-2 rounded-xl text-xs font-bold bg-indigo-600 text-white shadow-sm transition-all">
+            <i class="fa-solid fa-person-military-safety mr-1"></i> Security Gate Mode
+          </button>
+          <button id="roleWardenBtn" onclick="selectRole('warden')" class="flex-1 py-2 rounded-xl text-xs font-bold bg-slate-800 text-slate-300 hover:bg-slate-700 transition-all">
+            <i class="fa-solid fa-building-user mr-1"></i> Warden Mode
+          </button>
+        </div>
+
+        <div id="securityActions" class="space-y-2">
+          <button onclick="submitVerification('security', 'APPROVE')" class="w-full py-3.5 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm shadow-lg flex items-center justify-center gap-2 transition-all">
+            <i class="fa-solid fa-check"></i> APPROVE EXIT (Student Crossing Gate)
+          </button>
+          <button onclick="submitVerification('security', 'REJECT')" class="w-full py-2.5 rounded-2xl bg-rose-600/20 hover:bg-rose-600/30 text-rose-300 font-semibold text-xs border border-rose-500/30 flex items-center justify-center gap-2 transition-all">
+            <i class="fa-solid fa-xmark"></i> REJECT EXIT
+          </button>
+        </div>
+
+        <div id="wardenActions" class="hidden space-y-2">
+          <div id="wardenBlockedAlert" class="hidden p-3 rounded-xl bg-rose-500/20 border border-rose-500/40 text-rose-300 text-xs font-semibold text-center">
+            <i class="fa-solid fa-triangle-exclamation mr-1"></i> Security Verification Required: Student has not been verified as having crossed the gate yet.
+          </div>
+          <button id="wardenApproveBtn" onclick="submitVerification('warden', 'APPROVE')" class="w-full py-3.5 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-sm shadow-lg flex items-center justify-center gap-2 transition-all">
+            <i class="fa-solid fa-hotel"></i> APPROVE HOSTEL ARRIVAL
+          </button>
+          <button id="wardenRejectBtn" onclick="submitVerification('warden', 'REJECT')" class="w-full py-2.5 rounded-2xl bg-amber-600/20 hover:bg-amber-600/30 text-amber-300 font-semibold text-xs border border-amber-500/30 flex items-center justify-center gap-2 transition-all">
+            <i class="fa-solid fa-circle-xmark"></i> REJECT HOSTEL ARRIVAL (OUTSIDE_NOT_RETURNED)
+          </button>
+        </div>
+
+        <div id="completedMessage" class="hidden p-4 rounded-2xl bg-emerald-500/20 border border-emerald-500/40 text-center space-y-1">
+          <i class="fa-solid fa-circle-check text-2xl text-emerald-400"></i>
+          <p class="font-bold text-emerald-300 text-sm">Gate Pass Already Completed</p>
+          <p class="text-xs text-slate-400">Both Security exit and Warden arrival have been successfully verified.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const token = '${token}';
+    let currentPass = null;
+    let selectedMode = 'security';
+
+    async function loadPassPreview() {
+      try {
+        const res = await fetch('/api/gatepass/verify-preview', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token, role: selectedMode })
+        });
+        const data = await res.json();
+        document.getElementById('loadingState').classList.add('hidden');
+
+        if (!res.ok || !data.gatePass) {
+          showError(data.message || data.error || 'Gate Pass not found.');
+          return;
+        }
+
+        currentPass = data.gatePass;
+        renderPassUI(currentPass);
+      } catch (err) {
+        document.getElementById('loadingState').classList.add('hidden');
+        showError('Network error connecting to verification server.');
+      }
+    }
+
+    function renderPassUI(pass) {
+      document.getElementById('passDetails').classList.remove('hidden');
+      document.getElementById('errorState').classList.add('hidden');
+
+      document.getElementById('studentName').textContent = pass.student || 'Student';
+      document.getElementById('studentReg').textContent = pass.registrationNumber || 'REG-N/A';
+      document.getElementById('studentRoom').textContent = (pass.hostelBlock || 'Block A') + ' • Room ' + (pass.roomNumber || 'N/A');
+      document.getElementById('passIdText').textContent = pass.id;
+      document.getElementById('certIdText').textContent = pass.certificateId || 'CERT-N/A';
+      document.getElementById('gateDateText').textContent = pass.gateDate || '—';
+      document.getElementById('returnDateText').textContent = pass.returnDate || '—';
+
+      if (pass.studentPhoto) {
+        document.getElementById('studentPhotoContainer').innerHTML = '<img src="' + pass.studentPhoto + '" class="w-full h-full object-cover rounded-2xl">';
+      }
+
+      const secDone = pass.securityVerified || /^(outside|warden_pending|outside_not_returned|completed)$/i.test(pass.status);
+      const warDone = pass.wardenVerified || pass.status === 'COMPLETED';
+
+      document.getElementById('securityStatusBadge').innerHTML = secDone
+        ? '<span class="text-emerald-400"><i class="fa-solid fa-circle-check mr-1"></i>Exit Approved</span>'
+        : pass.securityStatus === 'REJECTED'
+          ? '<span class="text-rose-400"><i class="fa-solid fa-circle-xmark mr-1"></i>Exit Rejected</span>'
+          : '<span class="text-amber-400"><i class="fa-solid fa-clock mr-1"></i>Pending</span>';
+
+      document.getElementById('wardenStatusBadge').innerHTML = warDone
+        ? '<span class="text-emerald-400"><i class="fa-solid fa-circle-check mr-1"></i>Arrival Confirmed</span>'
+        : pass.status === 'OUTSIDE_NOT_RETURNED'
+          ? '<span class="text-amber-400"><i class="fa-solid fa-triangle-exclamation mr-1"></i>Not Returned</span>'
+          : '<span class="text-slate-400"><i class="fa-solid fa-clock mr-1"></i>Pending</span>';
+
+      const headerBadge = document.getElementById('headerBadge');
+      headerBadge.textContent = pass.status;
+      if (pass.status === 'COMPLETED') {
+        headerBadge.className = 'px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30';
+        document.getElementById('securityActions').classList.add('hidden');
+        document.getElementById('wardenActions').classList.add('hidden');
+        document.getElementById('completedMessage').classList.remove('hidden');
+      } else if (pass.status === 'OUTSIDE') {
+        headerBadge.className = 'px-3 py-1 rounded-full text-xs font-bold bg-blue-500/20 text-blue-300 border border-blue-500/30';
+      }
+
+      updateModeUI();
+    }
+
+    function selectRole(role) {
+      selectedMode = role;
+      const secBtn = document.getElementById('roleSecurityBtn');
+      const warBtn = document.getElementById('roleWardenBtn');
+      if (role === 'security') {
+        secBtn.className = 'flex-1 py-2 rounded-xl text-xs font-bold bg-indigo-600 text-white shadow-sm transition-all';
+        warBtn.className = 'flex-1 py-2 rounded-xl text-xs font-bold bg-slate-800 text-slate-300 hover:bg-slate-700 transition-all';
+      } else {
+        warBtn.className = 'flex-1 py-2 rounded-xl text-xs font-bold bg-indigo-600 text-white shadow-sm transition-all';
+        secBtn.className = 'flex-1 py-2 rounded-xl text-xs font-bold bg-slate-800 text-slate-300 hover:bg-slate-700 transition-all';
+      }
+      updateModeUI();
+    }
+
+    function updateModeUI() {
+      if (!currentPass || currentPass.status === 'COMPLETED') return;
+      const secActions = document.getElementById('securityActions');
+      const warActions = document.getElementById('wardenActions');
+      const warBlock = document.getElementById('wardenBlockedAlert');
+      const warApprove = document.getElementById('wardenApproveBtn');
+      const warReject = document.getElementById('wardenRejectBtn');
+
+      if (selectedMode === 'security') {
+        secActions.classList.remove('hidden');
+        warActions.classList.add('hidden');
+      } else {
+        secActions.classList.add('hidden');
+        warActions.classList.remove('hidden');
+
+        const secDone = currentPass.securityVerified || /^(outside|warden_pending|outside_not_returned|completed)$/i.test(currentPass.status);
+        if (!secDone) {
+          warBlock.classList.remove('hidden');
+          warApprove.disabled = true;
+          warApprove.classList.add('opacity-50', 'cursor-not-allowed');
+          warReject.disabled = true;
+          warReject.classList.add('opacity-50', 'cursor-not-allowed');
+        } else {
+          warBlock.classList.add('hidden');
+          warApprove.disabled = false;
+          warApprove.classList.remove('opacity-50', 'cursor-not-allowed');
+          warReject.disabled = false;
+          warReject.classList.remove('opacity-50', 'cursor-not-allowed');
+        }
+      }
+    }
+
+    async function submitVerification(role, action) {
+      let reason = '';
+      if (action === 'REJECT') {
+        reason = prompt('Please enter the reason for rejection:', role === 'security' ? 'Student details mismatch / Unauthorized' : 'Student did not arrive at hostel.');
+        if (reason === null) return;
+      }
+
+      const endpoint = role === 'security' ? '/api/gatepass/security/verify' : '/api/gatepass/warden/verify';
+      try {
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            token,
+            action,
+            role,
+            rejectionReason: reason,
+            guardName: 'Gate Security Guard',
+            wardenName: 'Hostel Warden'
+          })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          alert('Error: ' + (data.message || data.error || 'Verification failed.'));
+          return;
+        }
+        alert(data.message || 'Verification updated successfully!');
+        if (data.gatePass) {
+          currentPass = data.gatePass;
+          renderPassUI(currentPass);
+        }
+      } catch (err) {
+        alert('Network error submitting verification.');
+      }
+    }
+
+    function showError(msg) {
+      document.getElementById('errorState').classList.remove('hidden');
+      document.getElementById('errorMsg').textContent = msg;
+    }
+
+    loadPassPreview();
+  </script>
+</body>
+</html>`);
 });
 
-app.post('/api/gatepass/warden/approve', (req, res) => {
-  const data = readData(); const gatePass = data.gatePasses.find((item) => item.id === (req.body.id || req.body.gatePassId));
-  if (!gatePass) return res.status(404).json({ error: 'Gate pass not found.' });
-  if (!gatePass.inTime) return res.status(400).json({ error: 'The student has not returned through the gate yet.' });
-  const approved = req.body.approved !== false;
-  gatePass.wardenId = String(req.body.wardenId || ''); gatePass.wardenName = String(req.body.wardenName || 'Warden'); gatePass.wardenRemarks = String(req.body.remarks || ''); gatePass.wardenVerified = approved; gatePass.verifiedTime = new Date().toISOString();
-  gatePass.status = approved ? 'COMPLETED' : 'WARDEN VERIFICATION REJECTED'; gatePass.workflowStatus = gatePass.status;
-  addGatePassAudit(data, gatePass, approved ? 'Warden Approved Arrival' : 'Warden Rejected Verification', { id: gatePass.wardenId, name: gatePass.wardenName, role: 'warden', ip: req.ip }, gatePass.wardenRemarks);
-  createGatePassNotification(data, gatePass, 'gate-pass-completed', approved ? 'Gate Pass Completed' : 'Warden Verification Rejected', approved ? 'Your gate pass workflow is complete.' : 'Your hostel arrival verification was rejected. Please contact the warden.');
-  writeData(data); res.json(gatePass);
-});
-
-app.get('/qr/:token', (req, res) => {
-  const token = String(req.params.token || '').replace(/'/g, '');
-  res.type('html').send(`<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Gate Pass Scan</title><style>body{font-family:system-ui;background:#f1f5f9;display:grid;place-items:center;min-height:100vh;margin:0;color:#0f172a}.card{max-width:420px;background:white;border-radius:20px;padding:28px;box-shadow:0 12px 30px #0f172a20}button{width:100%;border:0;border-radius:10px;padding:14px;background:#0f766e;color:white;font-weight:700;font-size:16px}.muted{color:#64748b}.result{margin-top:16px;padding:14px;border-radius:10px;background:#f8fafc}</style><main class="card"><h1>Hostel Gate Pass</h1><p class="muted">Security scan verification. The action is recorded securely.</p><button id="scan">Record scan</button><div id="result" class="result">Ready to validate QR code.</div></main><script>document.getElementById('scan').onclick=async()=>{const r=document.getElementById('result');r.textContent='Validating…';const x=await fetch('/api/gatepass/scan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:'${token}',guardId:'QR Guard',location:'Main Gate',device:navigator.userAgent})});const d=await x.json();r.textContent=d.message||d.error||'Unable to scan.';if(d.gatePass)r.innerHTML+='<br><br><b>'+d.gatePass.student+'</b> · '+d.gatePass.status;};</script>`);
-});
 
 app.get('/api/laundry-requests', (req, res) => {
   const data = readData();
@@ -1464,6 +2412,123 @@ app.put('/api/technicians/:id', (req, res) => {
   res.json(sanitizeUser(technician));
 });
 
+// Full Complaint Dynamic Update
+app.put('/api/complaints/:id', (req, res) => {
+  const data = readData();
+  const complaint = data.complaints.find((c) => c.id === req.params.id);
+  if (!complaint) {
+    return res.status(404).json({ error: 'Complaint not found' });
+  }
+
+  const { title, description, category, priority, roomNumber, hostelBlock, assignedTo, technician, status, notes } = req.body;
+  if (title) complaint.title = title.trim();
+  if (description) complaint.description = description.trim();
+  if (category) complaint.category = category.trim();
+  if (priority) complaint.priority = priority.trim();
+  if (roomNumber) complaint.roomNumber = roomNumber.trim();
+  if (hostelBlock) complaint.hostelBlock = hostelBlock.trim();
+  if (assignedTo !== undefined) complaint.assignedTo = assignedTo;
+  if (technician !== undefined) complaint.technician = technician;
+  if (notes !== undefined) complaint.notes = notes;
+  if (status) {
+    complaint.status = status;
+    complaint.timeline = Array.from(new Set([...(complaint.timeline || []), status]));
+  }
+
+  writeData(data);
+  if (req.io) {
+    req.io.emit('complaint.updated', complaint);
+  }
+  res.json(complaint);
+});
+
+// Dynamic Student Management
+app.post('/api/students', (req, res) => {
+  const data = readData();
+  const { name, email, password, registrationNumber, hostelBlock, roomNumber, phone } = req.body;
+  if (!name || !email) {
+    return res.status(400).json({ error: 'Name and email are required' });
+  }
+  const normEmail = normalizeEmail(email);
+  if (data.users.some(u => normalizeEmail(u.email) === normEmail)) {
+    return res.status(409).json({ error: 'Student with this email already exists' });
+  }
+  const student = {
+    userId: generateUserId(data.users),
+    name: name.trim(),
+    email: normEmail,
+    password: password || 'student123',
+    role: 'student',
+    registrationNumber: registrationNumber || `REG-${Date.now().toString().slice(-4)}`,
+    hostelBlock: hostelBlock || 'Block A',
+    roomNumber: roomNumber || '101',
+    phone: phone || '+91 98765 00000',
+    createdAt: new Date().toISOString()
+  };
+  data.users.push(student);
+  writeData(data);
+  res.status(201).json(sanitizeUser(student));
+});
+
+app.put('/api/students/:id', (req, res) => {
+  const data = readData();
+  const student = data.users.find(u => (u.userId === req.params.id || u.id === req.params.id || normalizeEmail(u.email) === normalizeEmail(req.params.id)) && u.role === 'student');
+  if (!student) {
+    return res.status(404).json({ error: 'Student not found' });
+  }
+  const { name, email, password, registrationNumber, hostelBlock, roomNumber, phone } = req.body;
+  if (name) student.name = name.trim();
+  if (email) student.email = normalizeEmail(email);
+  if (password) student.password = password;
+  if (registrationNumber) student.registrationNumber = registrationNumber.trim();
+  if (hostelBlock) student.hostelBlock = hostelBlock.trim();
+  if (roomNumber) student.roomNumber = roomNumber.trim();
+  if (phone) student.phone = phone.trim();
+
+  writeData(data);
+  res.json(sanitizeUser(student));
+});
+
+app.delete('/api/students/:id', (req, res) => {
+  const data = readData();
+  const index = data.users.findIndex(u => (u.userId === req.params.id || u.id === req.params.id || normalizeEmail(u.email) === normalizeEmail(req.params.id)) && u.role === 'student');
+  if (index === -1) {
+    return res.status(404).json({ error: 'Student not found' });
+  }
+  data.users.splice(index, 1);
+  writeData(data);
+  res.json({ message: 'Student removed successfully' });
+});
+
+// Generic User Dynamic Update & Delete
+app.put('/api/users/:id', (req, res) => {
+  const data = readData();
+  const user = data.users.find(u => u.userId === req.params.id || u.id === req.params.id || normalizeEmail(u.email) === normalizeEmail(req.params.id));
+  if (!user) {
+    return res.status(404).json({ error: 'User not found' });
+  }
+  const fields = ['name', 'email', 'phone', 'hostelBlock', 'roomNumber', 'registrationNumber', 'specialization', 'status', 'role', 'password'];
+  fields.forEach(f => {
+    if (req.body[f] !== undefined) {
+      if (f === 'email') user.email = normalizeEmail(req.body.email);
+      else user[f] = req.body[f];
+    }
+  });
+  writeData(data);
+  res.json(sanitizeUser(user));
+});
+
+app.delete('/api/users/:id', (req, res) => {
+  const data = readData();
+  const index = data.users.findIndex(u => u.userId === req.params.id || u.id === req.params.id || normalizeEmail(u.email) === normalizeEmail(req.params.id));
+  if (index === -1) {
+    return res.status(404).json({ error: 'User not found' });
+  }
+  data.users.splice(index, 1);
+  writeData(data);
+  res.json({ message: 'User deleted successfully' });
+});
+
 app.get('/api/summary', (req, res) => {
   const data = readData();
   const complaints = data.complaints;
@@ -1483,29 +2548,68 @@ app.get('/api/summary', (req, res) => {
 
 app.get('/api/admin-settings', (req, res) => {
   const data = readData();
-  res.json(data.adminSettings);
+  const config = getTelegramConfig(data.adminSettings);
+  res.json({
+    ...data.adminSettings,
+    telegramConfigured: Boolean(config),
+    telegramChatId: data.adminSettings?.telegramChatId || process.env.TELEGRAM_CHAT_ID || '',
+    telegramBotToken: data.adminSettings?.telegramBotToken ? (data.adminSettings.telegramBotToken.slice(0, 6) + '...' + data.adminSettings.telegramBotToken.slice(-4)) : (process.env.TELEGRAM_BOT_TOKEN ? (process.env.TELEGRAM_BOT_TOKEN.slice(0, 6) + '...' + process.env.TELEGRAM_BOT_TOKEN.slice(-4)) : '')
+  });
 });
 
 app.put('/api/admin-settings', (req, res) => {
   const data = readData();
   const alertMinConfidence = Math.min(99, Math.max(1, Math.round(Number(req.body.alertMinConfidence ?? data.adminSettings.alertMinConfidence ?? 50) || 50)));
-  data.adminSettings = {
+  const updatedSettings = {
     ...data.adminSettings,
     alertCameraName: String(req.body.alertCameraName || data.adminSettings.alertCameraName || 'Hostel CCTV Camera 3').trim(),
     alertCameraLocation: String(req.body.alertCameraLocation || data.adminSettings.alertCameraLocation || 'Block A - Ground Floor').trim(),
     alertMinConfidence
   };
+
+  if (req.body.telegramBotToken !== undefined && !String(req.body.telegramBotToken).includes('...')) {
+    updatedSettings.telegramBotToken = String(req.body.telegramBotToken || '').trim();
+  }
+  if (req.body.telegramChatId !== undefined) {
+    updatedSettings.telegramChatId = String(req.body.telegramChatId || '').trim();
+  }
+
+  data.adminSettings = updatedSettings;
   writeData(data);
-  res.json(data.adminSettings);
+
+  const config = getTelegramConfig(data.adminSettings);
+  res.json({
+    ...data.adminSettings,
+    telegramConfigured: Boolean(config),
+    telegramChatId: data.adminSettings?.telegramChatId || process.env.TELEGRAM_CHAT_ID || '',
+    telegramBotToken: data.adminSettings?.telegramBotToken ? (data.adminSettings.telegramBotToken.slice(0, 6) + '...' + data.adminSettings.telegramBotToken.slice(-4)) : (process.env.TELEGRAM_BOT_TOKEN ? (process.env.TELEGRAM_BOT_TOKEN.slice(0, 6) + '...' + process.env.TELEGRAM_BOT_TOKEN.slice(-4)) : '')
+  });
+});
+
+app.post('/api/test-telegram-alert', async (req, res) => {
+  try {
+    const data = readData();
+    const testConfig = {
+      telegramBotToken: req.body.telegramBotToken && !req.body.telegramBotToken.includes('...') ? req.body.telegramBotToken : data.adminSettings?.telegramBotToken,
+      telegramChatId: req.body.telegramChatId || data.adminSettings?.telegramChatId
+    };
+    const result = await testTelegramConnection(testConfig);
+    res.json(result);
+  } catch (error) {
+    console.error('Telegram test failed:', error.message);
+    res.status(400).json({ error: error.message || 'Telegram test failed. Please verify Bot Token and Chat ID.' });
+  }
 });
 
 app.get('/api/alert-history', (req, res) => {
   const data = readData();
-  res.json(data.alertHistory.slice().sort((first, second) => new Date(second.createdAt) - new Date(first.createdAt)));
+  const history = Array.isArray(data.alertHistory) ? data.alertHistory : [];
+  res.json(history.slice().sort((first, second) => new Date(second.createdAt) - new Date(first.createdAt)));
 });
 
 app.get('/api/telegram-status', (req, res) => {
-  res.json({ configured: Boolean(getTelegramConfig()) });
+  const data = readData();
+  res.json({ configured: Boolean(getTelegramConfig(data.adminSettings)) });
 });
 
 app.get('/api/inventory', (req, res) => {
@@ -1563,6 +2667,9 @@ async function sendTelegramEmergencyAlert(req, res) {
     return res.status(202).json({ status: 'cooldown', message: 'Alert already sent for this detection event.', retryAfterSeconds: Math.ceil((ALERT_COOLDOWN_MS - elapsed) / 1000) });
   }
 
+  // Always set cooldown to prevent tight loop retries from frontend frames
+  alertCooldowns.set(cooldownKey, Date.now());
+
   const createdAt = new Date();
   const timestamp = createdAt.toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' });
   const alertId = `ALT-${Date.now()}-${Math.floor(Math.random() * 900 + 100)}`;
@@ -1572,6 +2679,8 @@ async function sendTelegramEmergencyAlert(req, res) {
   } catch (error) {
     return res.status(400).json({ error: error.message });
   }
+
+  const telegramConfig = getTelegramConfig(data.adminSettings);
   const alert = {
     id: alertId,
     detectionType: normalizedType === 'fire'
@@ -1587,10 +2696,23 @@ async function sendTelegramEmergencyAlert(req, res) {
     time: createdAt.toTimeString().slice(0, 8),
     createdAt: createdAt.toISOString(),
     imagePath: snapshot.publicPath,
-    telegramStatus: 'Failed',
+    telegramStatus: telegramConfig ? 'Pending' : 'Not Configured',
     telegramMessageId: null,
-    status: 'Failed'
+    status: telegramConfig ? 'Pending' : 'Logged'
   };
+
+  if (!telegramConfig) {
+    data.alertHistory = Array.isArray(data.alertHistory) ? data.alertHistory : [];
+    data.alertHistory.push(alert);
+    writeData(data);
+    io.emit('emergency-alert', alert);
+    return res.status(200).json({
+      success: true,
+      message: 'Emergency alert logged locally. Telegram is not configured in Admin Settings.',
+      alert,
+      telegramConfigured: false
+    });
+  }
 
   try {
     const telegram = await sendTelegramAlert({
@@ -1599,24 +2721,33 @@ async function sendTelegramEmergencyAlert(req, res) {
       cameraName: camera,
       location,
       imagePath: snapshot.diskPath,
-      timestamp
+      timestamp,
+      customConfig: data.adminSettings
     });
     alert.telegramStatus = 'Sent';
     alert.telegramMessageId = telegram.messageId;
     alert.status = 'Sent';
     alert.message = telegram.message;
+    data.alertHistory = Array.isArray(data.alertHistory) ? data.alertHistory : [];
     data.alertHistory.push(alert);
     writeData(data);
-    alertCooldowns.set(cooldownKey, Date.now());
     io.emit('emergency-alert', alert);
-    return res.status(201).json({ message: 'Telegram emergency alert sent successfully.', alert });
+    return res.status(201).json({ message: 'Telegram emergency alert sent successfully.', alert, telegramConfigured: true });
   } catch (error) {
+    alert.telegramStatus = 'Failed';
+    alert.status = 'Failed';
     alert.error = error.message;
+    data.alertHistory = Array.isArray(data.alertHistory) ? data.alertHistory : [];
     data.alertHistory.push(alert);
     writeData(data);
     io.emit('emergency-alert', alert);
-    console.error('Telegram emergency alert failed:', error.message);
-    return res.status(502).json({ error: 'Unable to send Telegram emergency alert.', alert });
+    console.error('Telegram emergency alert delivery failed:', error.message);
+    return res.status(200).json({
+      success: false,
+      warning: `Alert logged locally, but Telegram delivery failed: ${error.message}`,
+      alert,
+      telegramConfigured: true
+    });
   }
 }
 
@@ -1906,23 +3037,9 @@ io.on('connection', (socket) => {
   });
 });
 
-const os = require('os');
 const port = process.env.PORT || 5000;
 server.listen(port, () => {
-  console.log(`\n==================================================`);
-  console.log(`HostelFix Server is RUNNING!`);
-  console.log(`Local Access: http://localhost:${port}`);
-  console.log(`Mobile / Wi-Fi Access URLs:`);
-  
-  const interfaces = os.networkInterfaces();
-  for (const name of Object.keys(interfaces)) {
-    for (const iface of interfaces[name]) {
-      if (iface.family === 'IPv4' && !iface.internal) {
-        console.log(`  -> http://${iface.address}:${port}`);
-      }
-    }
-  }
-  console.log(`==================================================\n`);
+  console.log(`HostelFix Server is running at http://localhost:${port}`);
 });
 
 app.use((err, req, res, next) => {

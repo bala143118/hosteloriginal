@@ -63,7 +63,7 @@
     return normalized === 'smoke' || normalized.includes('smoke');
   }
 
-  function getHazardPrediction(predictions, threshold = 0.05) {
+  function getHazardPrediction(predictions, threshold = 0.50) {
     if (!Array.isArray(predictions)) {
       return null;
     }
@@ -103,7 +103,7 @@
     };
   }
 
-  function shouldTriggerFireDetection(predictions, threshold = 0.05) {
+  function shouldTriggerFireDetection(predictions, threshold = 0.50) {
     if (!Array.isArray(predictions)) {
       return false;
     }

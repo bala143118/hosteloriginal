@@ -61,9 +61,9 @@ def main():
                         crowd_results = crowd_model.predict(
                             source=np.array(image),
                             classes=[0],
-                            conf=0.2,
+                            conf=0.40,
                             iou=0.45,
-                            imgsz=960,
+                            imgsz=640,
                             max_det=30,
                             device='cpu',
                             verbose=False
@@ -72,7 +72,7 @@ def main():
             result = {
                 'success': True,
                 'result': {
-                    **extract_predictions(output, model),
+                    **extract_predictions(output, model, image),
                     'crowd': {
                         'personCount': len(people),
                         'threshold': 20,

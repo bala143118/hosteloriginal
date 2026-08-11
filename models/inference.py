@@ -279,45 +279,107 @@ def parse_dict_predictions(output, names=None):
     return None
 
 
-def extract_predictions(output, model):
+def filter_false_positive_detections(predictions, image=None):
+    if not isinstance(predictions, list):
+        return predictions
+
+    filtered = []
+    for det in predictions:
+        if not isinstance(det, dict):
+            filtered.append(det)
+            continue
+
+        label = str(det.get('label', '')).lower()
+        conf = float(det.get('confidence', 0))
+        box = det.get('box')
+
+        # Filter out low-confidence noise
+        if 'smoke' in label and conf < 0.52:
+            continue
+        if 'fire' in label and conf < 0.50:
+            continue
+
+        # Texture and gradient variance check to discard solid walls / plain ceilings
+        if image is not None and isinstance(box, (list, tuple)) and len(box) >= 4:
+            try:
+                img_w, img_h = image.size if hasattr(image, 'size') else (image.shape[1], image.shape[0])
+                bx, by, bw, bh = box[:4]
+                if max(bx, by, bw, bh) <= 1.0:
+                    x1 = max(0, int(bx * img_w))
+                    y1 = max(0, int(by * img_h))
+                    x2 = min(img_w, int((bx + bw) * img_w))
+                    y2 = min(img_h, int((by + bh) * img_h))
+                else:
+                    x1 = max(0, int(bx))
+                    y1 = max(0, int(by))
+                    x2 = min(img_w, int(bx + bw))
+                    y2 = min(img_h, int(by + bh))
+
+                if (x2 - x1) > 12 and (y2 - y1) > 12:
+                    crop = np.array(image.crop((x1, y1, x2, y2))) if hasattr(image, 'crop') else np.array(image)[y1:y2, x1:x2]
+                    if crop.size > 0:
+                        gray = crop if crop.ndim == 2 else np.mean(crop, axis=2).astype(np.uint8)
+                        std_dev = float(np.std(gray))
+                        # A flat wall/ceiling has virtually no contrast or texture (std_dev < 9.5)
+                        if 'smoke' in label and std_dev < 9.5:
+                            continue
+            except Exception:
+                pass
+
+        filtered.append(det)
+    return filtered
+
+
+def extract_predictions(output, model, image=None):
     output = normalize_output(output)
     names = get_names(model, output)
 
+    res = None
     if isinstance(output, dict):
         parsed = parse_dict_predictions(output, names)
         if parsed is not None:
-            return parsed
+            res = parsed
 
-    object_parsed = parse_object_predictions(output, names)
-    if object_parsed is not None:
-        return object_parsed
+    if res is None:
+        object_parsed = parse_object_predictions(output, names)
+        if object_parsed is not None:
+            res = object_parsed
 
-    tensor_parsed = parse_tensor_predictions(output, names)
-    if tensor_parsed is not None:
-        return tensor_parsed
+    if res is None:
+        tensor_parsed = parse_tensor_predictions(output, names)
+        if tensor_parsed is not None:
+            res = tensor_parsed
 
-    if isinstance(output, (list, tuple)) and len(output) > 0:
+    if res is None and isinstance(output, (list, tuple)) and len(output) > 0:
         first = output[0]
         tensor_parsed = parse_tensor_predictions(first, names)
         if tensor_parsed is not None:
-            return tensor_parsed
-        if isinstance(first, dict):
+            res = tensor_parsed
+        elif isinstance(first, dict):
             parsed = parse_dict_predictions(first, names)
             if parsed is not None:
-                return parsed
-            object_parsed = parse_object_predictions(first, names)
-            if object_parsed is not None:
-                return object_parsed
+                res = parsed
+            else:
+                object_parsed = parse_object_predictions(first, names)
+                if object_parsed is not None:
+                    res = object_parsed
         else:
             object_parsed = parse_object_predictions(first, names)
             if object_parsed is not None:
-                return object_parsed
+                res = object_parsed
 
-    if isinstance(output, dict):
-        return {'predictions': [output]}
-    if isinstance(output, list):
-        return {'predictions': output}
-    return {'predictions': [str(output)]}
+    if res is None:
+        if isinstance(output, dict):
+            res = {'predictions': [output]}
+        elif isinstance(output, list):
+            res = {'predictions': output}
+        else:
+            res = {'predictions': [str(output)]}
+
+    if isinstance(res, dict) and 'predictions' in res:
+        res['predictions'] = filter_false_positive_detections(res['predictions'], image)
+
+    return res
 
 
 def load_model(path):
@@ -342,7 +404,7 @@ def run_model(model, input_tensor, image, loader_type):
             results = model.predict(
                 source=image,
                 imgsz=960,
-                conf=0.2,
+                conf=0.50,
                 iou=0.45,
                 max_det=10,
                 device='cpu',

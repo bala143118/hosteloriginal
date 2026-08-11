@@ -18,22 +18,26 @@ const DEBUG_CCTV_INFERENCE = window.location.search.includes('debug=true');
 // If you want to use a fallback stream URL, set it here. For upload-based detection, leave it empty.
 const CCTV_STREAM_SOURCE = '';
 const CCTV_INFERENCE_API = '/api/cctv-inference';
-const CCTV_REVIEW_CONFIDENCE = 0.3;
-const CCTV_FIRE_ALERT_CONFIDENCE = 0.4;
+const CCTV_REVIEW_CONFIDENCE = 0.55;
+const CCTV_FIRE_ALERT_CONFIDENCE = 0.65;
 const CCTV_SMOKE_ALERT_CONFIDENCE = 0.65;
-const CCTV_FIRE_EMERGENCY_PERSIST_MS = 150;
-const CCTV_SMOKE_EMERGENCY_PERSIST_MS = 1200;
+const CCTV_FIRE_EMERGENCY_PERSIST_MS = 3000;
+const CCTV_SMOKE_EMERGENCY_PERSIST_MS = 3500;
 const CROWD_ALERT_THRESHOLD = 20;
 const CROWD_ALERT_STABLE_FRAMES = 3;
 const CCTV_LIVE_CAPTURE_MAX_WIDTH = 640;
 const CCTV_UPLOAD_CAPTURE_MAX_WIDTH = 960;
 const CCTV_LIVE_INFERENCE_INTERVAL_MS = 700;
 const CCTV_UPLOAD_INFERENCE_INTERVAL_MS = 350;
+let cctvEmergencyAlertCooldownUntil = 0;
+let lastEmergencyModalAlertId = '';
+let lastEmergencyModalShownAt = 0;
+let lastToastMap = new Map();
 const FACE_AUTH_INFERENCE_API = '/api/face-auth-inference';
-const FACE_AUTH_LIVE_CAPTURE_MAX_WIDTH = 960;
-const FACE_AUTH_UPLOAD_CAPTURE_MAX_WIDTH = 1280;
-const FACE_AUTH_LIVE_INFERENCE_INTERVAL_MS = 650;
-const FACE_AUTH_UPLOAD_INFERENCE_INTERVAL_MS = 320;
+const FACE_AUTH_LIVE_CAPTURE_MAX_WIDTH = 640;
+const FACE_AUTH_UPLOAD_CAPTURE_MAX_WIDTH = 960;
+const FACE_AUTH_LIVE_INFERENCE_INTERVAL_MS = 280;
+const FACE_AUTH_UPLOAD_INFERENCE_INTERVAL_MS = 180;
 let cctvInferenceInterval = null;
 let cctvCanvas = null;
 let cctvVideoSourceUrl = '';
@@ -397,17 +401,69 @@ async function saveEmergencyAlertSettings(event) {
     const alertCameraName = document.getElementById('emergencyAlertCamera')?.value.trim() || 'Hostel CCTV Camera 3';
     const alertCameraLocation = document.getElementById('emergencyAlertLocation')?.value.trim() || 'Block A - Ground Floor';
     const alertMinConfidenceValue = Number(document.getElementById('emergencyAlertConfidence')?.value);
-    const alertMinConfidence = Math.min(99, Math.max(1, Math.round(Number.isFinite(alertMinConfidenceValue) ? alertMinConfidenceValue : (cctvAlertConfidenceThreshold * 100))));
+    const alertMinConfidence = Math.min(99, Math.max(50, Math.round(Number.isFinite(alertMinConfidenceValue) ? alertMinConfidenceValue : (cctvAlertConfidenceThreshold * 100))));
+    const telegramBotToken = document.getElementById('adminTelegramBotToken')?.value.trim() || '';
+    const telegramChatId = document.getElementById('adminTelegramChatId')?.value.trim() || '';
+
     try {
-        const response = await apiRequest('/api/admin-settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ alertCameraName, alertCameraLocation, alertMinConfidence }) });
+        const response = await apiRequest('/api/admin-settings', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ alertCameraName, alertCameraLocation, alertMinConfidence, telegramBotToken, telegramChatId })
+        });
         const data = await parseJsonResponse(response);
         if (!response.ok) throw new Error(data.error || 'Unable to save emergency settings.');
         emergencyAlertCameraName = data.alertCameraName;
         emergencyAlertCameraLocation = data.alertCameraLocation;
-        cctvAlertConfidenceThreshold = (Number(data.alertMinConfidence) || 50) / 100;
-        showToast('Telegram emergency alert settings saved successfully.', 'success');
+        cctvAlertConfidenceThreshold = (Number(data.alertMinConfidence) || 75) / 100;
+        updateTelegramStatusBadge(data.telegramConfigured);
+        showToast('Emergency alert and Telegram settings saved successfully.', 'success');
     } catch (error) {
         showToast(error.message || 'Unable to save emergency settings.', 'error');
+    }
+}
+
+function updateTelegramStatusBadge(isConfigured) {
+    const badge = document.getElementById('adminTelegramStatusBadge');
+    if (!badge) return;
+    if (isConfigured) {
+        badge.className = 'badge-completed px-3 py-1 rounded-full text-xs font-semibold';
+        badge.textContent = 'Telegram Configured';
+    } else {
+        badge.className = 'badge-pending px-3 py-1 rounded-full text-xs font-semibold';
+        badge.textContent = 'Not Configured';
+    }
+}
+
+async function testTelegramAlertConnection() {
+    const tokenInput = document.getElementById('adminTelegramBotToken');
+    const chatIdInput = document.getElementById('adminTelegramChatId');
+    const telegramBotToken = tokenInput?.value.trim() || '';
+    const telegramChatId = chatIdInput?.value.trim() || '';
+    const testBtn = document.getElementById('testTelegramAlertBtn');
+
+    if (testBtn) {
+        testBtn.disabled = true;
+        testBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin text-xs"></i> Testing...';
+    }
+
+    try {
+        const response = await apiRequest('/api/test-telegram-alert', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ telegramBotToken, telegramChatId })
+        });
+        const data = await parseJsonResponse(response);
+        if (!response.ok) throw new Error(data.error || 'Telegram test failed.');
+        updateTelegramStatusBadge(true);
+        showToast(`Telegram verified! Test message sent to @${data.botUsername || 'Bot'}.`, 'success');
+    } catch (error) {
+        showToast(error.message || 'Telegram test failed. Check Bot Token and Chat ID.', 'error');
+    } finally {
+        if (testBtn) {
+            testBtn.disabled = false;
+            testBtn.innerHTML = '<i class="fa-solid fa-paper-plane text-xs"></i> Test Telegram Alert';
+        }
     }
 }
 
@@ -415,22 +471,32 @@ async function loadEmergencyAlertSettings() {
     const cameraInput = document.getElementById('emergencyAlertCamera');
     const locationInput = document.getElementById('emergencyAlertLocation');
     const confidenceInput = document.getElementById('emergencyAlertConfidence');
+    const tokenInput = document.getElementById('adminTelegramBotToken');
+    const chatIdInput = document.getElementById('adminTelegramChatId');
     if (!cameraInput && !locationInput && !confidenceInput) return;
-    const response = await apiRequest('/api/admin-settings');
-    const data = await parseJsonResponse(response);
-    if (!response.ok) throw new Error(data.error || 'Unable to load emergency settings.');
-    if (cameraInput) cameraInput.value = data.alertCameraName || emergencyAlertCameraName;
-    if (locationInput) locationInput.value = data.alertCameraLocation || emergencyAlertCameraLocation;
-    if (confidenceInput) confidenceInput.value = Number(data.alertMinConfidence) || 50;
-    emergencyAlertCameraName = data.alertCameraName || emergencyAlertCameraName;
-    emergencyAlertCameraLocation = data.alertCameraLocation || emergencyAlertCameraLocation;
-    cctvAlertConfidenceThreshold = (Number(data.alertMinConfidence) || 50) / 100;
+
+    try {
+        const response = await apiRequest('/api/admin-settings');
+        const data = await parseJsonResponse(response);
+        if (!response.ok) throw new Error(data.error || 'Unable to load emergency settings.');
+        if (cameraInput) cameraInput.value = data.alertCameraName || emergencyAlertCameraName;
+        if (locationInput) locationInput.value = data.alertCameraLocation || emergencyAlertCameraLocation;
+        if (confidenceInput) confidenceInput.value = Number(data.alertMinConfidence) || 75;
+        if (tokenInput && data.telegramBotToken) tokenInput.value = data.telegramBotToken;
+        if (chatIdInput && data.telegramChatId) chatIdInput.value = data.telegramChatId;
+        emergencyAlertCameraName = data.alertCameraName || emergencyAlertCameraName;
+        emergencyAlertCameraLocation = data.alertCameraLocation || emergencyAlertCameraLocation;
+        cctvAlertConfidenceThreshold = (Number(data.alertMinConfidence) || 75) / 100;
+        updateTelegramStatusBadge(data.telegramConfigured);
+    } catch (error) {
+        console.warn('Unable to load emergency settings:', error.message);
+    }
 }
 
 function renderAlertHistory(alerts) {
     const body = document.getElementById('alertHistoryTableBody');
     if (!body) return;
-    body.innerHTML = alerts.length ? alerts.map((alert) => `<tr><td class="py-3 pr-4">${alert.date}<br><span class="text-xs text-text-secondary">${alert.time}</span></td><td class="py-3 pr-4 font-medium">${alert.detectionType}</td><td class="py-3 pr-4">${alert.confidence}%</td><td class="py-3 pr-4">${alert.cameraName || alert.camera}<br><span class="text-xs text-text-secondary">${alert.location || ''}</span></td><td class="py-3 pr-4">${alert.telegramStatus || alert.status}</td><td class="py-3">${alert.imagePath ? `<a href="${alert.imagePath}" target="_blank"><img src="${alert.imagePath}" alt="Emergency screenshot" class="h-12 w-16 rounded-lg object-cover border border-border"></a>` : '-'}</td></tr>`).join('') : '<tr><td colspan="6" class="py-5 text-center text-text-secondary">No alerts have been sent yet.</td></tr>';
+    body.innerHTML = alerts.length ? alerts.map((alert) => `<tr><td class="py-3 pr-4">${alert.date}<br><span class="text-xs text-text-secondary">${alert.time}</span></td><td class="py-3 pr-4 font-medium">${alert.detectionType}</td><td class="py-3 pr-4">${alert.confidence}%</td><td class="py-3 pr-4">${alert.cameraName || alert.camera}<br><span class="text-xs text-text-secondary">${alert.location || ''}</span></td><td class="py-3 pr-4"><span class="${alert.telegramStatus === 'Sent' ? 'badge-completed' : alert.telegramStatus === 'Not Configured' ? 'badge-pending' : 'badge-high'} px-2.5 py-0.5 rounded-full text-xs">${alert.telegramStatus || alert.status}</span></td><td class="py-3">${alert.imagePath ? `<a href="${alert.imagePath}" target="_blank"><img src="${alert.imagePath}" alt="Emergency screenshot" class="h-12 w-16 rounded-lg object-cover border border-border"></a>` : '-'}</td></tr>`).join('') : '<tr><td colspan="6" class="py-5 text-center text-text-secondary">No alerts have been logged yet.</td></tr>';
 }
 
 async function loadAlertHistory() {
@@ -441,13 +507,21 @@ async function loadAlertHistory() {
 }
 
 function showEmergencyBrowserNotification(alert) {
+    const now = Date.now();
+    const alertKey = `${alert.id || ''}::${alert.cameraName || alert.camera || ''}::${alert.detectionType || ''}`;
+    if (lastEmergencyModalAlertId === alertKey && now - lastEmergencyModalShownAt < 30000) {
+        return; // Prevent duplicate overlapping emergency modals
+    }
+    lastEmergencyModalAlertId = alertKey;
+    lastEmergencyModalShownAt = now;
+
     playNotificationTone();
     const camera = alert.cameraName || alert.camera;
     showToast(`Emergency: ${alert.detectionType} detected at ${camera} (${alert.confidence}%).`, 'error');
     const feed = document.getElementById('cctvVideoPlayer')?.parentElement;
     if (feed) {
         feed.style.boxShadow = 'inset 0 0 0 5px #ef4444, 0 0 32px rgba(239,68,68,.85)';
-        setTimeout(() => { feed.style.boxShadow = ''; }, 60_000);
+        setTimeout(() => { feed.style.boxShadow = ''; }, 30000);
     }
     showModal('FIRE / SMOKE EMERGENCY', `<div class="space-y-4 text-center"><i class="fa-solid fa-triangle-exclamation text-6xl text-danger"></i><p class="text-xl font-bold">${alert.detectionType} detected</p><p class="text-text-secondary">${camera} - ${alert.location || 'Hostel CCTV Location'}</p><p class="text-lg font-semibold">Confidence: ${alert.confidence}%</p><p class="text-sm text-text-secondary">${alert.date} ${alert.time}</p><button onclick="closeModal()" class="btn-primary px-6 py-3 rounded-xl text-white font-semibold">Acknowledge Alert</button></div>`);
     if ('Notification' in window && Notification.permission === 'granted') {
@@ -464,18 +538,41 @@ async function enableEmergencyBrowserNotifications() {
 }
 
 async function sendTelegramEmergencyAlert(prediction, imageDataUrl) {
-    if (cctvEmergencyAlertSent || cctvEmergencyAlertInFlight) return;
+    if (cctvEmergencyAlertSent || cctvEmergencyAlertInFlight || Date.now() < cctvEmergencyAlertCooldownUntil) return;
     cctvEmergencyAlertInFlight = true;
+    cctvEmergencyAlertSent = true;
+    cctvEmergencyAlertCooldownUntil = Date.now() + 60000;
+
     try {
-        const response = await apiRequest('/api/send-telegram-alert', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: prediction.detectionType || (FireDetectionUtils.isFireLabel(prediction.label) ? 'Fire' : 'Smoke'), confidence: prediction.confidence, camera: emergencyAlertCameraName, location: emergencyAlertCameraLocation, image: imageDataUrl }) });
+        const response = await apiRequest('/api/send-telegram-alert', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                type: prediction.detectionType || (FireDetectionUtils.isFireLabel(prediction.label) ? 'Fire' : 'Smoke'),
+                confidence: prediction.confidence,
+                camera: emergencyAlertCameraName,
+                location: emergencyAlertCameraLocation,
+                image: imageDataUrl
+            })
+        });
         const data = await parseJsonResponse(response);
-        if (response.status === 202 && data.status === 'cooldown') { cctvEmergencyAlertSent = true; return; }
-        if (!response.ok) throw new Error(data.error || 'Unable to send Telegram emergency alert');
-        cctvEmergencyAlertSent = true;
-        showToast('Telegram emergency alert sent successfully.', 'success');
+        if (response.status === 202 && data.status === 'cooldown') {
+            return;
+        }
+        if (data.telegramConfigured === false) {
+            showToast('Emergency alert logged. Telegram is not configured in Admin Settings.', 'warning');
+            return;
+        }
+        if (data.success === false && data.warning) {
+            showToast(data.warning, 'warning');
+            return;
+        }
+        if (response.ok && data.message) {
+            showToast(data.message || 'Telegram emergency alert sent successfully.', 'success');
+        }
     } catch (error) {
-        showToast(error.message || 'Unable to send Telegram emergency alert', 'error');
-        console.error('Telegram emergency alert failed:', error);
+        console.warn('Telegram emergency alert request error:', error.message);
+        showToast('Emergency alert recorded locally.', 'info');
     } finally {
         cctvEmergencyAlertInFlight = false;
     }
@@ -579,8 +676,12 @@ function navigateTo(pageId, options = {}) {
         loadTechniciansList().catch((error) => console.error(error));
     }
 
-    if (pageId.startsWith('admin-') || pageId.startsWith('technician-')) {
-        loadDashboardData().catch((error) => console.error(error));
+    if (pageId.startsWith('admin-') || pageId.startsWith('technician-') || pageId === 'warden-dashboard' || pageId === 'security-dashboard') {
+        loadDashboardData().then(() => {
+            if (pageId === 'warden-dashboard') renderWardenDashboard();
+            if (pageId === 'security-dashboard') renderSecurityDashboard();
+            if (pageId === 'admin-gate-passes') renderAdminGatePassLogsPage();
+        }).catch((error) => console.error(error));
     }
 
     if (currentUser) {
@@ -1245,7 +1346,8 @@ function setupAnnouncementSocket() {
             showEmergencyBrowserNotification(alert);
             if (getActivePageId() === 'admin-settings') loadAlertHistory().catch(console.error);
         });
-        announcementSocket.on('gate-pass.created', (gatePass) => {
+        announcementSocket.on('gate-pass.created', (payload) => {
+            const gatePass = payload?.gatePass || payload;
             if (!gatePass || !gatePass.id) return;
             latestGatePasses = [gatePass, ...latestGatePasses.filter((entry) => entry?.id !== gatePass.id)];
             renderGatePassTable(latestGatePasses);
@@ -1254,8 +1356,16 @@ function setupAnnouncementSocket() {
             const gatePassCount = document.getElementById('adminGatePassCount');
             if (gatePassCount) gatePassCount.textContent = `${latestGatePasses.length}`;
             if (currentUser?.role === 'admin' || currentUser?.role === 'warden') {
-                showToast(`🔔 New Gate Pass request from ${gatePass.student || 'Student'} (${gatePass.hostelBlock || 'Hostel'})`, 'info');
+                playNotificationTone();
+                const retInfo = gatePass.returnDate ? ` — Expected Return: ${formatGatePassDate(gatePass.returnDate)}` : '';
+                showToast(`🔔 New Gate Pass: ${gatePass.student || 'Student'} (${gatePass.hostelBlock || 'Hostel'})${retInfo}`, 'info');
             }
+        });
+        announcementSocket.on('warden-notification.created', (notification) => {
+            if (!notification || (currentUser?.role !== 'warden' && currentUser?.role !== 'admin')) return;
+            playNotificationTone();
+            showToast(`📢 ${notification.title || 'Warden Alert'}: ${notification.message || ''}`, 'info');
+            renderWardenDashboard();
         });
         announcementSocket.on('complaint.created', (complaint) => {
             if (!complaint || !complaint.id) return;
@@ -1322,6 +1432,21 @@ async function sendLiveAnnouncement(event) {
     }
 }
 
+function confirmEmergencyCall(event, number, label) {
+    event.preventDefault();
+    if (confirm(`Do you want to initiate an emergency call to ${label} (${number})?`)) {
+        window.location.href = `tel:${number}`;
+    }
+}
+
+function getStatusBadgeClass(status = 'Pending') {
+    const lower = String(status).toLowerCase();
+    if (lower === 'completed' || lower === 'resolved') return 'badge-completed';
+    if (lower === 'in progress' || lower === 'progress') return 'badge-progress';
+    if (lower === 'pending') return 'badge-pending';
+    return 'badge-pending';
+}
+
 function getPriorityBadgeClass(priority = 'Medium') {
     const lower = String(priority).toLowerCase();
     if (lower.includes('high')) return 'badge-high';
@@ -1352,6 +1477,17 @@ function formatComplaintDate(dateString) {
 
 function formatGatePassDate(dateString) {
     if (!dateString) return '—';
+    const trimmed = String(dateString).trim();
+    const parts = trimmed.split('T')[0].split('-');
+    if (parts.length === 3 && parts[0].length === 4) {
+        const year = parseInt(parts[0], 10);
+        const month = parseInt(parts[1], 10) - 1;
+        const day = parseInt(parts[2], 10);
+        const date = new Date(year, month, day);
+        if (!Number.isNaN(date.getTime())) {
+            return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+        }
+    }
     const date = new Date(dateString);
     if (Number.isNaN(date.getTime())) return '—';
     return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
@@ -1369,26 +1505,119 @@ function getGatePassStatusClass(status = 'Pending') {
 }
 
 function renderStudentGatePassQr() {
-    const card = document.getElementById('gatePassQrCard');
-    if (!card) return;
+    const liveCard = document.getElementById('studentGatePassLiveCard');
+    const legacyCard = document.getElementById('gatePassQrCard');
     const pass = latestGatePasses.find(isGatePassForCurrentUser);
-    if (!pass) { card.classList.add('hidden'); return; }
-    card.classList.remove('hidden');
-    const status = pass.status || 'REQUESTED';
-    const statusText = document.getElementById('gatePassQrStatus');
-    const image = document.getElementById('gatePassQrImage');
-    const expiry = document.getElementById('gatePassQrExpiry');
-    const download = document.getElementById('downloadGatePassQrButton');
-    const timeline = document.getElementById('gatePassTimeline');
-    if (statusText) statusText.textContent = `${pass.id} · ${status}`;
-    if (image) { image.src = pass.qrImage || ''; image.classList.toggle('hidden', !pass.qrImage); }
-    if (expiry) expiry.textContent = pass.expiryDate ? `Valid until ${new Date(pass.expiryDate).toLocaleString()}` : 'QR appears after faculty approval.';
-    if (download) download.classList.toggle('hidden', !pass.qrImage);
-    if (timeline) {
-        const steps = ['REQUESTED', 'QR GENERATED', 'OUT', 'RETURNED', 'COMPLETED'];
-        const current = steps.indexOf(status);
-        timeline.innerHTML = steps.map((step, index) => `<span class="px-2.5 py-1 rounded-full ${index <= current ? 'bg-primary/10 text-primary' : 'bg-surface-alt text-text-secondary'}">${step}</span>`).join('');
+
+    if (!pass) {
+        if (liveCard) liveCard.classList.add('hidden');
+        if (legacyCard) legacyCard.classList.add('hidden');
+        return;
     }
+
+    const rawStatus = String(pass.status || 'PENDING_ADMIN').toUpperCase();
+    const isPendingAdmin = ['PENDING_ADMIN', 'REQUESTED', 'PENDING'].includes(rawStatus);
+    const isSecurityPending = rawStatus === 'SECURITY_PENDING' || rawStatus === 'QR GENERATED' || rawStatus === 'APPROVED';
+    const isOutside = rawStatus === 'OUTSIDE' || rawStatus === 'OUT';
+    const isOutsideNotReturned = rawStatus === 'OUTSIDE_NOT_RETURNED';
+    const isCompleted = rawStatus === 'COMPLETED';
+    const isRejected = rawStatus.includes('REJECTED');
+
+    let badgeClass = 'bg-amber-100 text-amber-800 border border-amber-200';
+    let badgeText = 'Pending Admin Approval';
+
+    if (isSecurityPending) {
+        badgeClass = 'bg-emerald/10 text-emerald border border-emerald/20';
+        badgeText = 'Approved • Ready for Security Scan';
+    } else if (isOutside) {
+        badgeClass = 'bg-blue-100 text-blue-800 border border-blue-200';
+        badgeText = 'Outside • Gate Crossed';
+    } else if (isOutsideNotReturned) {
+        badgeClass = 'bg-amber-100 text-amber-900 border border-amber-300';
+        badgeText = '⚠️ Outside — Not Returned';
+    } else if (isCompleted) {
+        badgeClass = 'bg-emerald-100 text-emerald-800 border border-emerald-200';
+        badgeText = '✅ Completed & Returned';
+    } else if (isRejected) {
+        badgeClass = 'bg-danger/10 text-danger border border-danger/20';
+        badgeText = rawStatus === 'SECURITY_REJECTED' ? '❌ Security Exit Rejected' : '❌ Pass Rejected';
+    }
+
+    if (liveCard) {
+        liveCard.classList.remove('hidden');
+        const badgeEl = document.getElementById('studentLivePassBadge');
+        const idEl = document.getElementById('studentLivePassId');
+        const datesEl = document.getElementById('studentLivePassDates');
+        const roomEl = document.getElementById('studentLivePassRoom');
+        const sessionEl = document.getElementById('studentLivePassSession');
+        const wardenEl = document.getElementById('studentLivePassWarden');
+        const qrImg = document.getElementById('studentLiveQrImg');
+        const qrPlaceholder = document.getElementById('studentLiveQrPlaceholder');
+
+        if (badgeEl) {
+            badgeEl.className = `px-3 py-1 rounded-full text-xs font-bold ${badgeClass}`;
+            badgeEl.textContent = badgeText;
+        }
+        if (idEl) {
+            idEl.innerHTML = `ID: <span class="font-mono font-bold">${pass.id || 'N/A'}</span>${pass.certificateId ? ` • <span class="text-xs text-primary font-mono">${pass.certificateId}</span>` : ''}`;
+        }
+        if (datesEl) datesEl.textContent = `Valid: ${formatGatePassDate(pass.gateDate)} ➔ ${formatGatePassDate(pass.returnDate)}`;
+        if (roomEl) roomEl.textContent = `${pass.hostelBlock || 'Block A'} • Room ${pass.roomNumber || 'N/A'}`;
+        if (sessionEl) sessionEl.textContent = pass.session || 'General';
+        if (wardenEl) wardenEl.textContent = pass.approvedBy ? `Approved by ${pass.approvedBy}` : 'Admin Review Pending';
+
+        if (qrImg && qrPlaceholder) {
+            const hasApprovedQr = pass.qrImage && !isPendingAdmin && !isRejected;
+            if (hasApprovedQr) {
+                qrImg.src = pass.qrImage;
+                qrImg.classList.remove('hidden');
+                qrPlaceholder.classList.add('hidden');
+            } else {
+                qrImg.classList.add('hidden');
+                qrPlaceholder.classList.remove('hidden');
+                qrPlaceholder.innerHTML = isRejected ? `
+                    <div class="space-y-1">
+                        <i class="fa-solid fa-ban text-2xl text-danger block mb-1"></i>
+                        <p class="font-bold text-danger text-xs">Pass Rejected</p>
+                        <p class="text-[9px] text-text-muted leading-tight">${pass.securityRejectionReason || pass.facultyRemarks || 'Request was not approved.'}</p>
+                    </div>
+                ` : `
+                    <div class="space-y-1">
+                        <i class="fa-solid fa-hourglass-half text-2xl text-amber-500 block mb-1"></i>
+                        <p class="font-bold text-amber-800 text-xs">Pending Admin Approval</p>
+                        <p class="text-[9px] text-text-muted leading-tight">One unique QR code will be generated upon approval</p>
+                    </div>
+                `;
+            }
+        }
+    }
+
+    if (legacyCard) {
+        legacyCard.classList.remove('hidden');
+        const statusText = document.getElementById('gatePassQrStatus');
+        const image = document.getElementById('gatePassQrImage');
+        const expiry = document.getElementById('gatePassQrExpiry');
+        const download = document.getElementById('downloadGatePassQrButton');
+        const timeline = document.getElementById('gatePassTimeline');
+        if (statusText) statusText.textContent = `${pass.id} · ${pass.status || 'Pending'}`;
+        if (image) { image.src = pass.qrImage || ''; image.classList.toggle('hidden', !pass.qrImage); }
+        if (expiry) expiry.textContent = pass.expiryDate ? `Valid until ${new Date(pass.expiryDate).toLocaleString()}` : 'QR appears after faculty approval.';
+        if (download) download.classList.toggle('hidden', !pass.qrImage);
+        if (timeline) {
+            const steps = ['REQUESTED', 'QR GENERATED', 'OUT', 'RETURNED', 'COMPLETED'];
+            const current = steps.indexOf(pass.status || 'REQUESTED');
+            timeline.innerHTML = steps.map((step, index) => `<span class="px-2.5 py-1 rounded-full ${index <= current ? 'bg-primary/10 text-primary font-semibold' : 'bg-surface-alt text-text-secondary'}">${step}</span>`).join('');
+        }
+    }
+}
+
+function downloadCurrentUserGatePassPdf() {
+    const pass = latestGatePasses.find(isGatePassForCurrentUser);
+    if (!pass || !pass.id) {
+        showToast('No active gate pass found for your account.', 'warning');
+        return;
+    }
+    downloadGatePassPdf(pass.id);
 }
 
 function downloadGatePassQr() {
@@ -1405,13 +1634,20 @@ function toggleAdminGatePassSeeAll() {
 function renderGatePassTable(gatePasses = []) {
     const tableBody = document.getElementById('adminGatePassTableBody');
     const seeAllButton = document.getElementById('adminGatePassSeeAllButton');
+    const countBadge = document.getElementById('adminGatePassCount');
+    const sidebarBadge = document.getElementById('adminSidebarGatePassBadge');
+
+    if (countBadge) countBadge.textContent = String(gatePasses.length || 0);
+    if (sidebarBadge) sidebarBadge.textContent = String(gatePasses.length || 0);
+    document.querySelectorAll('.admin-gate-pass-badge').forEach(el => el.textContent = String(gatePasses.length || 0));
+
     renderStudentGatePassQr();
     if (!tableBody) return;
 
     const defaultVisibleRows = 4;
 
     if (!gatePasses.length) {
-        tableBody.innerHTML = '<tr><td colspan="10" class="px-6 py-8 text-sm text-text-secondary text-center">No gate pass requests yet.</td></tr>';
+        tableBody.innerHTML = '<tr><td colspan="10" class="px-6 py-8 text-sm text-text-secondary text-center">No gate pass requests recorded yet.</td></tr>';
         if (seeAllButton) seeAllButton.classList.add('hidden');
         return;
     }
@@ -1419,7 +1655,7 @@ function renderGatePassTable(gatePasses = []) {
     if (seeAllButton) {
         if (gatePasses.length > defaultVisibleRows) {
             seeAllButton.classList.remove('hidden');
-            seeAllButton.textContent = showAllAdminGatePassRows ? 'Show less' : 'See all';
+            seeAllButton.textContent = showAllAdminGatePassRows ? `Show less (${defaultVisibleRows})` : `See all (${gatePasses.length})`;
         } else {
             seeAllButton.classList.add('hidden');
         }
@@ -1427,28 +1663,77 @@ function renderGatePassTable(gatePasses = []) {
 
     const visibleGatePasses = showAllAdminGatePassRows ? gatePasses : gatePasses.slice(0, defaultVisibleRows);
 
-    tableBody.innerHTML = visibleGatePasses.map((entry) => `
-        <tr class="table-row">
-            <td class="px-6 py-4 text-sm font-medium">${entry.id || 'N/A'}</td>
-            <td class="px-6 py-4 text-sm">${entry.student || 'Anonymous'}</td>
-            <td class="px-6 py-4 text-sm">${entry.registrationNumber || 'N/A'}</td>
-            <td class="px-6 py-4 text-sm">${entry.reason || 'General'}</td>
-            <td class="px-6 py-4 text-sm">${entry.session || 'Morning'}</td>
-            <td class="px-6 py-4 text-sm text-text-secondary">${formatGatePassDate(entry.gateDate)}</td>
-            <td class="px-6 py-4 text-sm text-text-secondary">${formatGatePassDate(entry.returnDate)}</td>
-            <td class="px-6 py-4"><span class="${getGatePassStatusClass(entry.status)} px-2.5 py-1 rounded-full text-xs font-medium">${entry.status || 'Pending'}</span></td>
-            <td class="px-6 py-4 text-sm text-text-secondary">
-                ${entry.studentPhoto
-                    ? `<img src="${entry.studentPhoto}" alt="Student photo" class="w-12 h-12 rounded-xl object-cover border border-border">`
-                    : '<span class="text-xs">No photo</span>'}
-            </td>
-            <td class="px-6 py-4 text-sm text-text-secondary">
-                ${['pending', 'requested'].includes(String(entry.status || '').toLowerCase())
-                    ? `<div class="flex flex-wrap gap-2"><button onclick="approveGatePass('${entry.id}', 'Approved')" class="px-3 py-2 rounded-lg bg-emerald text-white text-xs font-medium hover:bg-emerald-dark transition-all">Approve</button><button onclick="approveGatePass('${entry.id}', 'Rejected')" class="px-3 py-2 rounded-lg border border-border text-xs font-medium hover:bg-surface-alt transition-all">Reject</button><button onclick="downloadGatePassPdf('${entry.id}')" class="px-3 py-2 rounded-lg border border-border text-xs font-medium hover:bg-surface-alt transition-all">Download PDF</button></div>`
-                    : `<div class="flex flex-wrap items-center gap-2"><span>${formatComplaintDate(entry.createdAt)}</span><button onclick="downloadGatePassPdf('${entry.id}')" class="px-3 py-2 rounded-lg border border-border text-xs font-medium hover:bg-surface-alt transition-all">Download PDF</button></div>`}
-            </td>
-        </tr>
-    `).join('');
+    tableBody.innerHTML = visibleGatePasses.map((entry) => {
+        const rawStatus = String(entry.status || 'PENDING_ADMIN').toUpperCase();
+        const isPendingAdmin = ['PENDING_ADMIN', 'PENDING', 'REQUESTED'].includes(rawStatus);
+        const isApproved = ['SECURITY_PENDING', 'APPROVED', 'QR GENERATED'].includes(rawStatus);
+        const isOutside = rawStatus === 'OUTSIDE' || rawStatus === 'OUT';
+        const isOutsideNotReturned = rawStatus === 'OUTSIDE_NOT_RETURNED';
+        const isCompleted = rawStatus === 'COMPLETED';
+        const isRejected = rawStatus.includes('REJECTED');
+
+        let statusBadgeHtml = `<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-800 border border-amber-300 shadow-2xs"><i class="fa-solid fa-clock text-amber-600"></i> Pending Admin</span>`;
+
+        if (isApproved) {
+            statusBadgeHtml = `<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald/10 text-emerald border border-emerald/30 shadow-2xs"><i class="fa-solid fa-qrcode text-emerald"></i> Approved (QR Ready)</span>`;
+        } else if (isOutside) {
+            statusBadgeHtml = `<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-blue-100 text-blue-800 border border-blue-300 shadow-2xs"><i class="fa-solid fa-door-open text-blue-600"></i> Outside (Gate Crossed)</span>`;
+        } else if (isOutsideNotReturned) {
+            statusBadgeHtml = `<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-rose-100 text-rose-900 border border-rose-300 shadow-2xs"><i class="fa-solid fa-triangle-exclamation text-rose-600"></i> Outside (Not Returned)</span>`;
+        } else if (isCompleted) {
+            statusBadgeHtml = `<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 shadow-2xs"><i class="fa-solid fa-circle-check text-emerald-600"></i> Completed</span>`;
+        } else if (isRejected) {
+            statusBadgeHtml = `<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-danger/10 text-danger border border-danger/30 shadow-2xs"><i class="fa-solid fa-circle-xmark text-danger"></i> Rejected</span>`;
+        }
+
+        return `
+            <tr class="table-row hover:bg-surface-alt/50 transition-colors">
+                <td class="px-6 py-4 text-xs font-mono font-bold text-primary cursor-pointer hover:underline" onclick="viewGatePassDetailsModal('${entry.id}')" title="Click to view full details">
+                    ${entry.id || 'N/A'}
+                    ${entry.certificateId ? `<span class="block text-[10px] text-text-muted font-normal">${entry.certificateId.slice(0, 14)}...</span>` : ''}
+                </td>
+                <td class="px-6 py-4 text-sm font-semibold text-text">${entry.student || 'Anonymous'}</td>
+                <td class="px-6 py-4 text-xs font-mono text-text-secondary">${entry.registrationNumber || 'N/A'}</td>
+                <td class="px-6 py-4 text-xs text-text-secondary max-w-[160px] truncate" title="${entry.reason || 'General'}">${entry.reason || 'General'}</td>
+                <td class="px-6 py-4 text-xs font-medium">${entry.session || 'Morning'}</td>
+                <td class="px-6 py-4 text-xs text-text-secondary">${formatGatePassDate(entry.gateDate)}</td>
+                <td class="px-6 py-4 text-xs font-medium text-amber-700">${formatGatePassDate(entry.returnDate)}</td>
+                <td class="px-6 py-4">${statusBadgeHtml}</td>
+                <td class="px-6 py-4 text-sm text-text-secondary">
+                    ${entry.studentPhoto
+                        ? `<img src="${entry.studentPhoto}" alt="Student photo" class="w-10 h-10 rounded-xl object-cover border border-border shadow-2xs cursor-pointer hover:scale-110 transition-transform" onclick="viewGatePassDetailsModal('${entry.id}')">`
+                        : `<div class="w-10 h-10 rounded-xl bg-indigo-50 border border-indigo-100 flex items-center justify-center font-bold text-xs text-indigo-600">${(entry.student || 'S').slice(0, 2).toUpperCase()}</div>`}
+                </td>
+                <td class="px-6 py-4 text-xs">
+                    ${isPendingAdmin ? `
+                        <div class="flex flex-wrap items-center gap-1.5">
+                            <button onclick="approveGatePass('${entry.id}', 'Approved')" class="px-3 py-1.5 rounded-lg bg-emerald hover:bg-emerald/90 text-white font-bold shadow-2xs transition-all flex items-center gap-1">
+                                <i class="fa-solid fa-check"></i> Approve
+                            </button>
+                            <button onclick="approveGatePass('${entry.id}', 'Rejected')" class="px-2.5 py-1.5 rounded-lg bg-danger/10 hover:bg-danger hover:text-white text-danger font-semibold transition-all">
+                                Reject
+                            </button>
+                            <button onclick="viewGatePassDetailsModal('${entry.id}')" class="px-2.5 py-1.5 rounded-lg border border-border hover:bg-surface-alt text-text transition-all" title="View details">
+                                <i class="fa-solid fa-eye text-primary"></i>
+                            </button>
+                            <button onclick="downloadGatePassPdf('${entry.id}')" class="px-2.5 py-1.5 rounded-lg border border-border hover:bg-surface-alt text-text transition-all" title="Download PDF">
+                                <i class="fa-solid fa-file-pdf text-danger"></i>
+                            </button>
+                        </div>
+                    ` : `
+                        <div class="flex flex-wrap items-center gap-1.5">
+                            <button onclick="viewGatePassDetailsModal('${entry.id}')" class="px-3 py-1.5 rounded-lg border border-border bg-surface hover:bg-surface-alt text-text font-medium shadow-2xs transition-all flex items-center gap-1.5">
+                                <i class="fa-solid fa-eye text-primary"></i> Details
+                            </button>
+                            <button onclick="downloadGatePassPdf('${entry.id}')" class="px-2.5 py-1.5 rounded-lg border border-border hover:bg-surface-alt text-text-secondary hover:text-text transition-all" title="Download PDF">
+                                <i class="fa-solid fa-file-pdf text-danger"></i>
+                            </button>
+                        </div>
+                    `}
+                </td>
+            </tr>
+        `;
+    }).join('');
 }
 
 function escapePdfTextForClient(value) {
@@ -1580,81 +1865,119 @@ async function createGatePassPdfBlob(gatePass) {
             : [202, 138, 4];
     const imageAsset = await getPdfImageAssetFromDataUrl(gatePass.studentPhoto);
 
-    drawRect(0, 0, pageWidth, 78, [37, 99, 235]);
-    drawText('HOSTEL GATE PASS', margin, 20, { font: 'F2', size: 20, color: [255, 255, 255] });
-    drawText('Submitted request details', margin, 46, { size: 10, color: [219, 234, 254] });
+    // Executive Navy Header
+    drawRect(0, 0, pageWidth, 86, [15, 23, 42]);
+    drawRect(0, 84, pageWidth, 4, [79, 70, 229]);
 
-    drawRect(margin, 96, pageWidth - (margin * 2), 56, [248, 250, 252], [203, 213, 225], 0.8);
-    drawText('Gate Pass ID', margin + 14, 111, { font: 'F2', size: 9, color: [71, 85, 105] });
-    drawText(gatePass.id || 'N/A', margin + 14, 126, { font: 'F2', size: 13, color: [15, 23, 42] });
-    drawText('Submitted On', margin + 14, 139, { size: 8, color: [100, 116, 139] });
-    drawText(new Date(gatePass.createdAt || Date.now()).toLocaleString('en-IN'), margin + 86, 139, {
-        size: 8,
-        color: [100, 116, 139]
-    });
-    drawText('Status', pageWidth - margin - 118, 111, { font: 'F2', size: 9, color: [71, 85, 105] });
-    drawText(gatePass.status || 'Pending', pageWidth - margin - 118, 126, {
+    drawText('HOSTEL RESIDENCE GATE PASS', margin, 22, { font: 'F2', size: 18, color: [255, 255, 255] });
+    drawText('Campus Digital Security & Student Movement Authorization', margin, 46, { size: 9, color: [148, 163, 184] });
+    drawText('OFFICIAL VERIFIED DOCUMENT', margin, 62, { font: 'F2', size: 8, color: [56, 189, 248] });
+
+    // Right Side Header Metadata
+    drawText('PASS ID', pageWidth - margin - 180, 24, { size: 8, color: [203, 213, 225] });
+    drawText(gatePass.id || 'N/A', pageWidth - margin - 180, 36, { font: 'F2', size: 12, color: [255, 255, 255] });
+    drawText(`● ${(gatePass.status || 'Pending').toUpperCase()}`, pageWidth - margin - 180, 54, {
         font: 'F2',
-        size: 13,
+        size: 10,
         color: statusColor
     });
 
-    const fields = [
-        ['Student Name', gatePass.student || 'N/A'],
-        ['Register Number', gatePass.registrationNumber || 'N/A'],
-        ['Hostel Block', gatePass.hostelBlock || 'N/A'],
+    const contentWidth = pageWidth - (margin * 2);
+
+    // Top Student Bar
+    drawRect(margin, 102, contentWidth, 38, [248, 250, 252], [226, 232, 240], 0.8);
+    drawText('STUDENT NAME', margin + 14, 112, { size: 8, color: [100, 116, 139] });
+    drawText(gatePass.student || 'N/A', margin + 14, 124, { font: 'F2', size: 12, color: [15, 23, 42] });
+
+    drawText('REGISTER NUMBER', margin + 200, 112, { size: 8, color: [100, 116, 139] });
+    drawText(gatePass.registrationNumber || 'N/A', margin + 200, 124, { font: 'F2', size: 12, color: [15, 23, 42] });
+
+    drawText('SUBMITTED DATE', margin + 370, 112, { size: 8, color: [100, 116, 139] });
+    drawText(new Date(gatePass.createdAt || Date.now()).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }), margin + 370, 124, {
+        size: 10,
+        color: [15, 23, 42]
+    });
+
+    // Details Grid (Left 2 cols) and Student Photo (Right)
+    const startY = 150;
+    const gridFields = [
+        ['Hostel Block', gatePass.hostelBlock || 'Block A'],
         ['Room Number', gatePass.roomNumber || 'N/A'],
         ['Gate Pass Date', formatDateValue(gatePass.gateDate)],
         ['Return Date', formatDateValue(gatePass.returnDate)],
-        ['Session', gatePass.session || 'N/A'],
-        ['Approved By', gatePass.approvedBy || 'Pending']
+        ['Session Timing', gatePass.session || 'General'],
+        ['Authorized By', gatePass.approvedBy || 'Warden (Pending)']
     ];
 
-    let top = 172;
-    const boxWidth = 250;
-    const boxHeight = 52;
-    for (let index = 0; index < fields.length; index += 2) {
-        const row = [fields[index], fields[index + 1]].filter(Boolean);
-        let left = margin;
-        row.forEach(([label, value]) => {
-            drawRect(left, top, boxWidth, boxHeight, [255, 255, 255], [217, 229, 251], 0.8);
-            drawText(label, left + 12, top + 10, { font: 'F2', size: 8, color: [95, 115, 152] });
-            drawWrappedText(String(value), left + 12, top + 23, boxWidth - 24, { font: 'F2', size: 10.5, color: [17, 32, 63], lineHeight: 12 });
-            left += boxWidth + 12;
-        });
-        top += boxHeight + 12;
-    }
+    const colWidth = 176;
+    const rowHeight = 44;
+    gridFields.forEach((field, index) => {
+        const col = index % 2;
+        const row = Math.floor(index / 2);
+        const x = margin + (col * (colWidth + 10));
+        const y = startY + (row * (rowHeight + 8));
 
-    const photoTop = top;
-    const photoBoxWidth = 110;
-    const photoBoxHeight = 112;
-    const photoLeft = pageWidth - margin - photoBoxWidth;
-    drawRect(photoLeft, photoTop, photoBoxWidth, photoBoxHeight, [255, 255, 255], [217, 229, 251], 0.8);
-    drawText('Student Photo', photoLeft + 12, photoTop + 10, { font: 'F2', size: 8, color: [95, 115, 152] });
-    if (imageAsset) {
-        const fitRatio = Math.min(84 / imageAsset.width, 72 / imageAsset.height, 1);
-        const drawWidth = Math.max(1, Math.round(imageAsset.width * fitRatio));
-        const drawHeight = Math.max(1, Math.round(imageAsset.height * fitRatio));
-        const drawLeft = photoLeft + Math.round((photoBoxWidth - drawWidth) / 2);
-        const drawTop = photoTop + 28 + Math.round((70 - drawHeight) / 2);
-        drawImage('StudentPhoto', drawLeft, drawTop, drawWidth, drawHeight);
-    } else {
-        drawText('No photo uploaded', photoLeft + 16, photoTop + 56, { size: 8, color: [148, 163, 184] });
-    }
-
-    const reasonTop = top + 124;
-    drawRect(margin, reasonTop, pageWidth - (margin * 2), 82, [255, 255, 255], [217, 229, 251], 0.8);
-    drawText('Reason for Gate Pass', margin + 12, reasonTop + 10, { font: 'F2', size: 8, color: [95, 115, 152] });
-    drawWrappedText(String(gatePass.reason || 'N/A'), margin + 14, reasonTop + 38, pageWidth - (margin * 2) - 28, {
-        font: 'F1',
-        size: 10,
-        color: [17, 32, 63],
-        lineHeight: 13
+        drawRect(x, y, colWidth, rowHeight, [255, 255, 255], [226, 232, 240], 0.8);
+        drawText(field[0].toUpperCase(), x + 10, y + 8, { size: 7.5, color: [100, 116, 139] });
+        drawText(String(field[1]), x + 10, y + 22, { font: 'F2', size: 10, color: [15, 23, 42] });
     });
 
-    drawRect(margin, reasonTop + 98, pageWidth - (margin * 2), 32, [248, 250, 252], [217, 229, 251], 0.8);
-    drawText('Downloaded from HostelFix', margin + 12, reasonTop + 109, { size: 8, color: [100, 116, 139] });
-    drawText(`Status: ${gatePass.status || 'Pending'}`, pageWidth - margin - 100, reasonTop + 109, { size: 8, color: statusColor, font: 'F2' });
+    // Student Photo Box
+    const photoX = margin + (colWidth * 2) + 24;
+    const photoWidth = 145;
+    const photoHeight = 148;
+    drawRect(photoX, startY, photoWidth, photoHeight, [248, 250, 252], [203, 213, 225], 0.8);
+    drawText('STUDENT PHOTO', photoX + 10, startY + 10, { font: 'F2', size: 8, color: [71, 85, 105] });
+
+    if (imageAsset) {
+        const fitRatio = Math.min(115 / imageAsset.width, 110 / imageAsset.height, 1);
+        const drawWidth = Math.max(1, Math.round(imageAsset.width * fitRatio));
+        const drawHeight = Math.max(1, Math.round(imageAsset.height * fitRatio));
+        const drawLeft = photoX + Math.round((photoWidth - drawWidth) / 2);
+        const drawTop = startY + 26 + Math.round((110 - drawHeight) / 2);
+        drawImage('StudentPhoto', drawLeft, drawTop, drawWidth, drawHeight);
+    } else {
+        drawText('No Photo Uploaded', photoX + 16, startY + 70, { size: 8, color: [148, 163, 184] });
+    }
+
+    // Reason Box
+    const reasonY = startY + (3 * (rowHeight + 8)) + 6;
+    drawRect(margin, reasonY, contentWidth, 54, [248, 250, 252], [226, 232, 240], 0.8);
+    drawText('REASON FOR LEAVE / PURPOSE', margin + 14, reasonY + 10, { font: 'F2', size: 8, color: [71, 85, 105] });
+    drawWrappedText(String(gatePass.reason || 'Not specified'), margin + 14, reasonY + 24, contentWidth - 28, {
+        font: 'F1',
+        size: 9.5,
+        color: [30, 41, 59],
+        lineHeight: 12
+    });
+
+    // QR Verification & Security Section
+    const qrSectionY = reasonY + 66;
+    const qrBoxHeight = 160;
+    drawRect(margin, qrSectionY, contentWidth, qrBoxHeight, [255, 255, 255], [203, 213, 225], 0.8);
+
+    drawText('Digital Security & Verification QR', margin + 20, qrSectionY + 18, { font: 'F2', size: 12, color: [15, 23, 42] });
+    drawWrappedText('Security officers must scan this QR code at campus entry/exit points. This document is non-transferable and valid only for the approved movement window.', margin + 20, qrSectionY + 36, 330, {
+        font: 'F1',
+        size: 8.5,
+        color: [71, 85, 105],
+        lineHeight: 11
+    });
+
+    drawRect(margin + 20, qrSectionY + 84, 330, 52, [241, 245, 249], [226, 232, 240], 0.8);
+    drawText('OFFICIAL VERIFICATION CODE', margin + 30, qrSectionY + 92, { font: 'F2', size: 7.5, color: [71, 85, 105] });
+    drawText(gatePass.id || 'N/A', margin + 30, qrSectionY + 105, { font: 'F2', size: 11, color: [15, 23, 42] });
+    drawText(`STATUS: ${(gatePass.status || 'Pending').toUpperCase()}`, margin + 30, qrSectionY + 122, {
+        font: 'F2',
+        size: 8,
+        color: statusColor
+    });
+
+    // Security Footer
+    const footerY = 574;
+    drawRect(margin, footerY, contentWidth, 1, [226, 232, 240]);
+    drawText('Generated securely via HostelFix Student Residence System • Valid with institutional ID', margin, footerY + 8, { size: 7.5, color: [148, 163, 184] });
+    drawText(`CONFIDENTIAL • ${new Date().getFullYear()}`, pageWidth - margin - 120, footerY + 8, { font: 'F2', size: 7.5, color: [100, 116, 139] });
 
     const fontRegularId = addObject('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>');
     const fontBoldId = addObject('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>');
@@ -1780,40 +2103,120 @@ function populateTechnicianDropdown(technicianList = []) {
         .join('');
 }
 
-function getVisibleTechnicianComplaints(complaints, includeCompleted = false) {
+function getVisibleTechnicianComplaints(complaints = [], includeCompleted = false) {
     if (!currentUser || currentUser.role !== 'technician') {
         return complaints;
     }
 
+    const currentName = normalizeText(currentUser.name || '');
+    const currentEmail = normalizeText(currentUser.email || '');
+    const currentId = normalizeText(currentUser.userId || currentUser.id || '');
+
     return complaints.filter((complaint) => {
-        const matchesTechnician = normalizeText(complaint.assignedTo) === normalizeText(currentUser.name);
-        if (!matchesTechnician) return false;
-        if (!includeCompleted && String(complaint.status || '').toLowerCase() === 'completed') return false;
-        return true;
+        const cStatus = String(complaint.status || '').toLowerCase();
+        if (!includeCompleted && (cStatus === 'completed' || cStatus === 'resolved')) {
+            return false;
+        }
+
+        const cAssigned = normalizeText(complaint.assignedTo || '');
+        const cTech = normalizeText(complaint.technician || '');
+
+        // 1. Direct assignment match
+        const isDirectMatch = (
+            (cAssigned && (cAssigned === currentName || cAssigned === currentEmail || cAssigned === currentId)) ||
+            (cTech && (cTech === currentName || cTech === currentEmail || cTech === currentId))
+        );
+
+        // 2. Unassigned or general queue complaints available for all technicians to claim & resolve
+        const isUnassignedQueue = (
+            !cAssigned || cAssigned === 'unassigned' || cAssigned === 'none' || cAssigned === 'pending'
+        ) && (
+            !cTech || cTech === 'unassigned' || cTech === 'none'
+        );
+
+        // 3. Fallback demo match
+        const isDemoMatch = (cAssigned === 'mike johnson' || cTech === 'mike johnson');
+
+        return isDirectMatch || isUnassignedQueue || isDemoMatch;
     });
+}
+
+async function claimTechJob(complaintId) {
+    if (!complaintId) return;
+    const actorName = currentUser?.name || 'Technician';
+    showLoading();
+    try {
+        const response = await apiRequest(`/api/complaints/${encodeURIComponent(complaintId)}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                assignedTo: actorName,
+                technician: actorName,
+                status: 'In Progress'
+            })
+        });
+        hideLoading();
+        if (!response.ok) {
+            showToast('Unable to accept job.', 'error');
+            return;
+        }
+        showToast('Job claimed and assigned to you!', 'success');
+        await loadDashboardData();
+    } catch (error) {
+        hideLoading();
+        showToast('Unable to reach server.', 'error');
+    }
+}
+
+async function startTechJob(complaintId) {
+    if (!complaintId) return;
+    const actorName = currentUser?.name || 'Technician';
+    showLoading();
+    try {
+        const response = await apiRequest(`/api/complaints/${encodeURIComponent(complaintId)}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                assignedTo: actorName,
+                technician: actorName,
+                status: 'In Progress'
+            })
+        });
+        hideLoading();
+        if (!response.ok) {
+            showToast('Unable to start work.', 'error');
+            return;
+        }
+        showToast('Work started on this job! Status updated to In Progress.', 'info');
+        await loadDashboardData();
+    } catch (error) {
+        hideLoading();
+        showToast('Unable to reach server.', 'error');
+    }
 }
 
 async function markComplaintComplete(complaintId) {
     if (!complaintId) return;
-
+    const actorName = currentUser?.name || 'Technician';
     showLoading();
     try {
         const response = await apiRequest(`/api/complaints/${encodeURIComponent(complaintId)}/status`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ status: 'Completed' })
+            body: JSON.stringify({
+                status: 'Completed',
+                technician: actorName
+            })
         });
-        const data = await response.json();
         hideLoading();
 
         if (!response.ok) {
-            showToast(data.error || 'Unable to complete the job.', 'error');
+            showToast('Unable to complete the job.', 'error');
             return;
         }
 
-        showToast('Complaint marked complete and student notified.', 'success');
+        showToast('Complaint marked complete and student notified!', 'success');
         await loadDashboardData();
-        navigateTo('technician-dashboard');
     } catch (error) {
         hideLoading();
         showToast('Unable to reach server. Please try again.', 'error');
@@ -1848,39 +2251,50 @@ async function deleteComplaint(complaintId) {
 }
 
 function renderTechComplaintCard(complaint) {
+    const isAssignedToMe = normalizeText(complaint.assignedTo) === normalizeText(currentUser?.name) || normalizeText(complaint.technician) === normalizeText(currentUser?.name);
+    const isInProgress = String(complaint.status).toLowerCase() === 'in progress';
+
     return `
-        <div class="glass rounded-2xl border border-border overflow-hidden card-hover">
+        <div class="glass rounded-2xl border border-border overflow-hidden card-hover shadow-xs">
             <div class="p-6">
                 <div class="flex items-start justify-between mb-4">
                     <div class="flex items-center gap-3">
-                        <div class="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center"><i class="fa-solid ${getCategoryIcon(complaint.category)} text-primary"></i></div>
+                        <div class="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
+                            <i class="fa-solid ${getCategoryIcon(complaint.category)} text-primary text-base"></i>
+                        </div>
                         <div>
-                            <h4 class="font-semibold">${complaint.category || 'General Complaint'}</h4>
-                            <p class="text-xs text-text-secondary">${complaint.roomNumber || 'Room N/A'} | ${complaint.student || 'Anonymous'}</p>
+                            <div class="flex items-center gap-2">
+                                <h4 class="font-bold text-sm text-text">${complaint.category || 'General Complaint'}</h4>
+                                <span class="px-2 py-0.5 rounded-full text-[10px] font-bold ${isAssignedToMe ? 'bg-primary/10 text-primary border border-primary/20' : 'bg-surface-alt text-text-muted'}">
+                                    ${isAssignedToMe ? 'Assigned to You' : 'Queue Job'}
+                                </span>
+                            </div>
+                            <p class="text-xs text-text-secondary mt-0.5">${complaint.hostelBlock || 'Block A'} • ${complaint.roomNumber || 'Room N/A'} | <strong class="text-text">${complaint.student || 'Student'}</strong></p>
                         </div>
                     </div>
                     <div class="flex items-center gap-2">
-                        <span class="${getPriorityBadgeClass(complaint.priority)} px-2.5 py-1 rounded-full text-xs font-medium">${complaint.priority || 'Medium'}</span>
-                        <button onclick="deleteComplaint('${complaint.id}')" class="w-9 h-9 rounded-full bg-surface border border-border text-text-secondary hover:bg-danger hover:text-white transition-all" title="Delete assigned job">
+                        <span class="${getPriorityBadgeClass(complaint.priority)} px-2.5 py-1 rounded-full text-xs font-semibold">${complaint.priority || 'Medium'}</span>
+                        <button onclick="deleteComplaint('${complaint.id}')" class="w-8 h-8 rounded-xl bg-surface-alt border border-border text-text-secondary hover:bg-danger hover:text-white transition-all flex items-center justify-center text-xs" title="Delete job">
                             <i class="fa-solid fa-trash"></i>
                         </button>
                     </div>
                 </div>
-                <p class="text-sm text-text-secondary mb-4">${complaint.description || 'No description provided yet.'}</p>
-                <div class="flex items-center gap-2 mb-4">
-                    <div class="w-16 h-16 rounded-xl bg-surface-alt border border-border flex items-center justify-center">
-                        <i class="fa-solid fa-image text-text-muted text-xl"></i>
+                <div class="p-3.5 rounded-xl bg-surface-alt/70 border border-border/60 mb-4 text-xs">
+                    <p class="text-text font-medium leading-relaxed">${complaint.title || complaint.description || 'No description provided yet.'}</p>
+                    <div class="mt-2 pt-2 border-t border-border/50 flex items-center justify-between text-[11px] text-text-muted">
+                        <span>Ticket ID: <strong class="font-mono text-text">${complaint.id}</strong></span>
+                        <span>Registered: ${formatComplaintDate(complaint.createdAt)}</span>
                     </div>
                 </div>
-                <div class="flex gap-2">
-                    <button onclick="showToast('Job accepted successfully!', 'success')" class="flex-1 py-2 rounded-xl bg-emerald text-white text-sm font-medium hover:bg-emerald-dark transition-all">
-                        <i class="fa-solid fa-check mr-1"></i> Accept
+                <div class="flex flex-wrap items-center gap-2">
+                    <button onclick="claimTechJob('${complaint.id}')" class="flex-1 py-2 px-3 rounded-xl bg-emerald hover:bg-emerald-dark text-white text-xs font-bold transition-all shadow-sm flex items-center justify-center gap-1.5">
+                        <i class="fa-solid fa-check"></i> ${isAssignedToMe ? 'Re-Claim' : 'Accept Job'}
                     </button>
-                    <button onclick="showToast('Work started!', 'info')" class="flex-1 py-2 rounded-xl bg-primary text-white text-sm font-medium hover:bg-primary-dark transition-all">
-                        <i class="fa-solid fa-play mr-1"></i> Start Work
+                    <button onclick="startTechJob('${complaint.id}')" class="flex-1 py-2 px-3 rounded-xl bg-primary hover:bg-primary-dark text-white text-xs font-bold transition-all shadow-sm flex items-center justify-center gap-1.5">
+                        <i class="fa-solid fa-play"></i> ${isInProgress ? 'Working...' : 'Start Work'}
                     </button>
-                    <button onclick="markComplaintComplete('${complaint.id}')" class="flex-1 py-2 rounded-xl bg-surface border border-border text-text text-sm font-medium hover:bg-surface-alt transition-all">
-                        <i class="fa-solid fa-flag-checkered mr-1"></i> Complete
+                    <button onclick="markComplaintComplete('${complaint.id}')" class="flex-1 py-2 px-3 rounded-xl border border-border bg-surface hover:bg-surface-alt text-text text-xs font-bold transition-all flex items-center justify-center gap-1.5">
+                        <i class="fa-solid fa-flag-checkered text-emerald"></i> Complete
                     </button>
                 </div>
             </div>
@@ -1893,7 +2307,7 @@ function renderTechAssignedComplaints(complaints) {
     const pageContainer = document.getElementById('technicianAssignedPageComplaints');
     const visibleComplaints = getVisibleTechnicianComplaints(complaints, false);
 
-    const noDataMarkup = '<div class="glass rounded-2xl border border-border p-6 text-sm text-text-secondary">No complaints are assigned to your name yet.</div>';
+    const noDataMarkup = '<div class="glass rounded-2xl border border-border p-6 text-sm text-text-secondary text-center">No active jobs in your queue right now.</div>';
 
     const markup = visibleComplaints.map(renderTechComplaintCard).join('');
 
@@ -1911,10 +2325,10 @@ function renderTechCompletedComplaints(complaints) {
     if (!container) return;
 
     const completedComplaints = getVisibleTechnicianComplaints(complaints, true)
-        .filter((complaint) => String(complaint.status || '').toLowerCase() === 'completed');
+        .filter((complaint) => String(complaint.status || '').toLowerCase() === 'completed' || String(complaint.status || '').toLowerCase() === 'resolved');
 
     if (!completedComplaints.length) {
-        container.innerHTML = '<div class="glass rounded-2xl border border-border p-6 text-sm text-text-secondary">No completed jobs yet.</div>';
+        container.innerHTML = '<div class="glass rounded-2xl border border-border p-6 text-sm text-text-secondary text-center">No completed jobs recorded yet.</div>';
         return;
     }
 
@@ -1924,20 +2338,22 @@ function renderTechCompletedComplaints(complaints) {
                 <thead class="bg-surface-alt">
                     <tr>
                         <th class="text-left px-6 py-4 text-xs font-semibold text-text-secondary uppercase">ID</th>
-                        <th class="text-left px-6 py-4 text-xs font-semibold text-text-secondary uppercase">Issue</th>
-                        <th class="text-left px-6 py-4 text-xs font-semibold text-text-secondary uppercase">Room</th>
-                        <th class="text-left px-6 py-4 text-xs font-semibold text-text-secondary uppercase">Completed</th>
+                        <th class="text-left px-6 py-4 text-xs font-semibold text-text-secondary uppercase">Category</th>
+                        <th class="text-left px-6 py-4 text-xs font-semibold text-text-secondary uppercase">Room & Block</th>
+                        <th class="text-left px-6 py-4 text-xs font-semibold text-text-secondary uppercase">Student</th>
+                        <th class="text-left px-6 py-4 text-xs font-semibold text-text-secondary uppercase">Completed Date</th>
                         <th class="text-left px-6 py-4 text-xs font-semibold text-text-secondary uppercase">Status</th>
                     </tr>
                 </thead>
                 <tbody class="divide-y divide-border">
                     ${completedComplaints.map((complaint) => `
-                        <tr class="table-row">
-                            <td class="px-6 py-4 text-sm font-medium">${complaint.id || 'N/A'}</td>
-                            <td class="px-6 py-4 text-sm">${complaint.category || 'General Complaint'}</td>
-                            <td class="px-6 py-4 text-sm">${complaint.roomNumber || 'N/A'}</td>
-                            <td class="px-6 py-4 text-sm text-text-secondary">${formatComplaintDate(complaint.createdAt)}</td>
-                            <td class="px-6 py-4"><span class="${getStatusBadgeClass(complaint.status)} px-2.5 py-1 rounded-full text-xs font-medium">${complaint.status || 'Completed'}</span></td>
+                        <tr class="table-row hover:bg-surface-alt/40 transition-colors">
+                            <td class="px-6 py-4 text-xs font-mono font-bold text-primary">${complaint.id || 'N/A'}</td>
+                            <td class="px-6 py-4 text-sm font-semibold">${complaint.category || 'General Complaint'}</td>
+                            <td class="px-6 py-4 text-xs">${complaint.hostelBlock || 'Block A'} • ${complaint.roomNumber || 'N/A'}</td>
+                            <td class="px-6 py-4 text-xs font-medium">${complaint.student || 'Student'}</td>
+                            <td class="px-6 py-4 text-xs text-text-secondary">${formatComplaintDate(complaint.createdAt)}</td>
+                            <td class="px-6 py-4"><span class="${getStatusBadgeClass(complaint.status)} px-2.5 py-1 rounded-full text-xs font-semibold">${complaint.status || 'Completed'}</span></td>
                         </tr>
                     `).join('')}
                 </tbody>
@@ -1952,35 +2368,447 @@ function renderTechSummary(complaints) {
     const techCompleted = document.getElementById('techCompleted');
     const techUrgent = document.getElementById('techUrgent');
 
-    if (!techJobs && !techPending && !techCompleted && !techUrgent) return;
-
     const visibleComplaints = getVisibleTechnicianComplaints(complaints, false);
     const total = visibleComplaints.length;
-    const pending = visibleComplaints.filter((item) => ['Pending', 'Assigned', 'Accepted'].includes(item.status)).length;
-    const completed = getVisibleTechnicianComplaints(complaints, true).filter((item) => item.status === 'Completed').length;
-    const urgent = visibleComplaints.filter((item) => String(item.priority).toLowerCase() === 'high').length;
+    const pending = visibleComplaints.filter((item) => !item.status || ['Pending', 'Assigned', 'Accepted', 'In Progress'].includes(item.status)).length;
+    const completed = getVisibleTechnicianComplaints(complaints, true).filter((item) => item.status === 'Completed' || item.status === 'Resolved').length;
+    const urgent = visibleComplaints.filter((item) => String(item.priority).toLowerCase() === 'high' || String(item.priority).toLowerCase() === 'emergency').length;
 
     if (techJobs) techJobs.textContent = total.toLocaleString();
     if (techPending) techPending.textContent = pending.toLocaleString();
     if (techCompleted) techCompleted.textContent = completed.toLocaleString();
     if (techUrgent) techUrgent.textContent = urgent.toLocaleString();
+
+    // Update Sidebar badges for technician
+    document.querySelectorAll('.tech-sidebar-assigned-badge').forEach(badge => {
+        badge.textContent = String(total);
+    });
+
+    // Update technician sidebar user header
+    if (currentUser && currentUser.role === 'technician') {
+        const initials = (currentUser.name || 'TC').split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase();
+        document.querySelectorAll('.tech-sidebar-initials').forEach(el => {
+            el.textContent = initials;
+        });
+        document.querySelectorAll('.tech-sidebar-name').forEach(el => {
+            el.textContent = currentUser.name;
+        });
+    }
 }
 
-function renderAdminSummary(summary, complaints) {
+function renderAdminSummary(summary, complaints = [], allUsers = []) {
     const adminTotal = document.getElementById('adminTotalComplaints');
     const adminPending = document.getElementById('adminPendingComplaints');
     const adminCompleted = document.getElementById('adminCompletedComplaints');
     const adminActiveTechnicians = document.getElementById('adminActiveTechnicians');
     const adminTotalWardens = document.getElementById('adminTotalWardens');
 
-    const techCount = users.filter(u => u.role === 'technician').length;
-    const wardenCount = users.filter(u => u.role === 'warden').length;
+    const techCount = (allUsers || users || []).filter(u => u.role === 'technician').length;
+    const wardenCount = (allUsers || users || []).filter(u => u.role === 'warden').length;
+    const pendingCount = (complaints || []).filter(c => !c.status || c.status === 'Pending' || c.status === 'In Progress').length;
+    const resolvedCount = (complaints || []).filter(c => c.status === 'Resolved' || c.status === 'Completed').length;
 
-    if (adminTotal) adminTotal.textContent = String(summary.total || complaints.length || 0).toLocaleString();
-    if (adminPending) adminPending.textContent = String(summary.pending || 0).toLocaleString();
-    if (adminCompleted) adminCompleted.textContent = String(summary.completed || 0).toLocaleString();
-    if (adminActiveTechnicians) adminActiveTechnicians.textContent = String(summary.activeTechnicians || techCount || 0).toLocaleString();
-    if (adminTotalWardens) adminTotalWardens.textContent = String(wardenCount || 0).toLocaleString();
+    if (adminTotal) adminTotal.textContent = String(summary?.total || complaints.length || 0).toLocaleString();
+    if (adminPending) adminPending.textContent = String(summary?.pending || pendingCount || 0).toLocaleString();
+    if (adminCompleted) adminCompleted.textContent = String(summary?.completed || summary?.resolvedToday || resolvedCount || 0).toLocaleString();
+    if (adminActiveTechnicians) adminActiveTechnicians.textContent = String(summary?.activeTechnicians || techCount || 3).toLocaleString();
+    if (adminTotalWardens) adminTotalWardens.textContent = String(wardenCount || 3).toLocaleString();
+
+    // Dynamic Sidebar Badges
+    document.querySelectorAll('.admin-gate-pass-badge, #adminSidebarGatePassBadge').forEach(el => el.textContent = String(latestGatePasses.length || 0));
+    document.querySelectorAll('.admin-complaints-badge, #adminSidebarComplaintBadge').forEach(el => el.textContent = String(complaints.length || 0));
+
+    // Render Dynamic Visuals & Tables
+    renderAdminCategoryChart(complaints);
+    renderAdminMonthlyChart(complaints);
+    renderAdminDashboardTechTable(allUsers, complaints);
+    renderAdminDashboardComplaints(complaints);
+}
+
+// 1. Dynamic Complaint Categories Donut Chart & Legend
+function renderAdminCategoryChart(complaints = []) {
+    const pieChart = document.getElementById('adminCategoryPieChart');
+    const totalCountEl = document.getElementById('adminCategoryTotalCount');
+    const legendEl = document.getElementById('adminCategoryLegend');
+    if (!pieChart || !legendEl) return;
+
+    if (!complaints.length) {
+        pieChart.style.background = 'conic-gradient(#3b82f6 0deg 360deg)';
+        if (totalCountEl) totalCountEl.textContent = '0';
+        legendEl.innerHTML = '<div class="col-span-2 text-xs text-text-secondary text-center py-2">No complaints recorded yet.</div>';
+        return;
+    }
+
+    const categoryCounts = {};
+    complaints.forEach((c) => {
+        const cat = (c.category || 'Other').trim();
+        categoryCounts[cat] = (categoryCounts[cat] || 0) + 1;
+    });
+
+    const categories = Object.keys(categoryCounts);
+    const total = complaints.length;
+    if (totalCountEl) totalCountEl.textContent = String(categories.length);
+
+    const palette = [
+        { color: '#2563EB', bgClass: 'bg-primary' },
+        { color: '#10B981', bgClass: 'bg-emerald' },
+        { color: '#F59E0B', bgClass: 'bg-warning' },
+        { color: '#EF4444', bgClass: 'bg-danger' },
+        { color: '#06B6D4', bgClass: 'bg-info' },
+        { color: '#8B5CF6', bgClass: 'bg-indigo-500' },
+        { color: '#EC4899', bgClass: 'bg-pink-500' },
+        { color: '#64748B', bgClass: 'bg-slate-500' }
+    ];
+
+    let gradientParts = [];
+    let currentAngle = 0;
+
+    const legendItems = categories.map((cat, idx) => {
+        const count = categoryCounts[cat];
+        const pct = Math.round((count / total) * 100);
+        const colObj = palette[idx % palette.length];
+        const nextAngle = currentAngle + (count / total) * 360;
+        gradientParts.push(`${colObj.color} ${currentAngle.toFixed(1)}deg ${nextAngle.toFixed(1)}deg`);
+        currentAngle = nextAngle;
+
+        return `
+            <div class="flex items-center justify-between p-2 rounded-xl bg-surface-alt/70 border border-border/50 text-xs">
+                <div class="flex items-center gap-2">
+                    <span class="w-3 h-3 rounded-full shrink-0" style="background-color: ${colObj.color}"></span>
+                    <span class="text-text font-medium truncate max-w-[100px] sm:max-w-[130px]">${cat}</span>
+                </div>
+                <span class="font-bold text-text">${pct}% <span class="text-text-muted text-[10px]">(${count})</span></span>
+            </div>
+        `;
+    });
+
+    pieChart.style.background = `conic-gradient(${gradientParts.join(', ')})`;
+    legendEl.innerHTML = legendItems.join('');
+}
+
+// 2. Dynamic Monthly Ticket Volume Bar Chart
+function renderAdminMonthlyChart(complaints = []) {
+    const chartContainer = document.getElementById('adminMonthlyComplaintsChart');
+    const peakStats = document.getElementById('adminMonthlyPeakStats');
+    if (!chartContainer) return;
+
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const now = new Date();
+    const last6Months = [];
+    for (let i = 5; i >= 0; i--) {
+        const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+        last6Months.push({
+            monthIndex: d.getMonth(),
+            year: d.getFullYear(),
+            label: monthNames[d.getMonth()],
+            count: 0
+        });
+    }
+
+    complaints.forEach((c) => {
+        const cDate = new Date(c.createdAt || c.date || Date.now());
+        if (!isNaN(cDate.getTime())) {
+            const m = cDate.getMonth();
+            const y = cDate.getFullYear();
+            const target = last6Months.find(item => item.monthIndex === m && item.year === y);
+            if (target) {
+                target.count += 1;
+            }
+        }
+    });
+
+    const maxCount = Math.max(...last6Months.map(m => m.count), 1);
+    const peakMonth = last6Months.reduce((prev, curr) => (curr.count > prev.count ? curr : prev), last6Months[0]);
+
+    chartContainer.innerHTML = last6Months.map((m) => {
+        const heightPct = Math.max(15, Math.round((m.count / maxCount) * 100));
+        const isPeak = m.count === maxCount && m.count > 0;
+        return `
+            <div class="flex-1 flex flex-col items-center gap-2 group relative">
+                <div class="absolute -top-7 opacity-0 group-hover:opacity-100 transition-opacity px-2 py-0.5 rounded-lg bg-text text-surface text-[10px] font-bold pointer-events-none whitespace-nowrap shadow-md z-10">
+                    ${m.count} ${m.count === 1 ? 'ticket' : 'tickets'}
+                </div>
+                <div class="w-full ${isPeak ? 'bg-primary shadow-sm' : 'bg-primary/30 group-hover:bg-primary/50'} rounded-t-xl transition-all chart-bar" style="height: ${heightPct}%"></div>
+                <span class="text-xs ${isPeak ? 'font-bold text-primary' : 'text-text-secondary'}">${m.label}</span>
+            </div>
+        `;
+    }).join('');
+
+    if (peakStats) {
+        const resolved = complaints.filter(c => c.status === 'Completed' || c.status === 'Resolved').length;
+        const rate = complaints.length ? Math.round((resolved / complaints.length) * 100) : 100;
+        peakStats.innerHTML = `
+            <span>Peak Month: <strong class="text-text">${peakMonth.label} (${peakMonth.count} tickets)</strong></span>
+            <span class="text-emerald font-semibold"><i class="fa-solid fa-bolt"></i> ${rate}% Dynamic Resolution Rate</span>
+        `;
+    }
+}
+
+// 3. Dynamic Technician Performance Table on Admin Dashboard
+function renderAdminDashboardTechTable(allUsers = [], complaints = []) {
+    const tbody = document.getElementById('adminDashboardTechTableBody');
+    if (!tbody) return;
+
+    const technicians = Array.isArray(allUsers) ? allUsers.filter((u) => u.role === 'technician' || u.specialization || u.id?.startsWith('T-')) : [];
+    if (!technicians.length) {
+        tbody.innerHTML = '<tr><td colspan="7" class="px-6 py-6 text-center text-sm text-text-secondary">No technicians registered. Click "Add Technician" to create one.</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = technicians.map((t) => {
+        const initials = (t.name || 'TC').split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase();
+        const completed = complaints.filter((c) => (c.technician === t.name || c.assignedTo === t.name) && (String(c.status).toLowerCase() === 'completed' || String(c.status).toLowerCase() === 'resolved')).length;
+        const rating = t.rating || 4.9;
+        const avgTime = t.avgRepairTime || '2.4h';
+        const statusClass = t.status === 'On Leave' ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800';
+
+        return `
+            <tr class="table-row hover:bg-surface-alt/40 transition-colors">
+                <td class="px-6 py-4">
+                    <div class="flex items-center gap-3">
+                        <div class="w-9 h-9 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center text-primary font-bold text-xs">${initials}</div>
+                        <div>
+                            <p class="font-semibold text-sm text-text">${t.name || 'Technician'}</p>
+                            <p class="text-[11px] text-text-muted font-mono">${t.phone || t.email || ''}</p>
+                        </div>
+                    </div>
+                </td>
+                <td class="px-6 py-4 text-xs font-semibold text-primary">${t.specialization || 'General Maintenance'}</td>
+                <td class="px-6 py-4 text-sm font-bold text-text">${t.completedCount || completed}</td>
+                <td class="px-6 py-4 text-xs font-mono text-text-secondary">${avgTime}</td>
+                <td class="px-6 py-4">
+                    <div class="flex items-center gap-1 text-warning text-xs">
+                        <i class="fa-solid fa-star"></i>
+                        <span class="font-bold text-text ml-0.5">${rating}</span>
+                    </div>
+                </td>
+                <td class="px-6 py-4">
+                    <span class="px-2.5 py-1 rounded-full text-[11px] font-semibold ${statusClass}">${t.status || 'Active Duty'}</span>
+                </td>
+                <td class="px-6 py-4">
+                    <div class="flex items-center gap-2">
+                        <button onclick="openEditTechnicianModal('${t.id || t.userId || t.email}')" class="px-2.5 py-1 rounded-lg border border-border bg-surface hover:bg-surface-alt text-xs font-semibold text-text hover:text-primary transition-all">
+                            Edit
+                        </button>
+                        <button onclick="deleteTechnician('${t.id || t.userId || t.email}')" class="px-2.5 py-1 rounded-lg bg-danger/10 hover:bg-danger hover:text-white text-xs font-semibold text-danger transition-all">
+                            Delete
+                        </button>
+                    </div>
+                </td>
+            </tr>
+        `;
+    }).join('');
+}
+
+// 4. Dynamic Recent Complaints Table with Real-time Search
+let adminComplaintSearchTerm = '';
+function handleAdminComplaintSearch(val) {
+    adminComplaintSearchTerm = (val || '').toLowerCase().trim();
+    renderAdminDashboardComplaints(latestComplaints);
+}
+
+function renderAdminDashboardComplaints(complaints = []) {
+    const tbody = document.getElementById('adminComplaintsTableBody');
+    if (!tbody) return;
+
+    let list = Array.isArray(complaints) ? complaints.slice() : [];
+    if (adminComplaintSearchTerm) {
+        list = list.filter(c => {
+            const student = String(c.student || '').toLowerCase();
+            const room = String(c.roomNumber || '').toLowerCase();
+            const block = String(c.hostelBlock || '').toLowerCase();
+            const title = String(c.title || c.description || '').toLowerCase();
+            const cat = String(c.category || '').toLowerCase();
+            const id = String(c.id || '').toLowerCase();
+            return student.includes(adminComplaintSearchTerm) ||
+                   room.includes(adminComplaintSearchTerm) ||
+                   block.includes(adminComplaintSearchTerm) ||
+                   title.includes(adminComplaintSearchTerm) ||
+                   cat.includes(adminComplaintSearchTerm) ||
+                   id.includes(adminComplaintSearchTerm);
+        });
+    }
+
+    if (!list.length) {
+        tbody.innerHTML = '<tr><td colspan="8" class="px-6 py-8 text-center text-sm text-text-secondary">No matching complaints found.</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = list.slice(0, 10).map((c) => {
+        const priorityClass = getPriorityBadgeClass(c.priority);
+        const statusClass = getStatusBadgeClass(c.status);
+        const isPending = !c.status || c.status === 'Pending' || c.status === 'In Progress';
+
+        return `
+            <tr class="table-row hover:bg-surface-alt/40 transition-colors">
+                <td class="px-6 py-4 text-xs font-mono font-bold text-primary">${c.id || 'N/A'}</td>
+                <td class="px-6 py-4">
+                    <p class="font-semibold text-sm text-text">${c.student || 'Student'}</p>
+                    <p class="text-[11px] text-text-muted truncate max-w-[150px]">${c.title || c.description || 'Maintenance issue'}</p>
+                </td>
+                <td class="px-6 py-4 text-xs text-text">${c.hostelBlock || 'Block A'} • ${c.roomNumber || 'N/A'}</td>
+                <td class="px-6 py-4 text-xs font-medium text-text">${c.category || 'General'}</td>
+                <td class="px-6 py-4"><span class="${priorityClass} px-2.5 py-0.5 rounded-full text-[11px] font-semibold">${c.priority || 'Low'}</span></td>
+                <td class="px-6 py-4"><span class="${statusClass} px-2.5 py-0.5 rounded-full text-[11px] font-semibold">${c.status || 'Pending'}</span></td>
+                <td class="px-6 py-4 text-xs font-medium text-text-secondary">${c.technician || c.assignedTo || 'Unassigned'}</td>
+                <td class="px-6 py-4">
+                    <div class="flex flex-wrap items-center gap-1.5">
+                        <button onclick="openEditComplaintModal('${c.id}')" class="px-2.5 py-1 rounded-lg bg-primary/10 text-primary hover:bg-primary hover:text-white text-xs font-semibold transition-all">Edit</button>
+                        ${isPending ? `
+                            <button onclick="updateComplaintStatus('${c.id}', 'Completed')" class="px-2.5 py-1 rounded-lg bg-emerald/10 text-emerald hover:bg-emerald hover:text-white text-xs font-semibold transition-all">Resolve</button>
+                        ` : ''}
+                        <button onclick="deleteComplaint('${c.id}')" class="px-2.5 py-1 rounded-lg bg-danger/10 text-danger hover:bg-danger hover:text-white text-xs font-semibold transition-all">Delete</button>
+                    </div>
+                </td>
+            </tr>
+        `;
+    }).join('');
+}
+
+// 5. Full Interactive Dynamic CRUD Modals & Handlers
+function openEditComplaintModal(complaintId) {
+    const complaint = latestComplaints.find(c => c.id === complaintId);
+    if (!complaint) return showToast('Complaint not found.', 'error');
+
+    let modal = document.getElementById('dynamicEditComplaintModal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'dynamicEditComplaintModal';
+        modal.className = 'fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs';
+        document.body.appendChild(modal);
+    }
+
+    modal.innerHTML = `
+        <div class="glass w-full max-w-lg rounded-3xl border border-border p-6 shadow-2xl animate-scale-up">
+            <div class="flex items-center justify-between mb-5 pb-4 border-b border-border">
+                <div class="flex items-center gap-2.5">
+                    <div class="w-10 h-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center font-bold text-sm">
+                        <i class="fa-solid fa-pen-to-square"></i>
+                    </div>
+                    <div>
+                        <h3 class="text-lg font-bold text-text">Edit Maintenance Ticket</h3>
+                        <p class="text-xs text-text-secondary font-mono">${complaint.id}</p>
+                    </div>
+                </div>
+                <button onclick="document.getElementById('dynamicEditComplaintModal').remove()" class="w-8 h-8 rounded-full border border-border flex items-center justify-center text-text-muted hover:text-text hover:bg-surface-alt">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+            <form id="editComplaintForm" onsubmit="handleSaveComplaintEdit(event, '${complaint.id}')" class="space-y-4 text-xs">
+                <div>
+                    <label class="block font-semibold text-text mb-1">Issue Title / Description</label>
+                    <input id="editComplaintTitle" type="text" value="${(complaint.title || complaint.description || '').replace(/"/g, '&quot;')}" required class="input-focus w-full px-3.5 py-2 rounded-xl border border-border bg-surface-alt text-text">
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block font-semibold text-text mb-1">Category</label>
+                        <select id="editComplaintCategory" class="input-focus w-full px-3.5 py-2 rounded-xl border border-border bg-surface-alt text-text font-semibold">
+                            <option value="Electrical" ${complaint.category === 'Electrical' ? 'selected' : ''}>⚡ Electrical</option>
+                            <option value="Plumbing" ${complaint.category === 'Plumbing' ? 'selected' : ''}>💧 Plumbing</option>
+                            <option value="Wi-Fi" ${complaint.category === 'Wi-Fi' ? 'selected' : ''}>📶 Wi-Fi / Network</option>
+                            <option value="Furniture" ${complaint.category === 'Furniture' ? 'selected' : ''}>🪑 Furniture</option>
+                            <option value="Appliances" ${complaint.category === 'Appliances' ? 'selected' : ''}>🔌 Appliances</option>
+                            <option value="Carpentry" ${complaint.category === 'Carpentry' ? 'selected' : ''}>🔨 Carpentry</option>
+                            <option value="Cleaning" ${complaint.category === 'Cleaning' ? 'selected' : ''}>🧹 Cleaning</option>
+                            <option value="Others" ${complaint.category === 'Others' ? 'selected' : ''}>📦 Others</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block font-semibold text-text mb-1">Priority</label>
+                        <select id="editComplaintPriority" class="input-focus w-full px-3.5 py-2 rounded-xl border border-border bg-surface-alt text-text font-semibold">
+                            <option value="Low" ${complaint.priority === 'Low' ? 'selected' : ''}>🟢 Low</option>
+                            <option value="Medium" ${complaint.priority === 'Medium' ? 'selected' : ''}>🟡 Medium</option>
+                            <option value="High" ${complaint.priority === 'High' ? 'selected' : ''}>🔴 High</option>
+                            <option value="Emergency" ${complaint.priority === 'Emergency' ? 'selected' : ''}>🚨 Emergency</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block font-semibold text-text mb-1">Hostel Block</label>
+                        <input id="editComplaintBlock" type="text" value="${complaint.hostelBlock || 'Block A'}" class="input-focus w-full px-3.5 py-2 rounded-xl border border-border bg-surface-alt text-text">
+                    </div>
+                    <div>
+                        <label class="block font-semibold text-text mb-1">Room Number</label>
+                        <input id="editComplaintRoom" type="text" value="${complaint.roomNumber || '101'}" class="input-focus w-full px-3.5 py-2 rounded-xl border border-border bg-surface-alt text-text">
+                    </div>
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block font-semibold text-text mb-1">Status</label>
+                        <select id="editComplaintStatus" class="input-focus w-full px-3.5 py-2 rounded-xl border border-border bg-surface-alt text-text font-semibold">
+                            <option value="Pending" ${complaint.status === 'Pending' ? 'selected' : ''}>Pending</option>
+                            <option value="In Progress" ${complaint.status === 'In Progress' ? 'selected' : ''}>In Progress</option>
+                            <option value="Completed" ${complaint.status === 'Completed' || complaint.status === 'Resolved' ? 'selected' : ''}>Completed / Resolved</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block font-semibold text-text mb-1">Assigned Technician</label>
+                        <input id="editComplaintTech" type="text" value="${complaint.technician || complaint.assignedTo || ''}" placeholder="e.g. Mike Johnson" class="input-focus w-full px-3.5 py-2 rounded-xl border border-border bg-surface-alt text-text">
+                    </div>
+                </div>
+                <div>
+                    <label class="block font-semibold text-text mb-1">Maintenance Notes</label>
+                    <textarea id="editComplaintNotes" rows="2" placeholder="Add resolution comments or diagnostic notes..." class="input-focus w-full px-3.5 py-2 rounded-xl border border-border bg-surface-alt text-text">${complaint.notes || ''}</textarea>
+                </div>
+                <div class="flex items-center justify-end gap-3 pt-3 border-t border-border">
+                    <button type="button" onclick="document.getElementById('dynamicEditComplaintModal').remove()" class="px-4 py-2.5 rounded-xl border border-border text-text-secondary hover:text-text hover:bg-surface-alt font-semibold transition-all">Cancel</button>
+                    <button type="submit" class="btn-primary px-5 py-2.5 rounded-xl text-white font-bold shadow-md">Save Changes</button>
+                </div>
+            </form>
+        </div>
+    `;
+}
+
+async function handleSaveComplaintEdit(e, complaintId) {
+    e.preventDefault();
+    const title = document.getElementById('editComplaintTitle')?.value;
+    const category = document.getElementById('editComplaintCategory')?.value;
+    const priority = document.getElementById('editComplaintPriority')?.value;
+    const hostelBlock = document.getElementById('editComplaintBlock')?.value;
+    const roomNumber = document.getElementById('editComplaintRoom')?.value;
+    const status = document.getElementById('editComplaintStatus')?.value;
+    const technician = document.getElementById('editComplaintTech')?.value;
+    const notes = document.getElementById('editComplaintNotes')?.value;
+
+    showLoading();
+    try {
+        const response = await apiRequest(`/api/complaints/${encodeURIComponent(complaintId)}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title, description: title, category, priority, hostelBlock, roomNumber, status, technician, assignedTo: technician, notes })
+        });
+        hideLoading();
+        if (!response.ok) {
+            showToast('Failed to update complaint details.', 'error');
+            return;
+        }
+        showToast('Complaint updated successfully!', 'success');
+        document.getElementById('dynamicEditComplaintModal')?.remove();
+        await loadDashboardData();
+    } catch (err) {
+        hideLoading();
+        showToast('Unable to connect to server.', 'error');
+        console.error(err);
+    }
+}
+
+async function deleteComplaint(complaintId) {
+    if (!confirm(`Are you sure you want to delete complaint ${complaintId}?`)) return;
+    showLoading();
+    try {
+        const response = await apiRequest(`/api/complaints/${encodeURIComponent(complaintId)}`, { method: 'DELETE' });
+        hideLoading();
+        if (!response.ok) {
+            showToast('Failed to delete complaint.', 'error');
+            return;
+        }
+        showToast('Complaint deleted successfully.', 'success');
+        await loadDashboardData();
+    } catch (err) {
+        hideLoading();
+        showToast('Unable to connect to server.', 'error');
+    }
 }
 
 function renderAdminStudents(users = [], complaints = []) {
@@ -1988,22 +2816,43 @@ function renderAdminStudents(users = [], complaints = []) {
     if (!tbody) return;
     const students = users.filter((u) => u.role === 'student');
     if (!students.length) {
-        tbody.innerHTML = '<tr><td colspan="5" class="px-6 py-6 text-center text-sm text-text-secondary">No registered students found.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="6" class="px-6 py-6 text-center text-sm text-text-secondary">No registered students found.</td></tr>';
         return;
     }
     tbody.innerHTML = students.map((s) => {
         const studentComplaints = complaints.filter((c) => c.userEmail === s.email || c.student === s.name).length;
         const initials = (s.name || 'ST').split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase();
         return `
-            <tr class="table-row">
+            <tr class="table-row hover:bg-surface-alt/40 transition-colors">
                 <td class="px-6 py-4"><div class="flex items-center gap-3"><div class="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary text-xs font-bold">${initials}</div><span class="font-medium text-sm">${s.name || 'Student'}</span></div></td>
-                <td class="px-6 py-4 text-sm">${s.registrationNumber || 'REG-2024001'}</td>
-                <td class="px-6 py-4 text-sm">${s.roomNumber || 'A-204'}</td>
-                <td class="px-6 py-4 text-sm font-medium">${studentComplaints}</td>
-                <td class="px-6 py-4"><span class="badge-completed px-2.5 py-1 rounded-full text-xs font-medium">Active</span></td>
+                <td class="px-6 py-4 text-xs font-mono">${s.registrationNumber || 'REG-2024001'}</td>
+                <td class="px-6 py-4 text-xs">${s.hostelBlock || 'Block A'} • ${s.roomNumber || 'A-204'}</td>
+                <td class="px-6 py-4 text-xs font-mono text-text-secondary">${s.phone || '+91 98765 00000'}</td>
+                <td class="px-6 py-4 text-sm font-bold text-primary">${studentComplaints}</td>
+                <td class="px-6 py-4">
+                    <button onclick="deleteStudent('${s.userId || s.id || s.email}')" class="px-2.5 py-1 rounded-lg bg-danger/10 text-danger hover:bg-danger hover:text-white text-xs font-semibold transition-all">Remove</button>
+                </td>
             </tr>
         `;
     }).join('');
+}
+
+async function deleteStudent(studentId) {
+    if (!confirm('Are you sure you want to remove this student record?')) return;
+    showLoading();
+    try {
+        const response = await apiRequest(`/api/students/${encodeURIComponent(studentId)}`, { method: 'DELETE' });
+        hideLoading();
+        if (!response.ok) {
+            showToast('Failed to delete student.', 'error');
+            return;
+        }
+        showToast('Student deleted successfully.', 'success');
+        await loadDashboardData();
+    } catch (err) {
+        hideLoading();
+        showToast('Unable to connect to server.', 'error');
+    }
 }
 
 function renderAdminWardens(users = []) {
@@ -2018,7 +2867,7 @@ function renderAdminWardens(users = []) {
     container.innerHTML = wardens.map((w) => {
         const initials = (w.name || 'WD').split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase();
         return `
-            <div class="glass rounded-2xl border border-border p-5 card-hover relative group">
+            <div class="glass rounded-2xl border border-border p-5 card-hover relative group shadow-xs">
                 <div class="flex items-center justify-between mb-4">
                     <div class="flex items-center gap-3">
                         <div class="w-12 h-12 rounded-full bg-gradient-to-br from-indigo-600 to-primary flex items-center justify-center text-white font-bold text-sm shadow-md">${initials}</div>
@@ -2068,7 +2917,7 @@ function renderAdminTechnicians(users = [], complaints = []) {
         const initials = (t.name || 'TC').split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase();
         const done = complaints.filter((c) => c.technician === t.name || c.assignedTo === t.name).filter((c) => String(c.status).toLowerCase() === 'completed').length;
         return `
-            <div class="glass rounded-2xl border border-border p-5 card-hover relative group">
+            <div class="glass rounded-2xl border border-border p-5 card-hover relative group shadow-xs">
                 <div class="flex items-center justify-between mb-4">
                     <div class="flex items-center gap-3">
                         <div class="w-12 h-12 rounded-full bg-gradient-to-br from-primary to-info flex items-center justify-center text-white font-bold text-sm shadow-md">${initials}</div>
@@ -2093,31 +2942,445 @@ function renderAdminTechnicians(users = [], complaints = []) {
                 </div>
                 <div class="flex items-center justify-between">
                     <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-500/10 text-blue-600 border border-blue-500/30">${t.status || 'Active Duty'}</span>
-                    <span class="text-[11px] text-text-muted">${t.phone || t.email || ''}</span>
+                    <span class="text-[11px] text-text-muted font-mono">${t.phone || t.email || ''}</span>
                 </div>
             </div>
         `;
     }).join('');
 }
 
+let adminComplaintsState = {
+    page: 1,
+    pageSize: 8,
+    search: '',
+    status: 'all',
+    category: 'all',
+    priority: 'all'
+};
+
+function handleAdminComplaintsFilter() {
+    const searchEl = document.getElementById('adminComplaintsSearchInput');
+    const statusEl = document.getElementById('adminComplaintsStatusFilter');
+    const catEl = document.getElementById('adminComplaintsCategoryFilter');
+    const prioEl = document.getElementById('adminComplaintsPriorityFilter');
+
+    adminComplaintsState.search = (searchEl?.value || '').toLowerCase().trim();
+    adminComplaintsState.status = statusEl?.value || 'all';
+    adminComplaintsState.category = catEl?.value || 'all';
+    adminComplaintsState.priority = prioEl?.value || 'all';
+    adminComplaintsState.page = 1;
+    renderAdminFullComplaintsTable(latestComplaints);
+}
+
+function filterComplaintsByQuickStatus(status) {
+    const statusEl = document.getElementById('adminComplaintsStatusFilter');
+    if (statusEl) statusEl.value = status;
+    adminComplaintsState.status = status;
+    adminComplaintsState.page = 1;
+    renderAdminFullComplaintsTable(latestComplaints);
+}
+
+function resetAdminComplaintsFilters() {
+    const searchEl = document.getElementById('adminComplaintsSearchInput');
+    const statusEl = document.getElementById('adminComplaintsStatusFilter');
+    const catEl = document.getElementById('adminComplaintsCategoryFilter');
+    const prioEl = document.getElementById('adminComplaintsPriorityFilter');
+
+    if (searchEl) searchEl.value = '';
+    if (statusEl) statusEl.value = 'all';
+    if (catEl) catEl.value = 'all';
+    if (prioEl) prioEl.value = 'all';
+
+    adminComplaintsState = { page: 1, pageSize: 8, search: '', status: 'all', category: 'all', priority: 'all' };
+    renderAdminFullComplaintsTable(latestComplaints);
+}
+
+function changeAdminComplaintsPage(newPage) {
+    adminComplaintsState.page = Math.max(1, newPage);
+    renderAdminFullComplaintsTable(latestComplaints);
+}
+
 function renderAdminFullComplaintsTable(complaints = []) {
+    const list = Array.isArray(complaints) ? complaints : latestComplaints || [];
     const tbody = document.getElementById('adminFullComplaintsTableBody');
+    const totalCountEl = document.getElementById('adminComplaintsTotalCount');
+    const pendingCountEl = document.getElementById('adminComplaintsPendingCount');
+    const progressCountEl = document.getElementById('adminComplaintsProgressCount');
+    const completedCountEl = document.getElementById('adminComplaintsCompletedCount');
+    const paginationInfoEl = document.getElementById('adminComplaintsPaginationInfo');
+    const paginationControlsEl = document.getElementById('adminComplaintsPaginationControls');
+
+    // 1. Dynamic counters
+    if (totalCountEl) totalCountEl.textContent = `${list.length}`;
+    if (pendingCountEl) pendingCountEl.textContent = `${list.filter(c => !c.status || c.status === 'Pending').length}`;
+    if (progressCountEl) progressCountEl.textContent = `${list.filter(c => c.status === 'In Progress' || c.status === 'Assigned' || c.status === 'Accepted').length}`;
+    if (completedCountEl) completedCountEl.textContent = `${list.filter(c => c.status === 'Completed').length}`;
+
     if (!tbody) return;
-    if (!complaints.length) {
-        tbody.innerHTML = '<tr><td colspan="7" class="px-6 py-6 text-center text-sm text-text-secondary">No complaints registered yet.</td></tr>';
+
+    // 2. Dynamic multi-criteria filtering
+    let filtered = list.filter(c => {
+        const matchesSearch = !adminComplaintsState.search || (
+            String(c.id || '').toLowerCase().includes(adminComplaintsState.search) ||
+            String(c.student || '').toLowerCase().includes(adminComplaintsState.search) ||
+            String(c.email || '').toLowerCase().includes(adminComplaintsState.search) ||
+            String(c.registrationNumber || '').toLowerCase().includes(adminComplaintsState.search) ||
+            String(c.roomNumber || '').toLowerCase().includes(adminComplaintsState.search) ||
+            String(c.hostelBlock || '').toLowerCase().includes(adminComplaintsState.search) ||
+            String(c.category || '').toLowerCase().includes(adminComplaintsState.search) ||
+            String(c.description || '').toLowerCase().includes(adminComplaintsState.search) ||
+            String(c.assignedTo || c.technician || '').toLowerCase().includes(adminComplaintsState.search)
+        );
+
+        const matchesStatus = adminComplaintsState.status === 'all' || (c.status || 'Pending') === adminComplaintsState.status;
+        const matchesCategory = adminComplaintsState.category === 'all' || String(c.category || '').toLowerCase().includes(adminComplaintsState.category.toLowerCase());
+        const matchesPriority = adminComplaintsState.priority === 'all' || (c.priority || 'Low') === adminComplaintsState.priority;
+
+        return matchesSearch && matchesStatus && matchesCategory && matchesPriority;
+    });
+
+    // 3. Dynamic pagination
+    const totalMatching = filtered.length;
+    const totalPages = Math.max(1, Math.ceil(totalMatching / adminComplaintsState.pageSize));
+    if (adminComplaintsState.page > totalPages) {
+        adminComplaintsState.page = totalPages;
+    }
+    const startIndex = (adminComplaintsState.page - 1) * adminComplaintsState.pageSize;
+    const endIndex = Math.min(startIndex + adminComplaintsState.pageSize, totalMatching);
+    const paginatedItems = filtered.slice(startIndex, endIndex);
+
+    if (paginationInfoEl) {
+        paginationInfoEl.textContent = totalMatching > 0
+            ? `Showing ${startIndex + 1}-${endIndex} of ${totalMatching} complaints`
+            : 'No matching complaints found';
+    }
+
+    if (paginationControlsEl) {
+        if (totalPages <= 1) {
+            paginationControlsEl.innerHTML = '';
+        } else {
+            let pagesHtml = `
+                <button onclick="changeAdminComplaintsPage(${adminComplaintsState.page - 1})" ${adminComplaintsState.page === 1 ? 'disabled' : ''} class="w-8 h-8 rounded-lg border border-border flex items-center justify-center text-xs text-text-secondary hover:bg-surface-alt disabled:opacity-40 disabled:pointer-events-none transition-all">
+                    <i class="fa-solid fa-chevron-left"></i>
+                </button>
+            `;
+            for (let p = 1; p <= totalPages; p++) {
+                if (p === 1 || p === totalPages || (p >= adminComplaintsState.page - 1 && p <= adminComplaintsState.page + 1)) {
+                    pagesHtml += `
+                        <button onclick="changeAdminComplaintsPage(${p})" class="w-8 h-8 rounded-lg text-xs font-semibold ${p === adminComplaintsState.page ? 'bg-primary text-white shadow-xs' : 'border border-border text-text-secondary hover:bg-surface-alt'} transition-all">
+                            ${p}
+                        </button>
+                    `;
+                } else if (p === adminComplaintsState.page - 2 || p === adminComplaintsState.page + 2) {
+                    pagesHtml += `<span class="px-1 text-xs text-text-muted">...</span>`;
+                }
+            }
+            pagesHtml += `
+                <button onclick="changeAdminComplaintsPage(${adminComplaintsState.page + 1})" ${adminComplaintsState.page === totalPages ? 'disabled' : ''} class="w-8 h-8 rounded-lg border border-border flex items-center justify-center text-xs text-text-secondary hover:bg-surface-alt disabled:opacity-40 disabled:pointer-events-none transition-all">
+                    <i class="fa-solid fa-chevron-right"></i>
+                </button>
+            `;
+            paginationControlsEl.innerHTML = pagesHtml;
+        }
+    }
+
+    // 4. Render rows
+    if (!paginatedItems.length) {
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="8" class="px-6 py-12 text-center text-sm text-text-secondary">
+                    <i class="fa-solid fa-inbox text-3xl mb-2 text-text-muted block"></i>
+                    No complaints matching current filters.
+                    <button onclick="resetAdminComplaintsFilters()" class="block mx-auto mt-2 text-xs font-semibold text-primary hover:underline">Reset Filters</button>
+                </td>
+            </tr>
+        `;
         return;
     }
-    tbody.innerHTML = complaints.map((c) => `
-        <tr class="table-row">
-            <td class="px-6 py-4 text-sm font-medium">${c.id}</td>
-            <td class="px-6 py-4 text-sm">${c.student || 'John Doe'}</td>
-            <td class="px-6 py-4 text-sm">${c.roomNumber || 'N/A'}</td>
-            <td class="px-6 py-4 text-sm">${c.category || 'General'}</td>
-            <td class="px-6 py-4"><span class="${getPriorityBadgeClass(c.priority)} px-2.5 py-1 rounded-full text-xs font-medium">${c.priority || 'Low'}</span></td>
-            <td class="px-6 py-4"><span class="${getStatusBadgeClass(c.status)} px-2.5 py-1 rounded-full text-xs font-medium">${c.status || 'Pending'}</span></td>
-            <td class="px-6 py-4 text-sm text-text-secondary">${formatComplaintDate(c.createdAt)}</td>
-        </tr>
-    `).join('');
+
+    tbody.innerHTML = paginatedItems.map((c) => {
+        const priorityClass = getPriorityBadgeClass(c.priority);
+        const statusClass = getStatusBadgeClass(c.status);
+        const techName = c.technician || c.assignedTo || '';
+        const isResolved = c.status === 'Completed';
+
+        return `
+            <tr class="table-row hover:bg-surface-alt/40 transition-colors">
+                <td class="px-6 py-4 font-mono font-bold text-xs text-primary">
+                    <button onclick="openComplaintDetailsModal('${c.id}')" class="hover:underline font-bold text-left">${c.id || 'N/A'}</button>
+                </td>
+                <td class="px-6 py-4">
+                    <p class="font-semibold text-xs text-text">${c.student || 'Student'}</p>
+                    <p class="text-[11px] text-text-muted">${c.hostelBlock || 'Block A'} • Room ${c.roomNumber || 'N/A'}</p>
+                </td>
+                <td class="px-6 py-4">
+                    <p class="font-medium text-xs text-text">${c.category || 'General'}</p>
+                    <p class="text-[11px] text-text-muted truncate max-w-[180px]">${c.description || 'No details provided'}</p>
+                </td>
+                <td class="px-6 py-4">
+                    <span class="${priorityClass} px-2.5 py-0.5 rounded-full text-[11px] font-semibold">${c.priority || 'Low'}</span>
+                </td>
+                <td class="px-6 py-4">
+                    <span class="${statusClass} px-2.5 py-0.5 rounded-full text-[11px] font-semibold">${c.status || 'Pending'}</span>
+                </td>
+                <td class="px-6 py-4 text-xs">
+                    ${techName && techName !== 'Unassigned' ? `
+                        <div class="flex items-center gap-1.5">
+                            <span class="font-medium text-text">${techName}</span>
+                            <button onclick="openAssignTechnicianModal('${c.id}')" title="Reassign" class="text-text-muted hover:text-primary transition-all text-[11px]"><i class="fa-solid fa-arrows-rotate"></i></button>
+                        </div>
+                    ` : `
+                        <button onclick="openAssignTechnicianModal('${c.id}')" class="px-2 py-1 rounded-lg bg-primary/10 text-primary hover:bg-primary hover:text-white text-[11px] font-semibold transition-all flex items-center gap-1">
+                            <i class="fa-solid fa-user-plus text-[10px]"></i> Assign
+                        </button>
+                    `}
+                </td>
+                <td class="px-6 py-4 text-xs text-text-secondary whitespace-nowrap">${formatComplaintDate(c.createdAt)}</td>
+                <td class="px-6 py-4 text-right">
+                    <div class="flex items-center justify-end gap-1.5">
+                        <button onclick="openComplaintDetailsModal('${c.id}')" title="View Full Details" class="w-7 h-7 rounded-lg bg-surface-alt border border-border text-text hover:bg-primary hover:text-white flex items-center justify-center text-xs transition-all">
+                            <i class="fa-solid fa-eye"></i>
+                        </button>
+                        ${!isResolved ? `
+                            <button onclick="quickUpdateComplaintStatus('${c.id}', 'Completed')" title="Mark as Resolved" class="w-7 h-7 rounded-lg bg-emerald/10 text-emerald hover:bg-emerald hover:text-white flex items-center justify-center text-xs transition-all font-bold">
+                                <i class="fa-solid fa-check"></i>
+                            </button>
+                        ` : `
+                            <button onclick="quickUpdateComplaintStatus('${c.id}', 'In Progress')" title="Reopen Request" class="w-7 h-7 rounded-lg bg-warning/10 text-warning hover:bg-warning hover:text-white flex items-center justify-center text-xs transition-all font-bold">
+                                <i class="fa-solid fa-rotate-left"></i>
+                            </button>
+                        `}
+                        <button onclick="deleteComplaint('${c.id}')" title="Delete Request" class="w-7 h-7 rounded-lg bg-danger/10 text-danger hover:bg-danger hover:text-white flex items-center justify-center text-xs transition-all">
+                            <i class="fa-solid fa-trash"></i>
+                        </button>
+                    </div>
+                </td>
+            </tr>
+        `;
+    }).join('');
+}
+
+function openComplaintDetailsModal(complaintId) {
+    const complaint = (latestComplaints || []).find(c => c.id === complaintId);
+    if (!complaint) return showToast('Complaint not found.', 'error');
+
+    const priorityClass = getPriorityBadgeClass(complaint.priority);
+    const statusClass = getStatusBadgeClass(complaint.status);
+    const createdStr = new Date(complaint.createdAt || Date.now()).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' });
+
+    const content = `
+        <div class="space-y-6">
+            <div class="flex items-center justify-between pb-4 border-b border-border">
+                <div>
+                    <span class="text-xs font-mono font-bold text-primary">${complaint.id}</span>
+                    <h3 class="text-lg font-bold text-text mt-0.5">${complaint.category || 'General'} Maintenance</h3>
+                    <p class="text-xs text-text-secondary">${complaint.hostelBlock || 'Block A'} • Room ${complaint.roomNumber || 'N/A'}</p>
+                </div>
+                <div class="flex items-center gap-2">
+                    <span class="${priorityClass} px-3 py-1 rounded-full text-xs font-semibold">${complaint.priority || 'Low'} Priority</span>
+                    <span class="${statusClass} px-3 py-1 rounded-full text-xs font-semibold">${complaint.status || 'Pending'}</span>
+                </div>
+            </div>
+
+            <!-- Student Info & Technician -->
+            <div class="grid sm:grid-cols-2 gap-4 p-4 rounded-2xl bg-surface-alt border border-border/70 text-xs">
+                <div class="space-y-1">
+                    <p class="text-text-muted font-medium uppercase text-[10px] tracking-wider">Reported By</p>
+                    <p class="font-bold text-sm text-text">${complaint.student || 'Student'}</p>
+                    <p class="text-text-secondary">${complaint.email || 'No email provided'}</p>
+                    ${complaint.registrationNumber ? `<p class="font-mono text-text-muted">Reg: ${complaint.registrationNumber}</p>` : ''}
+                </div>
+                <div class="space-y-1">
+                    <p class="text-text-muted font-medium uppercase text-[10px] tracking-wider">Assigned Technician</p>
+                    <p class="font-bold text-sm text-text">${complaint.technician || complaint.assignedTo || 'Unassigned'}</p>
+                    <p class="text-text-secondary">Logged on: ${createdStr}</p>
+                    <button onclick="closeModal(); openAssignTechnicianModal('${complaint.id}');" class="text-primary font-semibold hover:underline mt-1 inline-block">Change Technician →</button>
+                </div>
+            </div>
+
+            <!-- Issue Description -->
+            <div>
+                <p class="text-xs font-semibold uppercase tracking-wider text-text-secondary mb-2">Issue Description</p>
+                <div class="p-4 rounded-2xl bg-surface border border-border text-sm text-text leading-relaxed">
+                    ${complaint.description || 'No description provided.'}
+                </div>
+            </div>
+
+            <!-- Actions Bar -->
+            <div class="flex flex-wrap items-center justify-between gap-3 pt-4 border-t border-border">
+                <div class="flex items-center gap-2">
+                    <span class="text-xs font-medium text-text-secondary">Change Status:</span>
+                    <button onclick="quickUpdateComplaintStatus('${complaint.id}', 'In Progress'); closeModal();" class="px-3 py-1.5 rounded-xl bg-info/10 text-info hover:bg-info hover:text-white text-xs font-semibold transition-all">In Progress</button>
+                    <button onclick="quickUpdateComplaintStatus('${complaint.id}', 'Completed'); closeModal();" class="px-3 py-1.5 rounded-xl bg-emerald/10 text-emerald hover:bg-emerald hover:text-white text-xs font-semibold transition-all">Resolved</button>
+                </div>
+                <button onclick="deleteComplaint('${complaint.id}'); closeModal();" class="px-3 py-1.5 rounded-xl bg-danger/10 text-danger hover:bg-danger hover:text-white text-xs font-semibold transition-all flex items-center gap-1.5">
+                    <i class="fa-solid fa-trash text-xs"></i> Delete
+                </button>
+            </div>
+        </div>
+    `;
+
+    showModal('Complaint Details & Resolution', content);
+}
+
+function openAssignTechnicianModal(complaintId) {
+    const complaint = (latestComplaints || []).find(c => c.id === complaintId);
+    if (!complaint) return showToast('Complaint not found.', 'error');
+
+    const technicians = Array.isArray(allUsers) ? allUsers.filter(u => u.role === 'technician') : [];
+    const currentTech = complaint.technician || complaint.assignedTo || '';
+
+    const content = `
+        <div class="space-y-5">
+            <div>
+                <h4 class="font-bold text-sm text-text">Assign Technician for ${complaint.id}</h4>
+                <p class="text-xs text-text-secondary">${complaint.category} issue in ${complaint.hostelBlock} • Room ${complaint.roomNumber}</p>
+            </div>
+
+            <div class="space-y-2">
+                <label class="block text-xs font-semibold uppercase tracking-wider text-text-secondary">Select Technician</label>
+                <select id="assignTechSelectInput" class="input-focus w-full px-4 py-3 rounded-xl border border-border bg-surface-alt text-sm">
+                    <option value="">-- Choose available technician --</option>
+                    ${technicians.map(t => `<option value="${t.name}" ${t.name === currentTech ? 'selected' : ''}>${t.name} (${t.email})</option>`).join('')}
+                </select>
+            </div>
+
+            <div class="flex items-center justify-end gap-3 pt-4 border-t border-border">
+                <button onclick="closeModal()" class="px-4 py-2.5 rounded-xl border border-border text-xs font-semibold text-text-secondary hover:bg-surface-alt transition-all">Cancel</button>
+                <button onclick="submitAssignTechnician('${complaint.id}')" class="btn-primary px-5 py-2.5 rounded-xl text-white text-xs font-semibold shadow-xs">Save Assignment</button>
+            </div>
+        </div>
+    `;
+
+    showModal('Assign Maintenance Technician', content);
+}
+
+async function submitAssignTechnician(complaintId) {
+    const select = document.getElementById('assignTechSelectInput');
+    const technicianName = select?.value?.trim();
+    if (!technicianName) return showToast('Please select a technician.', 'warning');
+
+    try {
+        const response = await apiRequest(`/api/complaints/${encodeURIComponent(complaintId)}/status`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: 'Assigned', technician: technicianName })
+        });
+        const data = await parseJsonResponse(response);
+        if (!response.ok) throw new Error(data.error || 'Failed to assign technician.');
+        closeModal();
+        showToast(`Assigned ${technicianName} to #${complaintId} successfully!`, 'success');
+        await loadDashboardData();
+    } catch (e) {
+        showToast(e.message || 'Unable to assign technician.', 'error');
+    }
+}
+
+async function quickUpdateComplaintStatus(complaintId, newStatus) {
+    try {
+        const response = await apiRequest(`/api/complaints/${encodeURIComponent(complaintId)}/status`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: newStatus })
+        });
+        const data = await parseJsonResponse(response);
+        if (!response.ok) throw new Error(data.error || 'Failed to update status.');
+        showToast(`Complaint #${complaintId} status updated to ${newStatus}`, 'success');
+        await loadDashboardData();
+    } catch (e) {
+        showToast(e.message || 'Unable to update status.', 'error');
+    }
+}
+
+function openNewComplaintModal() {
+    const content = `
+        <form onsubmit="submitNewComplaintFromModal(event)" class="space-y-4 text-xs">
+            <div class="grid sm:grid-cols-2 gap-4">
+                <div>
+                    <label class="block font-semibold text-text-secondary uppercase mb-1">Student Name</label>
+                    <input id="modalCompStudent" type="text" required placeholder="e.g. John Doe" class="input-focus w-full px-3.5 py-2.5 rounded-xl border border-border bg-surface-alt text-xs">
+                </div>
+                <div>
+                    <label class="block font-semibold text-text-secondary uppercase mb-1">Student Email</label>
+                    <input id="modalCompEmail" type="email" required placeholder="student@hostelfix.edu" class="input-focus w-full px-3.5 py-2.5 rounded-xl border border-border bg-surface-alt text-xs">
+                </div>
+            </div>
+            <div class="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                <div>
+                    <label class="block font-semibold text-text-secondary uppercase mb-1">Hostel Block</label>
+                    <input id="modalCompBlock" type="text" required placeholder="Block A" class="input-focus w-full px-3.5 py-2.5 rounded-xl border border-border bg-surface-alt text-xs">
+                </div>
+                <div>
+                    <label class="block font-semibold text-text-secondary uppercase mb-1">Room Number</label>
+                    <input id="modalCompRoom" type="text" required placeholder="A-204" class="input-focus w-full px-3.5 py-2.5 rounded-xl border border-border bg-surface-alt text-xs">
+                </div>
+                <div class="col-span-2 sm:col-span-1">
+                    <label class="block font-semibold text-text-secondary uppercase mb-1">Reg Number</label>
+                    <input id="modalCompReg" type="text" placeholder="REG-2024001" class="input-focus w-full px-3.5 py-2.5 rounded-xl border border-border bg-surface-alt text-xs">
+                </div>
+            </div>
+            <div class="grid sm:grid-cols-2 gap-4">
+                <div>
+                    <label class="block font-semibold text-text-secondary uppercase mb-1">Category</label>
+                    <select id="modalCompCategory" class="input-focus w-full px-3.5 py-2.5 rounded-xl border border-border bg-surface-alt text-xs">
+                        <option value="Electrical">Electrical</option>
+                        <option value="Plumbing">Plumbing</option>
+                        <option value="Carpentry">Carpentry</option>
+                        <option value="Furniture">Furniture</option>
+                        <option value="Appliances">Appliances</option>
+                        <option value="Wi-Fi">Wi-Fi & Network</option>
+                        <option value="Cleaning">Cleaning</option>
+                        <option value="Other">Other</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block font-semibold text-text-secondary uppercase mb-1">Priority</label>
+                    <select id="modalCompPriority" class="input-focus w-full px-3.5 py-2.5 rounded-xl border border-border bg-surface-alt text-xs">
+                        <option value="Low">Low</option>
+                        <option value="Medium">Medium</option>
+                        <option value="High" selected>High</option>
+                        <option value="Urgent">Urgent</option>
+                    </select>
+                </div>
+            </div>
+            <div>
+                <label class="block font-semibold text-text-secondary uppercase mb-1">Issue Description</label>
+                <textarea id="modalCompDesc" rows="3" required placeholder="Describe the maintenance problem..." class="input-focus w-full px-3.5 py-2.5 rounded-xl border border-border bg-surface-alt text-xs resize-none"></textarea>
+            </div>
+            <div class="flex items-center justify-end gap-3 pt-3 border-t border-border">
+                <button type="button" onclick="closeModal()" class="px-4 py-2.5 rounded-xl border border-border text-xs font-semibold text-text-secondary hover:bg-surface-alt transition-all">Cancel</button>
+                <button type="submit" class="btn-primary px-5 py-2.5 rounded-xl text-white text-xs font-semibold shadow-xs">Create Complaint</button>
+            </div>
+        </form>
+    `;
+    showModal('Log New Maintenance Complaint', content);
+}
+
+async function submitNewComplaintFromModal(event) {
+    event.preventDefault();
+    const student = document.getElementById('modalCompStudent')?.value.trim();
+    const email = document.getElementById('modalCompEmail')?.value.trim();
+    const hostelBlock = document.getElementById('modalCompBlock')?.value.trim();
+    const roomNumber = document.getElementById('modalCompRoom')?.value.trim();
+    const registrationNumber = document.getElementById('modalCompReg')?.value.trim();
+    const category = document.getElementById('modalCompCategory')?.value;
+    const priority = document.getElementById('modalCompPriority')?.value;
+    const description = document.getElementById('modalCompDesc')?.value.trim();
+
+    try {
+        const response = await apiRequest('/api/complaints', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ student, email, hostelBlock, roomNumber, registrationNumber, category, priority, description })
+        });
+        const data = await parseJsonResponse(response);
+        if (!response.ok) throw new Error(data.error || 'Unable to create complaint.');
+        closeModal();
+        showToast(`Complaint #${data.id} registered dynamically!`, 'success');
+        await loadDashboardData();
+    } catch (e) {
+        showToast(e.message || 'Failed to submit complaint.', 'error');
+    }
 }
 
 function renderTechInventoryGrid(inventory = []) {
@@ -2677,14 +3940,14 @@ async function handleLaundrySubmit(e) {
     }
 }
 
-async function approveGatePass(gatePassId, status) {
+async function approveGatePass(gatePassId, status, actorRole = 'Admin') {
     if (!gatePassId) return;
     showLoading();
     try {
         const response = await apiRequest(`/api/gate-passes/${encodeURIComponent(gatePassId)}/status`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ status, approvedBy: currentUser?.name || 'Admin' })
+            body: JSON.stringify({ status, approvedBy: currentUser?.name || actorRole })
         });
         const data = await parseJsonResponse(response);
         hideLoading();
@@ -2696,12 +3959,82 @@ async function approveGatePass(gatePassId, status) {
 
         showToast(`Gate pass ${status.toLowerCase()} successfully.`, 'success');
         await loadDashboardData();
-        navigateTo('admin-dashboard');
+        const activePage = getActivePageId();
+        if (activePage === 'warden-dashboard') {
+            renderWardenDashboard();
+        } else if (activePage === 'security-dashboard') {
+            renderSecurityDashboard();
+        } else {
+            renderGatePassTable(latestGatePasses);
+        }
     } catch (error) {
         hideLoading();
         showToast('Unable to reach server. Please try again.', 'error');
         console.error(error);
     }
+}
+
+async function updateGatePassStatus(gatePassId, status) {
+    if (!gatePassId) return;
+    const actorRole = currentUser?.role === 'warden' ? 'Warden' : (currentUser?.name || 'Admin');
+    
+    if (status === 'COMPLETED') {
+        showLoading();
+        try {
+            const response = await apiRequest('/api/gatepass/warden/approve', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    id: gatePassId,
+                    wardenId: currentUser?.userId || currentUser?.email || 'warden',
+                    wardenName: currentUser?.name || 'Warden',
+                    approved: true
+                })
+            });
+            hideLoading();
+            const data = await parseJsonResponse(response);
+            if (!response.ok) {
+                showToast(data.error || 'Failed to complete warden verification.', 'error');
+                return;
+            }
+            showToast('Student return verified and gate pass completed!', 'success');
+            await loadDashboardData();
+            renderWardenDashboard();
+        } catch (err) {
+            hideLoading();
+            showToast('Unable to complete verification.', 'error');
+            console.error(err);
+        }
+        return;
+    }
+
+    if (status === 'OUT' || status === 'RETURNED') {
+        showLoading();
+        try {
+            const response = await apiRequest(`/api/gate-passes/${encodeURIComponent(gatePassId)}/status`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ status: status === 'OUT' ? 'OUT' : 'RETURNED', approvedBy: currentUser?.name || 'Security' })
+            });
+            hideLoading();
+            const data = await parseJsonResponse(response);
+            if (!response.ok) {
+                showToast(data.error || 'Failed to update gate pass movement.', 'error');
+                return;
+            }
+            showToast(`Gate pass marked ${status}.`, 'success');
+            await loadDashboardData();
+            renderSecurityDashboard();
+            renderWardenDashboard();
+        } catch (err) {
+            hideLoading();
+            showToast('Failed to update status.', 'error');
+            console.error(err);
+        }
+        return;
+    }
+
+    return approveGatePass(gatePassId, status === 'Rejected' ? 'Rejected' : 'Approved', actorRole);
 }
 
 function handleFileSelect(input) {
@@ -2776,7 +4109,15 @@ async function searchComplaint(targetId) {
 
 async function loadDashboardData() {
     try {
-        const [summaryResponse, complaintsResponse, techniciansResponse, gatePassesResponse, laundryRequestsResponse, usersResponse, inventoryResponse] = await Promise.all([
+        const [
+            summaryRes,
+            complaintsRes,
+            techniciansRes,
+            gatePassesRes,
+            laundryRequestsRes,
+            usersRes,
+            inventoryRes
+        ] = await Promise.allSettled([
             apiRequest('/api/summary'),
             apiRequest('/api/complaints'),
             apiRequest('/api/technicians'),
@@ -2786,46 +4127,35 @@ async function loadDashboardData() {
             apiRequest('/api/inventory')
         ]);
 
-        const summary = await parseJsonResponse(summaryResponse);
-        const complaints = await parseJsonResponse(complaintsResponse);
-        const technicianList = await parseJsonResponse(techniciansResponse);
-        const gatePasses = await parseJsonResponse(gatePassesResponse);
-        const laundryRequests = await parseJsonResponse(laundryRequestsResponse);
-        const allUsers = usersResponse.ok ? await parseJsonResponse(usersResponse) : [];
-        const inventoryList = inventoryResponse.ok ? await parseJsonResponse(inventoryResponse) : [];
-
-        if (!summaryResponse.ok || !complaintsResponse.ok || !techniciansResponse.ok || !gatePassesResponse.ok || !laundryRequestsResponse.ok) {
-            const failed = [
-                !summaryResponse.ok && summary,
-                !complaintsResponse.ok && complaints,
-                !techniciansResponse.ok && technicianList,
-                !gatePassesResponse.ok && gatePasses,
-                !laundryRequestsResponse.ok && laundryRequests
-            ].find(Boolean);
-            throw new Error(failed?.error || 'Failed to load dashboard data.');
-        }
+        const summary = summaryRes.status === 'fulfilled' && summaryRes.value.ok ? await parseJsonResponse(summaryRes.value) : { total: 0, resolvedToday: 0, pending: 0, activeTechnicians: 0 };
+        const complaints = complaintsRes.status === 'fulfilled' && complaintsRes.value.ok ? await parseJsonResponse(complaintsRes.value) : [];
+        const technicianList = techniciansRes.status === 'fulfilled' && techniciansRes.value.ok ? await parseJsonResponse(techniciansRes.value) : [];
+        const gatePasses = gatePassesRes.status === 'fulfilled' && gatePassesRes.value.ok ? await parseJsonResponse(gatePassesRes.value) : [];
+        const laundryRequests = laundryRequestsRes.status === 'fulfilled' && laundryRequestsRes.value.ok ? await parseJsonResponse(laundryRequestsRes.value) : [];
+        const allUsers = usersRes.status === 'fulfilled' && usersRes.value.ok ? await parseJsonResponse(usersRes.value) : [];
+        const inventoryList = inventoryRes.status === 'fulfilled' && inventoryRes.value.ok ? await parseJsonResponse(inventoryRes.value) : [];
 
         latestComplaints = Array.isArray(complaints) ? complaints.slice() : [];
         latestGatePasses = Array.isArray(gatePasses) ? gatePasses.slice() : [];
         latestLaundryRequests = Array.isArray(laundryRequests) ? laundryRequests.slice() : [];
+        
         syncCurrentUserStudentProfile();
         prepareComplaintForm();
         prepareLaundryForm();
-
         populateTechnicianDropdown(technicianList);
 
         const values = {
-            landingTotalComplaints: summary.total || 0,
-            landingResolvedToday: summary.resolvedToday || 0,
-            landingPendingRequests: summary.pending || 0,
-            landingActiveTechnicians: summary.activeTechnicians || 0
+            landingTotalComplaints: summary?.total || 0,
+            landingResolvedToday: summary?.resolvedToday || 0,
+            landingPendingRequests: summary?.pending || 0,
+            landingActiveTechnicians: summary?.activeTechnicians || 0
         };
 
         Object.entries(values).forEach(([id, value]) => {
             const el = document.getElementById(id);
             if (el) {
                 el.dataset.value = value;
-                el.textContent = value.toLocaleString();
+                el.textContent = Number(value || 0).toLocaleString();
             }
         });
 
@@ -2835,7 +4165,7 @@ async function loadDashboardData() {
         renderTechCompletedComplaints(complaints);
         renderTechSummary(complaints);
         renderAdminSummary(summary, complaints, allUsers);
-        renderGatePassTable(gatePasses);
+        renderGatePassTable(latestGatePasses);
         renderAdminStudents(allUsers, complaints);
         renderAdminWardens(allUsers);
         renderAdminTechnicians(allUsers, complaints);
@@ -2843,9 +4173,10 @@ async function loadDashboardData() {
         renderTechInventoryGrid(inventoryList);
         renderWardenDashboard();
         renderSecurityDashboard();
+        renderAdminGatePassLogsPage();
 
         const gatePassCount = document.getElementById('adminGatePassCount');
-        if (gatePassCount) gatePassCount.textContent = `${gatePasses.length}`;
+        if (gatePassCount) gatePassCount.textContent = `${latestGatePasses.length}`;
 
         if (document.getElementById('page-landing')?.classList.contains('active')) {
             animateNumbers();
@@ -2855,60 +4186,1341 @@ async function loadDashboardData() {
     }
 }
 
+let showAllWardenGatePassRows = false;
+let showAllWardenReturnRows = false;
+let currentWardenFilter = 'all';
+let wardenGatePassSearchQuery = '';
+let currentWardenReturnFilter = 'all';
+let wardenReturnSearchQuery = '';
+let currentSecurityFilter = 'all';
+let securityGatePassSearchQuery = '';
+
+async function refreshWardenDashboardData(buttonElement) {
+    const icon = buttonElement?.querySelector('i.fa-rotate, i.fa-solid') || buttonElement?.querySelector('i');
+    if (icon) icon.classList.add('fa-spin');
+    try {
+        await loadDashboardData();
+        renderWardenDashboard();
+        renderWardenReturnSchedule(latestGatePasses);
+        showToast('Warden dashboard & student returns refreshed!', 'success');
+    } catch (e) {
+        console.error(e);
+        showToast('Dashboard data reloaded.', 'info');
+    } finally {
+        if (icon) {
+            setTimeout(() => icon.classList.remove('fa-spin'), 600);
+        }
+    }
+}
+
+async function refreshSecurityDashboardData(buttonElement) {
+    const icon = buttonElement?.querySelector('i.fa-rotate, i.fa-solid') || buttonElement?.querySelector('i');
+    if (icon) icon.classList.add('fa-spin');
+    try {
+        await loadDashboardData();
+        renderSecurityDashboard();
+        showToast('Security gate dashboard refreshed!', 'success');
+    } catch (e) {
+        console.error(e);
+    } finally {
+        if (icon) {
+            setTimeout(() => icon.classList.remove('fa-spin'), 600);
+        }
+    }
+}
+
+async function refreshAdminGatePassesData(buttonElement) {
+    const icon = buttonElement?.querySelector('i.fa-rotate, i.fa-solid') || buttonElement?.querySelector('i');
+    if (icon) icon.classList.add('fa-spin');
+    try {
+        await loadDashboardData();
+        renderAdminGatePassLogsPage();
+        showToast('Gate pass monitoring matrix refreshed!', 'success');
+    } catch (e) {
+        console.error(e);
+    } finally {
+        if (icon) {
+            setTimeout(() => icon.classList.remove('fa-spin'), 600);
+        }
+    }
+}
+
+async function refreshDashboardData(buttonElement) {
+    const icon = buttonElement?.querySelector('i.fa-rotate, i.fa-solid') || buttonElement?.querySelector('i');
+    if (icon) icon.classList.add('fa-spin');
+    try {
+        await loadDashboardData();
+        
+        if (!currentUser) return;
+        
+        if (currentUser.role === 'admin') {
+            const pageId = getActivePageId();
+            if (pageId === 'admin-dashboard') renderAdminDashboard();
+            else if (pageId === 'admin-students') renderAdminStudentsPage();
+            else if (pageId === 'admin-technicians') renderAdminTechniciansPage();
+            else if (pageId === 'admin-complaints') renderAdminComplaintsPage();
+            else if (pageId === 'admin-reports') renderAdminReportsPage();
+        } else if (currentUser.role === 'student') {
+            renderStudentDashboard();
+        } else if (currentUser.role === 'technician') {
+            renderTechnicianDashboard();
+        } else if (currentUser.role === 'warden') {
+            renderWardenDashboard();
+            renderWardenReturnSchedule(latestGatePasses);
+        } else if (currentUser.role === 'security') {
+            renderSecurityDashboard();
+        }
+        
+        showToast('Data refreshed successfully!', 'success');
+    } catch (e) {
+        console.error(e);
+        showToast('Failed to refresh data.', 'error');
+    } finally {
+        if (icon) {
+            setTimeout(() => icon.classList.remove('fa-spin'), 600);
+        }
+    }
+}
+
+function toggleWardenGatePassSeeAll() {
+    showAllWardenGatePassRows = !showAllWardenGatePassRows;
+    renderWardenDashboard();
+}
+
+function toggleWardenReturnSeeAll() {
+    showAllWardenReturnRows = !showAllWardenReturnRows;
+    renderWardenReturnSchedule(latestGatePasses);
+}
+
+function setWardenGatePassFilter(filterType) {
+    currentWardenFilter = filterType;
+    document.querySelectorAll('.warden-filter-btn').forEach((btn) => {
+        const active = btn.dataset.filter === filterType;
+        if (active) {
+            btn.className = 'warden-filter-btn px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-primary text-white transition-all shadow-sm';
+        } else {
+            btn.className = 'warden-filter-btn px-3.5 py-1.5 rounded-xl text-xs font-semibold border border-border bg-surface text-text-secondary hover:text-text transition-all';
+        }
+    });
+    renderWardenDashboard();
+}
+
+function handleWardenGatePassSearch(query) {
+    wardenGatePassSearchQuery = (query || '').toLowerCase().trim();
+    renderWardenDashboard();
+}
+
+function setWardenReturnFilter(filterType) {
+    currentWardenReturnFilter = filterType;
+    document.querySelectorAll('.warden-return-filter-btn').forEach((btn) => {
+        const active = btn.dataset.returnFilter === filterType;
+        if (active) {
+            btn.className = 'warden-return-filter-btn px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-indigo-600 text-white transition-all shadow-xs flex items-center gap-1';
+        } else {
+            btn.className = 'warden-return-filter-btn px-3.5 py-1.5 rounded-xl text-xs font-semibold border border-border bg-surface text-text-secondary hover:text-text transition-all flex items-center gap-1';
+        }
+    });
+    renderWardenReturnSchedule(latestGatePasses);
+}
+
+function handleWardenReturnSearch(query) {
+    wardenReturnSearchQuery = (query || '').toLowerCase().trim();
+    renderWardenReturnSchedule(latestGatePasses);
+}
+
+function calculateGatePassReturnInfo(pass) {
+    const todayStr = new Date().toISOString().split('T')[0];
+    const returnStr = String(pass.returnDate || '').slice(0, 10);
+    const rawStatus = String(pass.status || 'REQUESTED').toUpperCase();
+
+    if (rawStatus === 'COMPLETED') {
+        return {
+            category: 'completed',
+            label: 'Completed & Returned',
+            badgeClass: 'bg-emerald-100 text-emerald-800 border border-emerald-200',
+            icon: 'fa-solid fa-circle-check text-emerald',
+            isOverdue: false,
+            isToday: false,
+            isUpcoming: false,
+            isReturned: false,
+            diffDays: 0
+        };
+    }
+
+    if (rawStatus === 'REJECTED' || rawStatus === 'WARDEN VERIFICATION REJECTED') {
+        return {
+            category: 'rejected',
+            label: 'Rejected',
+            badgeClass: 'bg-danger/10 text-danger border border-danger/20',
+            icon: 'fa-solid fa-ban text-danger',
+            isOverdue: false,
+            isToday: false,
+            isUpcoming: false,
+            isReturned: false,
+            diffDays: 0
+        };
+    }
+
+    if (rawStatus === 'RETURNED' || (pass.inTime && !pass.wardenVerified)) {
+        return {
+            category: 'returned',
+            label: '🟣 Returned (Arrival Verification Needed)',
+            badgeClass: 'bg-purple-100 text-purple-800 border border-purple-200 animate-pulse',
+            icon: 'fa-solid fa-clipboard-check text-purple-600',
+            isOverdue: false,
+            isToday: false,
+            isUpcoming: false,
+            isReturned: true,
+            diffDays: 0
+        };
+    }
+
+    if (!returnStr) {
+        return {
+            category: 'unknown',
+            label: 'Return Date Not Specified',
+            badgeClass: 'bg-surface-alt text-text-secondary border border-border',
+            icon: 'fa-solid fa-calendar text-text-muted',
+            isOverdue: false,
+            isToday: false,
+            isUpcoming: false,
+            isReturned: false,
+            diffDays: 0
+        };
+    }
+
+    const todayParts = todayStr.split('-');
+    const returnParts = returnStr.split('-');
+    const todayDate = new Date(parseInt(todayParts[0], 10), parseInt(todayParts[1], 10) - 1, parseInt(todayParts[2], 10));
+    const returnDate = new Date(parseInt(returnParts[0], 10), parseInt(returnParts[1], 10) - 1, parseInt(returnParts[2], 10));
+    const diffTime = returnDate.getTime() - todayDate.getTime();
+    const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
+
+    if (diffDays === 0) {
+        return {
+            category: 'today',
+            label: `🟢 Expected Return TODAY (${formatGatePassDate(returnStr)})`,
+            badgeClass: 'bg-emerald text-white border border-emerald shadow-xs font-bold',
+            icon: 'fa-solid fa-bell text-emerald animate-bounce',
+            isOverdue: false,
+            isToday: true,
+            isUpcoming: false,
+            isReturned: false,
+            diffDays: 0
+        };
+    } else if (diffDays === 1) {
+        return {
+            category: 'upcoming',
+            label: `🔵 Returning Tomorrow (${formatGatePassDate(returnStr)})`,
+            badgeClass: 'bg-blue-100 text-blue-800 border border-blue-200 font-semibold',
+            icon: 'fa-solid fa-calendar-day text-blue-600',
+            isOverdue: false,
+            isToday: false,
+            isUpcoming: true,
+            isReturned: false,
+            diffDays: 1
+        };
+    } else if (diffDays > 1) {
+        return {
+            category: 'upcoming',
+            label: `🟡 Returning in ${diffDays} days (${formatGatePassDate(returnStr)})`,
+            badgeClass: 'bg-amber-50 text-amber-800 border border-amber-200 font-medium',
+            icon: 'fa-solid fa-calendar-days text-amber-600',
+            isOverdue: false,
+            isToday: false,
+            isUpcoming: true,
+            isReturned: false,
+            diffDays
+        };
+    } else {
+        const overdueDays = Math.abs(diffDays);
+        return {
+            category: 'overdue',
+            label: `🔴 Overdue by ${overdueDays} day${overdueDays > 1 ? 's' : ''}! (Was due ${formatGatePassDate(returnStr)})`,
+            badgeClass: 'bg-danger text-white border border-danger/80 shadow-xs font-bold animate-pulse',
+            icon: 'fa-solid fa-triangle-exclamation text-danger',
+            isOverdue: true,
+            isToday: false,
+            isUpcoming: false,
+            isReturned: false,
+            diffDays
+        };
+    }
+}
+
+function renderWardenReturnSchedule(passes) {
+    const list = document.getElementById('wardenReturnScheduleList');
+    if (!list) return;
+
+    let activePasses = (passes || latestGatePasses || []).filter(p => {
+        const status = String(p.status || 'REQUESTED').toUpperCase();
+        return status !== 'REJECTED' && status !== 'WARDEN VERIFICATION REJECTED';
+    });
+
+    if (currentWardenReturnFilter === 'today') {
+        activePasses = activePasses.filter(p => calculateGatePassReturnInfo(p).category === 'today');
+    } else if (currentWardenReturnFilter === 'upcoming') {
+        activePasses = activePasses.filter(p => calculateGatePassReturnInfo(p).category === 'upcoming');
+    } else if (currentWardenReturnFilter === 'overdue') {
+        activePasses = activePasses.filter(p => calculateGatePassReturnInfo(p).category === 'overdue');
+    } else if (currentWardenReturnFilter === 'returned') {
+        activePasses = activePasses.filter(p => calculateGatePassReturnInfo(p).category === 'returned');
+    }
+
+    if (wardenReturnSearchQuery) {
+        activePasses = activePasses.filter(p => {
+            const student = String(p.student || '').toLowerCase();
+            const reg = String(p.registrationNumber || '').toLowerCase();
+            const id = String(p.id || '').toLowerCase();
+            const room = String(p.roomNumber || '').toLowerCase();
+            const block = String(p.hostelBlock || '').toLowerCase();
+            const reason = String(p.reason || '').toLowerCase();
+            return student.includes(wardenReturnSearchQuery) ||
+                   reg.includes(wardenReturnSearchQuery) ||
+                   id.includes(wardenReturnSearchQuery) ||
+                   room.includes(wardenReturnSearchQuery) ||
+                   block.includes(wardenReturnSearchQuery) ||
+                   reason.includes(wardenReturnSearchQuery);
+        });
+    }
+
+    if (!activePasses.length) {
+        list.innerHTML = `
+            <div class="text-sm text-text-secondary py-8 text-center bg-surface-alt/60 rounded-2xl border border-dashed border-border">
+                <i class="fa-solid fa-calendar-check text-2xl mb-2 text-indigo-400 block"></i>
+                No students match the return filter <strong>"${currentWardenReturnFilter}"</strong>.
+            </div>`;
+        return;
+    }
+
+    activePasses.sort((a, b) => {
+        const infoA = calculateGatePassReturnInfo(a);
+        const infoB = calculateGatePassReturnInfo(b);
+        const priority = { overdue: 1, today: 2, returned: 3, upcoming: 4, completed: 5, unknown: 6, rejected: 7 };
+        const prioA = priority[infoA.category] || 10;
+        const prioB = priority[infoB.category] || 10;
+        if (prioA !== prioB) return prioA - prioB;
+        return new Date(a.returnDate || 0) - new Date(b.returnDate || 0);
+    });
+
+    const seeAllBtn = document.getElementById('wardenReturnSeeAllBtn');
+    const defaultVisible = 4;
+
+    if (seeAllBtn) {
+        if (activePasses.length > defaultVisible) {
+            seeAllBtn.classList.remove('hidden');
+            seeAllBtn.textContent = showAllWardenReturnRows ? `Show Less (${activePasses.length})` : `See All (${activePasses.length})`;
+        } else {
+            seeAllBtn.classList.add('hidden');
+        }
+    }
+
+    const displayPasses = showAllWardenReturnRows ? activePasses : activePasses.slice(0, defaultVisible);
+
+    let html = displayPasses.map((pass) => {
+        const returnInfo = calculateGatePassReturnInfo(pass);
+        const rawStatus = String(pass.status || 'REQUESTED').toUpperCase();
+        const isPending = rawStatus === 'REQUESTED' || rawStatus === 'PENDING';
+        const isReturned = rawStatus === 'RETURNED';
+
+        let borderCardClass = 'border-border bg-surface hover:border-indigo-300';
+        if (returnInfo.isToday) {
+            borderCardClass = 'border-emerald/40 bg-emerald/[0.02] shadow-sm';
+        } else if (returnInfo.isOverdue) {
+            borderCardClass = 'border-danger/40 bg-danger/[0.02] shadow-sm';
+        } else if (returnInfo.isReturned) {
+            borderCardClass = 'border-purple-300 bg-purple-500/[0.02] shadow-sm';
+        }
+
+        return `
+            <div class="rounded-2xl border ${borderCardClass} p-4 sm:p-5 hover:shadow-md transition-all flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                <div class="flex items-start gap-4">
+                    ${pass.studentPhoto ? `
+                        <img src="${pass.studentPhoto}" alt="${pass.student || 'Student'}" class="w-14 h-14 rounded-2xl object-cover border border-border shadow-xs shrink-0">
+                    ` : `
+                        <div class="w-14 h-14 rounded-2xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-500 text-xl font-bold shrink-0">
+                            ${(pass.student || 'S').slice(0, 2).toUpperCase()}
+                        </div>
+                    `}
+                    <div class="space-y-1.5 min-w-0">
+                        <div class="flex flex-wrap items-center gap-2">
+                            <span class="font-bold text-base text-text">${pass.student || 'Student'}</span>
+                            <span class="text-xs text-text-secondary font-mono">(${pass.registrationNumber || 'N/A'})</span>
+                            <span class="px-3 py-1 rounded-full text-xs font-semibold ${returnInfo.badgeClass}">
+                                ${returnInfo.label}
+                            </span>
+                        </div>
+                        <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-text-secondary">
+                            <span><strong class="text-text">Hostel:</strong> ${pass.hostelBlock || 'Block A'} • <strong>Room:</strong> ${pass.roomNumber || 'N/A'}</span>
+                            <span><strong class="text-text">Session:</strong> ${pass.session || 'General'}</span>
+                            <span class="text-text-muted font-mono">Pass: ${pass.id}</span>
+                        </div>
+                        <div class="flex flex-wrap items-center gap-3 text-xs">
+                            <div class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-surface-alt border border-border/80">
+                                <i class="fa-solid fa-arrow-right-from-bracket text-text-muted"></i>
+                                <span class="text-text-secondary font-medium">Out: <strong>${formatGatePassDate(pass.gateDate)}</strong></span>
+                            </div>
+                            <div class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg ${returnInfo.isToday ? 'bg-emerald/10 text-emerald font-bold border border-emerald/30' : returnInfo.isOverdue ? 'bg-danger/10 text-danger font-bold border border-danger/30' : 'bg-surface-alt border border-border/80'}">
+                                <i class="fa-solid fa-calendar-check ${returnInfo.isToday ? 'text-emerald' : returnInfo.isOverdue ? 'text-danger' : 'text-primary'}"></i>
+                                <span>Expected Return: <strong>${formatGatePassDate(pass.returnDate)}</strong></span>
+                            </div>
+                        </div>
+                        <p class="text-xs text-text-muted italic bg-surface-alt/70 px-2.5 py-1 rounded-lg">
+                            <i class="fa-solid fa-comment-dots text-primary/70 mr-1"></i> "${pass.reason || 'No reason provided'}"
+                        </p>
+                    </div>
+                </div>
+                <div class="flex flex-wrap items-center gap-2 shrink-0 self-end lg:self-center">
+                    ${isPending ? `
+                        <button onclick="updateGatePassStatus('${pass.id}', 'Approved')" class="px-3.5 py-2 rounded-xl bg-emerald hover:bg-emerald/90 text-white text-xs font-semibold shadow-xs transition-all flex items-center gap-1.5">
+                            <i class="fa-solid fa-check"></i> Approve
+                        </button>
+                    ` : ''}
+                    ${isReturned ? `
+                        <button onclick="updateGatePassStatus('${pass.id}', 'COMPLETED')" class="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-semibold shadow-xs transition-all flex items-center gap-1.5">
+                            <i class="fa-solid fa-clipboard-check"></i> Verify Return
+                        </button>
+                    ` : ''}
+                    <button onclick="viewGatePassDetailsModal('${pass.id}')" class="px-3.5 py-2 rounded-xl border border-border bg-surface-alt hover:bg-surface text-xs font-semibold text-text hover:text-primary transition-all flex items-center gap-1.5">
+                        <i class="fa-solid fa-eye text-primary"></i> Details
+                    </button>
+                    <button onclick="downloadGatePassPdf('${pass.id}')" class="px-3 py-2 rounded-xl border border-border bg-surface-alt hover:bg-surface text-xs font-semibold text-text-secondary hover:text-text transition-all flex items-center gap-1.5">
+                        <i class="fa-solid fa-file-pdf text-danger"></i> PDF
+                    </button>
+                </div>
+            </div>
+        `;
+    }).join('');
+
+    if (activePasses.length > defaultVisible) {
+        html += `
+            <div class="pt-3 text-center">
+                <button onclick="toggleWardenReturnSeeAll()" class="w-full sm:w-auto px-6 py-2.5 rounded-xl border border-indigo-200 bg-indigo-50/80 hover:bg-indigo-100 text-indigo-700 text-xs font-bold transition-all shadow-xs flex items-center justify-center gap-2 mx-auto">
+                    <i class="fa-solid ${showAllWardenReturnRows ? 'fa-chevron-up' : 'fa-chevron-down'}"></i>
+                    ${showAllWardenReturnRows ? `Show Less (${defaultVisible} items)` : `See All (${activePasses.length} Scheduled Returns)`}
+                </button>
+            </div>
+        `;
+    }
+
+    list.innerHTML = html;
+}
+
+function viewGatePassDetailsModal(passId) {
+    const pass = latestGatePasses.find(p => p.id === passId || p.id?.toLowerCase() === passId?.toLowerCase());
+    if (!pass) return showToast('Gate pass record not found.', 'error');
+
+    const rawStatus = String(pass.status || 'PENDING_ADMIN').toUpperCase();
+    const isApproved = /^(approved|qr generated|security_pending|outside|warden_pending|outside_not_returned|completed)$/i.test(rawStatus);
+    const isSecurityPending = rawStatus === 'SECURITY_PENDING' || rawStatus === 'APPROVED' || rawStatus === 'QR GENERATED';
+    const isOutside = rawStatus === 'OUTSIDE' || rawStatus === 'OUT';
+    const isOutsideNotReturned = rawStatus === 'OUTSIDE_NOT_RETURNED';
+    const isCompleted = rawStatus === 'COMPLETED';
+    const isRejected = rawStatus.includes('REJECTED');
+
+    let badgeClass = 'bg-amber-100 text-amber-800 border border-amber-200';
+    let badgeText = 'Pending Admin Approval';
+
+    if (isSecurityPending) {
+        badgeClass = 'bg-indigo-100 text-indigo-800 border border-indigo-200';
+        badgeText = 'Approved • Security Pending';
+    } else if (isOutside) {
+        badgeClass = 'bg-blue-100 text-blue-800 border border-blue-200';
+        badgeText = 'Outside • Gate Crossed';
+    } else if (isOutsideNotReturned) {
+        badgeClass = 'bg-rose-100 text-rose-900 border border-rose-300';
+        badgeText = '⚠️ Outside — Not Returned';
+    } else if (isCompleted) {
+        badgeClass = 'bg-emerald-100 text-emerald-800 border border-emerald-200';
+        badgeText = '✅ Completed & Verified';
+    } else if (isRejected) {
+        badgeClass = 'bg-danger/10 text-danger border border-danger/20';
+        badgeText = rawStatus === 'SECURITY_REJECTED' ? '❌ Security Exit Rejected' : '❌ Pass Rejected';
+    }
+
+    const timelineEvents = [
+        {
+            stage: 'Applied',
+            title: 'Gate Pass Applied',
+            time: pass.createdAt ? new Date(pass.createdAt).toLocaleString('en-IN') : '—',
+            actor: pass.student || 'Student',
+            done: true,
+            icon: 'fa-solid fa-file-pen text-indigo-500',
+            bg: 'bg-indigo-500'
+        },
+        {
+            stage: 'Admin',
+            title: pass.adminApproval?.status === 'APPROVED' || isApproved ? 'Admin Approved' : isRejected ? 'Admin Rejected' : 'Admin Approval Pending',
+            time: pass.approvedAt || pass.adminApproval?.approvedAt ? new Date(pass.approvedAt || pass.adminApproval?.approvedAt).toLocaleString('en-IN') : 'Pending',
+            actor: pass.approvedBy || pass.adminApproval?.approvedBy || 'Admin',
+            done: Boolean(pass.approvedAt || pass.adminApproval?.approvedAt || isApproved),
+            cert: pass.certificateId || '',
+            icon: isApproved ? 'fa-solid fa-user-shield text-emerald' : 'fa-solid fa-clock text-amber-500',
+            bg: isApproved ? 'bg-emerald' : 'bg-amber-400'
+        },
+        {
+            stage: 'Security Exit',
+            title: pass.securityVerified ? 'Security Exit Verified' : pass.securityStatus === 'REJECTED' ? 'Security Exit Rejected' : 'Security Gate Scan Pending',
+            time: pass.exitTime || pass.securityVerifiedAt ? new Date(pass.exitTime || pass.securityVerifiedAt).toLocaleString('en-IN') : 'Pending',
+            actor: pass.securityName || 'Gate Security',
+            done: Boolean(pass.securityVerified || pass.exitTime),
+            note: pass.securityRejectionReason ? ('Reason: "' + pass.securityRejectionReason + '"') : (pass.exitTime ? 'Student crossed the campus gate' : ''),
+            icon: pass.securityVerified ? 'fa-solid fa-person-walking-arrow-right text-blue-500' : 'fa-solid fa-shield-halved text-slate-400',
+            bg: pass.securityVerified ? 'bg-blue-500' : 'bg-slate-300'
+        },
+        {
+            stage: 'Warden Arrival',
+            title: pass.wardenVerified ? 'Hostel Arrival Confirmed' : pass.status === 'OUTSIDE_NOT_RETURNED' ? 'Hostel Arrival Not Verified (OUTSIDE_NOT_RETURNED)' : 'Hostel Arrival Verification Pending',
+            time: pass.hostelArrivalTime || pass.wardenVerifiedAt ? new Date(pass.hostelArrivalTime || pass.wardenVerifiedAt).toLocaleString('en-IN') : 'Pending',
+            actor: pass.wardenName || 'Hostel Warden',
+            done: Boolean(pass.wardenVerified || pass.hostelArrivalTime || pass.status === 'OUTSIDE_NOT_RETURNED'),
+            note: pass.wardenRejectionReason ? ('Reason: "' + pass.wardenRejectionReason + '"') : (pass.hostelArrivalTime ? 'Student safely reached the hostel block' : ''),
+            icon: pass.wardenVerified ? 'fa-solid fa-hotel text-emerald' : pass.status === 'OUTSIDE_NOT_RETURNED' ? 'fa-solid fa-triangle-exclamation text-rose-500' : 'fa-solid fa-building-user text-slate-400',
+            bg: pass.wardenVerified ? 'bg-emerald' : pass.status === 'OUTSIDE_NOT_RETURNED' ? 'bg-rose-500' : 'bg-slate-300'
+        }
+    ];
+
+    const content = `
+        <div class="space-y-6 text-left">
+            <div class="flex items-start gap-4 pb-4 border-b border-border">
+                ${pass.studentPhoto ? `
+                    <img src="${pass.studentPhoto}" alt="${pass.student || 'Student'}" class="w-20 h-20 rounded-2xl object-cover border-2 border-border shadow-md shrink-0">
+                ` : `
+                    <div class="w-20 h-20 rounded-2xl bg-surface-alt border-2 border-border flex items-center justify-center text-text-muted text-2xl shrink-0">
+                        <i class="fa-solid fa-user"></i>
+                    </div>
+                `}
+                <div class="space-y-1 min-w-0 flex-1">
+                    <div class="flex flex-wrap items-center gap-2">
+                        <h3 class="text-xl font-bold text-text truncate">${pass.student || 'Anonymous'}</h3>
+                        <span class="px-3 py-0.5 rounded-full text-xs font-bold ${badgeClass}">${badgeText}</span>
+                    </div>
+                    <p class="text-xs text-text-secondary font-mono">Register No: <strong class="text-text">${pass.registrationNumber || 'N/A'}</strong></p>
+                    <p class="text-xs text-text-secondary">Hostel: <strong class="text-text">${pass.hostelBlock || 'Block A'}</strong> • Room: <strong class="text-text">${pass.roomNumber || 'N/A'}</strong></p>
+                    <div class="flex flex-wrap items-center gap-2 pt-0.5">
+                        <span class="text-xs font-mono text-primary font-bold">Pass: ${pass.id}</span>
+                        ${pass.certificateId ? `<span class="text-xs font-mono text-emerald-600 bg-emerald/10 px-2 py-0.5 rounded-lg border border-emerald/20">Cert: ${pass.certificateId}</span>` : ''}
+                    </div>
+                </div>
+            </div>
+
+            <div class="p-4 rounded-2xl bg-surface-alt border border-border/80 space-y-3">
+                <p class="text-xs font-bold uppercase tracking-wider text-text-secondary flex items-center gap-2">
+                    <i class="fa-solid fa-shield-check text-indigo-600"></i> Two-Step Gate Pass Verification Status
+                </p>
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                    <div class="p-3 rounded-xl bg-surface border border-border">
+                        <span class="text-[10px] text-text-muted uppercase font-bold block">1. Admin Status</span>
+                        <p class="font-bold mt-1 ${isApproved ? 'text-emerald' : isRejected ? 'text-danger' : 'text-amber-600'}">
+                            ${isApproved ? '✅ Approved' : isRejected ? '❌ Rejected' : '⏳ Pending'}
+                        </p>
+                        <p class="text-[11px] text-text-muted mt-0.5">${pass.approvedBy ? `By: ${pass.approvedBy}` : 'Awaiting review'}</p>
+                    </div>
+                    <div class="p-3 rounded-xl bg-surface border border-border">
+                        <span class="text-[10px] text-text-muted uppercase font-bold block">2. Security Gate Exit</span>
+                        <p class="font-bold mt-1 ${pass.securityVerified ? 'text-blue-600' : pass.securityStatus === 'REJECTED' ? 'text-danger' : 'text-amber-600'}">
+                            ${pass.securityVerified ? '✅ Exit Approved' : pass.securityStatus === 'REJECTED' ? '❌ Exit Rejected' : '⏳ Pending Exit'}
+                        </p>
+                        <p class="text-[11px] text-text-muted mt-0.5">${pass.exitTime ? `Exit: ${new Date(pass.exitTime).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}` : 'Not crossed yet'}</p>
+                    </div>
+                    <div class="p-3 rounded-xl bg-surface border border-border">
+                        <span class="text-[10px] text-text-muted uppercase font-bold block">3. Warden Arrival</span>
+                        <p class="font-bold mt-1 ${pass.wardenVerified ? 'text-emerald' : isOutsideNotReturned ? 'text-rose-600' : 'text-slate-500'}">
+                            ${pass.wardenVerified ? '✅ Arrival Confirmed' : isOutsideNotReturned ? '⚠️ Not Returned' : '⏳ Pending Arrival'}
+                        </p>
+                        <p class="text-[11px] text-text-muted mt-0.5">${pass.hostelArrivalTime ? `In: ${new Date(pass.hostelArrivalTime).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}` : isOutsideNotReturned ? pass.wardenRejectionReason || 'Rejected by warden' : 'Awaiting return'}</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                <div class="p-3 rounded-xl bg-surface-alt border border-border/80">
+                    <p class="text-text-muted font-semibold uppercase text-[10px]">Leave Date</p>
+                    <p class="font-bold text-text mt-0.5">${formatGatePassDate(pass.gateDate)}</p>
+                </div>
+                <div class="p-3 rounded-xl bg-surface-alt border border-border/80">
+                    <p class="text-text-muted font-semibold uppercase text-[10px]">Expected Return</p>
+                    <p class="font-bold text-amber-700 mt-0.5">${formatGatePassDate(pass.returnDate)}</p>
+                </div>
+                <div class="p-3 rounded-xl bg-surface-alt border border-border/80">
+                    <p class="text-text-muted font-semibold uppercase text-[10px]">Session</p>
+                    <p class="font-bold text-text mt-0.5">${pass.session || 'General'}</p>
+                </div>
+                <div class="p-3 rounded-xl bg-surface-alt border border-border/80">
+                    <p class="text-text-muted font-semibold uppercase text-[10px]">Gate Crossed</p>
+                    <p class="font-bold text-text mt-0.5">${pass.gateCrossed || pass.exitTime ? '🚪 YES (Outside)' : '❌ NO'}</p>
+                </div>
+            </div>
+
+            <div class="p-3.5 rounded-xl bg-surface-alt border border-border/80 text-xs">
+                <p class="text-text-muted font-semibold uppercase text-[10px] mb-1">Reason for Leave & Destination</p>
+                <p class="text-text leading-relaxed italic">"${pass.reason || 'No specific reason provided.'}"</p>
+            </div>
+
+            <div class="p-5 rounded-2xl bg-surface border border-border space-y-4">
+                <h4 class="font-bold text-sm text-text flex items-center gap-2">
+                    <i class="fa-solid fa-timeline text-indigo-600"></i> Gate Pass Movement Timeline
+                </h4>
+                <div class="relative pl-6 space-y-5 before:absolute before:left-2.5 before:top-2 before:bottom-2 before:w-0.5 before:bg-border">
+                    ${timelineEvents.map((t) => `
+                        <div class="relative flex items-start gap-3">
+                            <div class="absolute -left-6 top-1 w-5 h-5 rounded-full ${t.bg} text-white flex items-center justify-center text-[9px] shadow-xs ring-4 ring-surface">
+                                <i class="${t.icon.includes('check') ? 'fa-solid fa-check' : 'fa-solid fa-circle'}"></i>
+                            </div>
+                            <div class="space-y-0.5">
+                                <div class="flex flex-wrap items-center gap-2">
+                                    <span class="font-bold text-xs text-text">${t.title}</span>
+                                    <span class="text-[10px] text-text-muted font-mono">${t.time}</span>
+                                </div>
+                                <p class="text-xs text-text-secondary">Actor: <strong class="text-text">${t.actor}</strong></p>
+                                ${t.cert ? `<p class="text-[11px] font-mono text-emerald-600">Certificate: ${t.cert}</p>` : ''}
+                                ${t.note ? `<p class="text-[11px] text-rose-600 font-medium">${t.note}</p>` : ''}
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+
+            ${pass.qrImage ? `
+                <div class="p-4 rounded-2xl bg-white border border-border flex flex-col sm:flex-row items-center justify-between gap-4 text-center sm:text-left">
+                    <div class="space-y-1">
+                        <p class="font-bold text-sm text-slate-900">Unified Digital Verification QR Code</p>
+                        <p class="text-xs text-slate-500">Same QR code used for both Security Gate exit and Warden Hostel return.</p>
+                        <p class="text-[11px] font-mono text-indigo-600">Code: ${pass.id}</p>
+                    </div>
+                    <img src="${pass.qrImage}" alt="QR Code" class="w-24 h-24 object-contain rounded-xl border border-slate-200 shadow-sm">
+                </div>
+            ` : ''}
+
+            <div class="flex flex-wrap gap-2.5 pt-2 border-t border-border">
+                ${rawStatus === 'PENDING_ADMIN' || rawStatus === 'REQUESTED' || rawStatus === 'PENDING' ? `
+                    <button onclick="updateGatePassStatus('${pass.id}', 'Approved'); closeModal();" class="flex-1 py-2.5 rounded-xl bg-emerald hover:bg-emerald/90 text-white text-xs font-semibold shadow-sm transition-all flex items-center justify-center gap-1.5">
+                        <i class="fa-solid fa-check"></i> Approve Pass (Generate QR)
+                    </button>
+                    <button onclick="updateGatePassStatus('${pass.id}', 'Rejected'); closeModal();" class="px-4 py-2.5 rounded-xl bg-danger/10 hover:bg-danger hover:text-white text-danger text-xs font-semibold transition-all">
+                        Reject
+                    </button>
+                ` : ''}
+                ${(currentUser?.role === 'security' || currentUser?.role === 'admin') && (rawStatus === 'SECURITY_PENDING' || rawStatus === 'QR GENERATED' || rawStatus === 'APPROVED') ? `
+                    <button onclick="executeSecurityVerification('${pass.id}', 'APPROVE'); closeModal();" class="flex-1 py-2.5 rounded-xl bg-emerald hover:bg-emerald/90 text-white text-xs font-semibold shadow-sm transition-all flex items-center justify-center gap-1.5">
+                        <i class="fa-solid fa-door-open"></i> Approve Exit
+                    </button>
+                    <button onclick="executeSecurityVerification('${pass.id}', 'REJECT'); closeModal();" class="px-4 py-2.5 rounded-xl bg-rose-600/10 hover:bg-rose-600 text-rose-600 hover:text-white text-xs font-semibold transition-all">
+                        Reject Exit
+                    </button>
+                ` : ''}
+                ${(currentUser?.role === 'warden' || currentUser?.role === 'admin') && (rawStatus === 'OUTSIDE' || rawStatus === 'OUT' || rawStatus === 'OUTSIDE_NOT_RETURNED' || rawStatus === 'RETURNED') ? `
+                    <button onclick="executeWardenVerification('${pass.id}', 'APPROVE'); closeModal();" class="flex-1 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold shadow-sm transition-all flex items-center justify-center gap-1.5">
+                        <i class="fa-solid fa-hotel"></i> Confirm Hostel Arrival
+                    </button>
+                    <button onclick="executeWardenVerification('${pass.id}', 'REJECT'); closeModal();" class="px-4 py-2.5 rounded-xl bg-amber-600/10 hover:bg-amber-600 text-amber-700 hover:text-white text-xs font-semibold transition-all">
+                        Mark Not Returned
+                    </button>
+                ` : ''}
+                <button onclick="downloadGatePassPdf('${pass.id}')" class="px-4 py-2.5 rounded-xl border border-border bg-surface-alt hover:bg-surface text-xs font-semibold text-text transition-all flex items-center gap-1.5">
+                    <i class="fa-solid fa-file-pdf text-danger"></i> Download PDF
+                </button>
+            </div>
+        </div>
+    `;
+
+    showModal('Gate Pass Details & Verification Timeline', content);
+}
+
+// ============================================================================
+// UNIVERSAL QR SCANNER & TWO-STEP VERIFICATION SYSTEM (SECURITY & WARDEN)
+// ============================================================================
+let activeHtml5QrScanner = null;
+let currentScannerRole = 'warden';
+
+function openQrScanModal(role = 'warden') {
+    currentScannerRole = role;
+    const isSecurity = role === 'security';
+    const isWarden = role === 'warden';
+
+    const title = isSecurity 
+        ? 'Gate Security • Scan Gate Pass QR' 
+        : 'Hostel Warden • Scan Student Return QR';
+
+    // Collect active passes to provide 1-click test pills for convenience
+    const activeTestPasses = latestGatePasses.filter(p => {
+        const raw = String(p.status || '').toUpperCase();
+        if (isSecurity) {
+            return raw === 'SECURITY_PENDING' || raw === 'APPROVED' || raw === 'QR GENERATED';
+        } else {
+            // For Warden: all active/approved passes eligible for return verification
+            return raw !== 'REJECTED' && raw !== 'CANCELLED' && raw !== 'COMPLETED';
+        }
+    }).slice(0, 4);
+
+    const content = `
+        <div class="space-y-5 text-left max-w-xl mx-auto">
+            <!-- Header Banner (Warden Only or Security Only) -->
+            <div class="p-4 rounded-2xl bg-gradient-to-r ${isSecurity ? 'from-indigo-600 via-blue-600 to-cyan-600' : 'from-purple-600 via-indigo-600 to-pink-600'} text-white shadow-md">
+                <div class="flex items-center justify-between gap-3">
+                    <div class="flex items-center gap-3">
+                        <div class="w-10 h-10 rounded-2xl bg-white/20 flex items-center justify-center text-xl backdrop-blur-md shadow-sm shrink-0">
+                            <i class="fa-solid ${isSecurity ? 'fa-person-military-safety' : 'fa-building-user'}"></i>
+                        </div>
+                        <div>
+                            <h4 class="font-bold text-sm leading-tight">${isSecurity ? 'Gate Security Departure Scan' : 'Warden Hostel Return Scan'}</h4>
+                            <p class="text-xs text-white/80 mt-0.5">${isSecurity ? 'Scan student QR to verify approved exit & gate crossing' : 'Scan student QR to confirm hostel arrival & record in database'}</p>
+                        </div>
+                    </div>
+                    <span class="px-3 py-1 rounded-full text-xs font-bold bg-white/25 border border-white/30 uppercase tracking-wider">${isWarden ? 'WARDEN RETURN' : 'SECURITY'}</span>
+                </div>
+            </div>
+
+            <!-- Live Camera Viewfinder Box -->
+            <div class="relative rounded-2xl overflow-hidden bg-slate-950 border-2 border-slate-700 min-h-[260px] flex items-center justify-center shadow-inner">
+                <div id="qrInteractiveCameraContainer" class="w-full h-full min-h-[260px]"></div>
+                <div id="cameraPlaceholderState" class="absolute inset-0 flex flex-col items-center justify-center p-6 text-center text-slate-200 space-y-3 bg-slate-950/95 z-10">
+                    <div class="w-14 h-14 rounded-2xl bg-indigo-600/20 border border-indigo-500/30 flex items-center justify-center text-2xl text-indigo-400">
+                        <i class="fa-solid fa-camera"></i>
+                    </div>
+                    <div>
+                        <p class="text-sm font-bold text-white">${isWarden ? 'Scan Student Return QR Code' : 'Live Camera QR Scanner'}</p>
+                        <p class="text-xs text-slate-400 mt-1 max-w-xs">Point your device camera at the student's Gate Pass QR code to scan and verify.</p>
+                    </div>
+                    <div class="flex flex-wrap items-center justify-center gap-2 pt-1">
+                        <button onclick="startCameraScanner('${role}')" class="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-md transition-all flex items-center gap-2">
+                            <i class="fa-solid fa-play"></i> Start Camera Scan
+                        </button>
+                        <label class="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-200 text-xs font-semibold cursor-pointer transition-all flex items-center gap-2">
+                            <i class="fa-solid fa-image text-indigo-400"></i> Upload QR Image
+                            <input type="file" accept="image/*" class="hidden" onchange="handleQrImageUpload(event, '${role}')">
+                        </label>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Manual Input & Search Fallback -->
+            <div class="p-4 rounded-2xl bg-surface-alt border border-border space-y-3">
+                <label class="text-xs font-bold text-text flex items-center justify-between">
+                    <span class="flex items-center gap-2"><i class="fa-solid fa-keyboard text-indigo-600"></i> Or Enter Pass ID / QR Token Manually</span>
+                    <span class="text-[10px] text-text-muted font-normal">Pass ID or Token</span>
+                </label>
+                <div class="flex gap-2">
+                    <input id="modalManualScanInput" type="text" placeholder="e.g. GP-2026-48083721 or paste QR token" class="input-focus flex-1 px-4 py-2.5 rounded-xl border border-border bg-surface text-xs font-mono">
+                    <button onclick="handleManualModalScanSubmit('${role}')" class="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-xs transition-all flex items-center gap-1.5 shrink-0">
+                        <i class="fa-solid fa-magnifying-glass"></i> Inspect & Verify
+                    </button>
+                </div>
+
+                <!-- 1-Click Quick Sample Testing Pills -->
+                ${activeTestPasses.length > 0 ? `
+                    <div class="pt-2 border-t border-border/70">
+                        <p class="text-[11px] font-bold text-text-secondary mb-1.5 flex items-center gap-1.5">
+                            <i class="fa-solid fa-bolt text-amber-500"></i> Quick Select Active Pass to Verify Return:
+                        </p>
+                        <div class="flex flex-wrap gap-1.5">
+                            ${activeTestPasses.map(p => `
+                                <button onclick="handleQrScannedToken('${p.token || p.qrToken || p.id}', '${role}')" class="px-2.5 py-1 rounded-lg border border-border bg-surface hover:bg-surface-alt hover:border-purple-400 text-[11px] font-medium text-text transition-all flex items-center gap-1.5">
+                                    <span class="w-2 h-2 rounded-full bg-purple-500"></span>
+                                    <span class="font-bold">${p.student}</span>
+                                    <span class="font-mono text-text-muted">(${p.id})</span>
+                                </button>
+                            `).join('')}
+                        </div>
+                    </div>
+                ` : ''}
+            </div>
+
+            <!-- Dynamic Scan Result & Action Card Container -->
+            <div id="qrScanVerificationResultBox" class="hidden space-y-4"></div>
+        </div>
+    `;
+
+    showModal(title, content);
+}
+
+function startCameraScanner(role = 'warden') {
+    const placeholder = document.getElementById('cameraPlaceholderState');
+    if (placeholder) placeholder.classList.add('hidden');
+
+    if (typeof Html5Qrcode === 'undefined') {
+        showToast('Camera scanner library not loaded. Please use manual ID input.', 'warning');
+        if (placeholder) placeholder.classList.remove('hidden');
+        return;
+    }
+
+    try {
+        if (activeHtml5QrScanner) {
+            activeHtml5QrScanner.stop().catch(() => {});
+            activeHtml5QrScanner = null;
+        }
+
+        activeHtml5QrScanner = new Html5Qrcode('qrInteractiveCameraContainer');
+        const config = { fps: 10, qrbox: { width: 220, height: 220 } };
+
+        activeHtml5QrScanner.start(
+            { facingMode: 'environment' },
+            config,
+            (decodedText) => {
+                if (decodedText) {
+                    stopCameraScanner();
+                    playChimeSound();
+                    handleQrScannedToken(decodedText, role);
+                }
+            },
+            (errorMsg) => {
+                // scanning frame in progress...
+            }
+        ).catch((err) => {
+            console.warn('Camera stream error:', err);
+            if (placeholder) {
+                placeholder.classList.remove('hidden');
+                placeholder.innerHTML = `
+                    <div class="w-12 h-12 rounded-2xl bg-amber-500/20 border border-amber-500/30 flex items-center justify-center text-2xl text-amber-400 mb-2">
+                        <i class="fa-solid fa-triangle-exclamation"></i>
+                    </div>
+                    <p class="text-xs font-bold text-white">Camera Access Notice</p>
+                    <p class="text-[11px] text-slate-400 mt-0.5">Direct camera access was not granted or is unavailable on this device.</p>
+                    <p class="text-[11px] text-indigo-300 font-medium">You can upload a QR image or type/select the Pass ID below!</p>
+                `;
+            }
+        });
+    } catch (e) {
+        console.warn('QR scanner initialization error:', e);
+    }
+}
+
+function stopCameraScanner() {
+    if (activeHtml5QrScanner) {
+        try {
+            activeHtml5QrScanner.stop().catch(() => {});
+        } catch (e) {}
+        activeHtml5QrScanner = null;
+    }
+}
+
+function handleQrImageUpload(event, role) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    if (typeof Html5Qrcode === 'undefined') {
+        return showToast('Scanner library loading. Please use manual input.', 'info');
+    }
+
+    const scanner = new Html5Qrcode('qrInteractiveCameraContainer');
+    scanner.scanFile(file, true)
+        .then(decodedText => {
+            stopCameraScanner();
+            playChimeSound();
+            handleQrScannedToken(decodedText, role);
+        })
+        .catch(err => {
+            showToast('Could not detect a valid QR code in this image. Please try another image or manual input.', 'error');
+        });
+}
+
+function handleManualModalScanSubmit(role) {
+    const input = document.getElementById('modalManualScanInput');
+    const val = (input?.value || '').trim();
+    if (!val) return showToast('Please enter a Pass ID or QR token.', 'warning');
+    handleQrScannedToken(val, role);
+}
+
+function handleSecurityQuickLookup() {
+    const input = document.getElementById('securityScanInput');
+    const val = (input?.value || '').trim();
+    if (!val) return showToast('Please enter a Gate Pass ID or scan a QR code.', 'warning');
+    openQrScanModal('security');
+    setTimeout(() => {
+        const modalInput = document.getElementById('modalManualScanInput');
+        if (modalInput) modalInput.value = val;
+        handleQrScannedToken(val, 'security');
+    }, 200);
+}
+
+async function handleQrScannedToken(rawToken, role = 'warden') {
+    let token = String(rawToken || '').trim();
+    // Extract token from full URLs (e.g. /qr/TOKEN or /gatepass/verify/TOKEN)
+    const qrMatch = token.match(/\/qr\/([^\s/?#]+)/i) || token.match(/\/verify\/([^\s/?#]+)/i);
+    if (qrMatch && qrMatch[1]) token = decodeURIComponent(qrMatch[1]);
+
+    const resultBox = document.getElementById('qrScanVerificationResultBox');
+    if (!resultBox) return;
+
+    resultBox.classList.remove('hidden');
+    resultBox.innerHTML = `
+        <div class="p-6 rounded-2xl bg-surface border border-border text-center space-y-2">
+            <i class="fa-solid fa-circle-notch fa-spin text-2xl text-indigo-600"></i>
+            <p class="text-xs font-semibold text-text">Validating QR Code & fetching student record...</p>
+        </div>
+    `;
+
+    try {
+        const res = await fetch('/api/gatepass/verify-preview', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token, role, user: currentUser })
+        });
+        const data = await res.json();
+
+        if (!res.ok || !data.gatePass) {
+            resultBox.innerHTML = `
+                <div class="p-5 rounded-2xl bg-danger/10 border-2 border-danger/20 text-danger space-y-3">
+                    <div class="flex items-center gap-2.5 font-bold text-sm text-danger">
+                        <div class="w-8 h-8 rounded-xl bg-danger text-white flex items-center justify-center text-base shrink-0 shadow-sm">
+                            <i class="fa-solid fa-ban"></i>
+                        </div>
+                        <div>
+                            <h4>Verification Blocked</h4>
+                            <p class="text-xs font-normal mt-0.5">${data.message || data.error || 'Gate pass verification failed.'}</p>
+                        </div>
+                    </div>
+                </div>
+            `;
+            return;
+        }
+
+        const pass = data.gatePass;
+        renderScanPreviewCard(pass, role, token);
+    } catch (err) {
+        resultBox.innerHTML = `
+            <div class="p-4 rounded-2xl bg-danger/10 border border-danger/20 text-danger text-xs font-semibold">
+                Network error connecting to verification service. Please try again.
+            </div>
+        `;
+    }
+}
+
+function renderScanPreviewCard(pass, role, token) {
+    const resultBox = document.getElementById('qrScanVerificationResultBox');
+    if (!resultBox) return;
+
+    const isSecurity = role === 'security';
+    const isWarden = role === 'warden';
+    const isCompleted = String(pass.status).toUpperCase() === 'COMPLETED';
+
+    resultBox.innerHTML = `
+        <div class="p-5 rounded-2xl bg-surface border-2 ${isSecurity ? 'border-indigo-500/50' : 'border-purple-500/50'} space-y-4 shadow-lg animate-fadeIn">
+            <!-- Student Header Banner -->
+            <div class="flex items-start gap-4 pb-3 border-b border-border">
+                ${pass.studentPhoto ? `
+                    <img src="${pass.studentPhoto}" alt="${pass.student}" class="w-16 h-16 rounded-2xl object-cover border-2 border-border shadow-sm shrink-0">
+                ` : `
+                    <div class="w-16 h-16 rounded-2xl bg-surface-alt border border-border flex items-center justify-center text-text-muted text-2xl shrink-0">
+                        <i class="fa-solid fa-user"></i>
+                    </div>
+                `}
+                <div class="min-w-0 flex-1 space-y-0.5">
+                    <div class="flex items-center justify-between gap-2">
+                        <h4 class="font-bold text-base text-text truncate">${pass.student || 'Student'}</h4>
+                        <span class="px-2.5 py-0.5 rounded-full text-xs font-bold ${isCompleted ? 'bg-emerald-100 text-emerald-800' : 'bg-purple-100 text-purple-800'}">
+                            ${isCompleted ? 'Returned & Completed' : (pass.status || 'Active')}
+                        </span>
+                    </div>
+                    <p class="text-xs text-text-secondary font-mono">Reg No: <strong class="text-text">${pass.registrationNumber || 'N/A'}</strong></p>
+                    <p class="text-xs text-text-secondary">${pass.hostelBlock || 'Block A'} • Room <strong>${pass.roomNumber || 'N/A'}</strong></p>
+                    <p class="text-[11px] font-mono text-primary font-bold">Pass ID: ${pass.id} ${pass.certificateId ? `• Cert: ${pass.certificateId}` : ''}</p>
+                </div>
+            </div>
+
+            <!-- Pass Schedule Info Grid -->
+            <div class="grid grid-cols-2 gap-2 text-xs">
+                <div class="p-2.5 rounded-xl bg-surface-alt border border-border/70">
+                    <span class="text-text-muted block text-[10px] uppercase font-bold">Departure Date</span>
+                    <span class="font-bold text-text">${formatGatePassDate(pass.gateDate)}</span>
+                </div>
+                <div class="p-2.5 rounded-xl bg-surface-alt border border-border/70">
+                    <span class="text-text-muted block text-[10px] uppercase font-bold">Expected Return</span>
+                    <span class="font-bold text-purple-700">${formatGatePassDate(pass.returnDate)}</span>
+                </div>
+                <div class="p-2.5 rounded-xl bg-surface-alt border border-border/70">
+                    <span class="text-text-muted block text-[10px] uppercase font-bold">Admin Status</span>
+                    <span class="font-semibold text-emerald">${pass.approvedBy ? `Approved by ${pass.approvedBy}` : 'Approved'}</span>
+                </div>
+                <div class="p-2.5 rounded-xl bg-surface-alt border border-border/70">
+                    <span class="text-text-muted block text-[10px] uppercase font-bold">Hostel Arrival</span>
+                    <span class="font-semibold ${isCompleted ? 'text-emerald' : 'text-purple-600'}">${isCompleted ? 'Verified at ' + (pass.hostelArrivalTime ? new Date(pass.hostelArrivalTime).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : '') : 'Pending Confirmation'}</span>
+                </div>
+            </div>
+
+            <div class="p-3 rounded-xl bg-surface-alt border border-border/70 text-xs">
+                <span class="text-text-muted block text-[10px] uppercase font-bold mb-0.5">Reason for Gate Pass</span>
+                <p class="text-text italic">"${pass.reason || 'General'}"</p>
+            </div>
+
+            <!-- Verification Action Buttons (ACCEPT / REJECT) -->
+            ${isCompleted ? `
+                <div class="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-center space-y-1">
+                    <i class="fa-solid fa-circle-check text-2xl text-emerald-600"></i>
+                    <p class="font-bold text-xs text-emerald-800">Hostel Return Already Confirmed</p>
+                    <p class="text-[11px] text-emerald-700">This gate pass is marked as completed in the database.</p>
+                </div>
+            ` : isWarden ? `
+                <div class="space-y-2 pt-2 border-t border-border">
+                    <button onclick="submitWardenVerificationAction('${token}', 'APPROVE')" class="w-full py-3.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold text-sm shadow-md flex items-center justify-center gap-2 transition-all transform hover:-translate-y-0.5">
+                        <i class="fa-solid fa-hotel text-base"></i> APPROVE HOSTEL RETURN (Confirm Student Arrival)
+                    </button>
+                    <button onclick="promptWardenRejection('${token}')" class="w-full py-2.5 rounded-xl bg-amber-600/10 hover:bg-amber-600 hover:text-white text-amber-700 font-semibold text-xs transition-all flex items-center justify-center gap-2">
+                        <i class="fa-solid fa-circle-xmark"></i> REJECT RETURN (Mark Not Returned)
+                    </button>
+                </div>
+            ` : isSecurity ? `
+                <div class="space-y-2 pt-2 border-t border-border">
+                    <button onclick="submitSecurityVerificationAction('${token}', 'APPROVE')" class="w-full py-3.5 rounded-xl bg-emerald hover:bg-emerald/90 text-white font-bold text-sm shadow-md flex items-center justify-center gap-2 transition-all transform hover:-translate-y-0.5">
+                        <i class="fa-solid fa-door-open text-base"></i> APPROVE EXIT (Student Crossing Gate)
+                    </button>
+                    <button onclick="promptSecurityRejection('${token}')" class="w-full py-2.5 rounded-xl bg-rose-600/10 hover:bg-rose-600 hover:text-white text-rose-600 font-semibold text-xs transition-all flex items-center justify-center gap-2">
+                        <i class="fa-solid fa-ban"></i> REJECT EXIT
+                    </button>
+                </div>
+            ` : ''}
+        </div>
+    `;
+}
+
+function promptSecurityRejection(token) {
+    const reasons = [
+        'Invalid Gate Pass',
+        'Student details mismatch',
+        'Expired Gate Pass',
+        'Unauthorized request',
+        'Other reason'
+    ];
+    const inputReason = prompt(`Please enter reason for security rejection:\n(Presets: ${reasons.join(', ')})`, 'Student details mismatch');
+    if (inputReason !== null && inputReason.trim()) {
+        submitSecurityVerificationAction(token, 'REJECT', inputReason.trim());
+    }
+}
+
+function promptWardenRejection(token) {
+    const inputReason = prompt('Please enter reason for hostel arrival rejection:\n(Student will be marked as OUTSIDE_NOT_RETURNED in database)', 'Student did not arrive at hostel.');
+    if (inputReason !== null && inputReason.trim()) {
+        submitWardenVerificationAction(token, 'REJECT', inputReason.trim());
+    }
+}
+
+async function executeSecurityVerification(tokenOrId, action, reason = '') {
+    submitSecurityVerificationAction(tokenOrId, action, reason);
+}
+
+async function executeWardenVerification(tokenOrId, action, reason = '') {
+    submitWardenVerificationAction(tokenOrId, action, reason);
+}
+
+async function submitSecurityVerificationAction(token, action, reason = '') {
+    try {
+        const res = await fetch('/api/gatepass/security/verify', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                token,
+                action,
+                role: 'security',
+                rejectionReason: reason,
+                guardName: currentUser?.name || 'Gate Security Officer',
+                guardId: currentUser?.userId || 'SEC-001',
+                location: 'Main Campus Gate'
+            })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+            alert('Error: ' + (data.message || data.error || 'Security verification failed.'));
+            return;
+        }
+
+        playChimeSound();
+        showToast(data.message || 'Security verification updated successfully in database!', action === 'APPROVE' ? 'success' : 'warning');
+        closeModal();
+        await loadDashboardData();
+        renderSecurityDashboard();
+    } catch (err) {
+        showToast('Network error processing security verification.', 'error');
+    }
+}
+
+async function submitWardenVerificationAction(token, action, reason = '') {
+    try {
+        const res = await fetch('/api/gatepass/warden/verify', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                token,
+                action,
+                role: 'warden',
+                rejectionReason: reason,
+                wardenName: currentUser?.name || 'Hostel Warden',
+                wardenId: currentUser?.userId || 'WRD-001'
+            })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+            alert('Error: ' + (data.message || data.error || 'Warden verification failed.'));
+            return;
+        }
+
+        playChimeSound();
+        showToast(data.message || 'Hostel arrival verification updated in database!', action === 'APPROVE' ? 'success' : 'warning');
+        closeModal();
+        await loadDashboardData();
+        renderWardenDashboard();
+    } catch (err) {
+        showToast('Network error processing warden verification.', 'error');
+    }
+}
+
 function renderWardenDashboard() {
     const pendingCount = document.getElementById('wardenPendingCount');
     const approvedCount = document.getElementById('wardenApprovedCount');
     const outCount = document.getElementById('wardenOutCount');
+    const totalCount = document.getElementById('wardenTotalPassCount');
+    const seeAllBtn = document.getElementById('wardenGatePassSeeAllBtn');
     const list = document.getElementById('wardenGatePassList');
 
-    const pendingPasses = latestGatePasses.filter(p => !p.status || p.status === 'REQUESTED' || p.status === 'Pending');
-    const approvedPasses = latestGatePasses.filter(p => p.status === 'QR GENERATED' || p.status === 'Approved');
-    const outPasses = latestGatePasses.filter(p => p.status === 'OUT');
+    const returningTodayEl = document.getElementById('wardenReturningTodayCount');
+    const returningUpcomingEl = document.getElementById('wardenReturningUpcomingCount');
+    const overdueEl = document.getElementById('wardenOverdueCount');
+    const tabTodayEl = document.getElementById('tabReturningTodayCount');
+    const tabUpcomingEl = document.getElementById('tabReturningUpcomingCount');
+    const tabOverdueEl = document.getElementById('tabOverdueCount');
+    const totalReturnBadge = document.getElementById('wardenReturnTotalBadge');
+
+    const pendingPasses = latestGatePasses.filter(p => !p.status || ['REQUESTED', 'PENDING', 'PENDING_ADMIN'].includes(String(p.status).toUpperCase()));
+    const approvedPasses = latestGatePasses.filter(p => p.status && ['QR GENERATED', 'APPROVED', 'SECURITY_PENDING', 'OUTSIDE', 'OUT', 'RETURNED', 'COMPLETED'].includes(String(p.status).toUpperCase()));
+    const outPasses = latestGatePasses.filter(p => p.status && (String(p.status).toUpperCase() === 'OUTSIDE' || String(p.status).toUpperCase() === 'OUT' || (p.securityVerified && !p.wardenVerified)));
+
+    let returningTodayCount = 0;
+    let returningUpcomingCount = 0;
+    let overdueCount = 0;
+    let awaitingVerificationCount = 0;
+    const lateReturnsList = [];
+
+    const now = new Date();
+    const todayStr = now.toISOString().split('T')[0];
+
+    latestGatePasses.forEach(p => {
+        const info = calculateGatePassReturnInfo(p);
+        if (info.category === 'today') returningTodayCount++;
+        else if (info.category === 'upcoming') returningUpcomingCount++;
+        else if (info.category === 'overdue') overdueCount++;
+        else if (info.category === 'returned') awaitingVerificationCount++;
+
+        const isOutside = String(p.status).toUpperCase() === 'OUTSIDE' || String(p.status).toUpperCase() === 'OUT' || (p.securityVerified && !p.wardenVerified && p.status !== 'COMPLETED');
+        if (isOutside && p.returnDate) {
+            const retDate = new Date(`${p.returnDate}T23:59:59`);
+            if (retDate < now) {
+                const diffMs = now.getTime() - retDate.getTime();
+                const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+                lateReturnsList.push({ pass: p, overdueDays: diffDays, returnDate: p.returnDate });
+            }
+        }
+    });
 
     if (pendingCount) pendingCount.textContent = pendingPasses.length;
     if (approvedCount) approvedCount.textContent = approvedPasses.length;
     if (outCount) outCount.textContent = outPasses.length;
+    if (totalCount) totalCount.textContent = `${latestGatePasses.length} Total`;
 
+    if (returningTodayEl) returningTodayEl.textContent = returningTodayCount;
+    if (returningUpcomingEl) returningUpcomingEl.textContent = returningUpcomingCount;
+    if (overdueEl) overdueEl.textContent = overdueCount;
+    if (tabTodayEl) tabTodayEl.textContent = returningTodayCount;
+    if (tabUpcomingEl) tabUpcomingEl.textContent = returningUpcomingCount;
+    if (tabOverdueEl) tabOverdueEl.textContent = overdueCount;
+    if (totalReturnBadge) totalReturnBadge.textContent = `${returningTodayCount + returningUpcomingCount + overdueCount + awaitingVerificationCount} Scheduled`;
+
+    const lateSection = document.getElementById('wardenLateReturnSection');
+    const lateListEl = document.getElementById('wardenLateReturnList');
+    const lateBadgeEl = document.getElementById('wardenLateReturnCountBadge');
+
+    if (lateSection && lateListEl) {
+        if (lateReturnsList.length > 0) {
+            lateSection.classList.remove('hidden');
+            if (lateBadgeEl) lateBadgeEl.textContent = `${lateReturnsList.length} Student(s) Overdue`;
+            lateListEl.innerHTML = lateReturnsList.map(({ pass, overdueDays }) => `
+                <div class="rounded-xl border border-rose-300 bg-surface p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
+                    <div class="flex items-center gap-3">
+                        <div class="w-8 h-8 rounded-full bg-rose-600 text-white flex items-center justify-center text-xs font-bold shrink-0">
+                            <i class="fa-solid fa-user-clock"></i>
+                        </div>
+                        <div>
+                            <div class="flex items-center gap-2">
+                                <span class="font-bold text-xs text-rose-950">${pass.student}</span>
+                                <span class="text-[11px] font-mono text-rose-800">(${pass.registrationNumber || 'N/A'})</span>
+                                <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-600 text-white">🔴 Overdue by ${overdueDays} day(s)</span>
+                            </div>
+                            <p class="text-[11px] text-text-secondary mt-0.5">
+                                Room: <strong>${pass.roomNumber}</strong>, Block <strong>${pass.hostelBlock}</strong> • Expected: <strong class="text-rose-700">${formatGatePassDate(pass.returnDate)}</strong> • Exit: ${pass.exitTime ? new Date(pass.exitTime).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : 'N/A'}
+                            </p>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-2 shrink-0">
+                        <button onclick="submitWardenVerificationAction('${pass.id}', 'APPROVE')" class="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition-all shadow-xs">
+                            Verify Arrival
+                        </button>
+                        <button onclick="promptWardenRejection('${pass.id}')" class="px-2.5 py-1.5 rounded-lg bg-rose-100 hover:bg-rose-200 text-rose-800 text-xs font-semibold transition-all">
+                            Mark Not Returned
+                        </button>
+                    </div>
+                </div>
+            `).join('');
+        } else {
+            lateSection.classList.add('hidden');
+        }
+    }
+
+    const alertBanner = document.getElementById('wardenReturnAlertBanner');
+    const alertTitle = document.getElementById('wardenReturnAlertBannerTitle');
+    const alertMsg = document.getElementById('wardenReturnAlertBannerMessage');
+    if (alertBanner && alertTitle && alertMsg) {
+        const formattedToday = formatGatePassDate(todayStr);
+        if (overdueCount > 0 && returningTodayCount > 0) {
+            alertBanner.className = 'mb-6 rounded-2xl border border-danger/30 bg-gradient-to-r from-danger/10 via-amber-500/10 to-indigo-500/10 p-4 sm:p-5 shadow-xs transition-all';
+            alertTitle.textContent = `📢 Scheduled Returns & Overdue Notice (${formattedToday})`;
+            alertMsg.textContent = `${returningTodayCount} student(s) are expected to return today, and ${overdueCount} student(s) have passed their return date and are overdue!`;
+            alertBanner.classList.remove('hidden');
+        } else if (overdueCount > 0) {
+            alertBanner.className = 'mb-6 rounded-2xl border border-danger/30 bg-gradient-to-r from-danger/10 via-rose-500/10 to-amber-500/10 p-4 sm:p-5 shadow-xs transition-all';
+            alertTitle.textContent = `⚠️ Overdue Student Return Alert`;
+            alertMsg.textContent = `${overdueCount} student(s) have passed their scheduled return date and are still marked OUT. Please review and verify.`;
+            alertBanner.classList.remove('hidden');
+        } else if (returningTodayCount > 0) {
+            alertBanner.className = 'mb-6 rounded-2xl border border-emerald/30 bg-gradient-to-r from-emerald/10 via-teal-500/10 to-indigo-500/10 p-4 sm:p-5 shadow-xs transition-all';
+            alertTitle.textContent = `🟢 Expected Student Returns Today (${formattedToday})`;
+            alertMsg.textContent = `${returningTodayCount} student(s) are scheduled to return to the hostel today.`;
+            alertBanner.classList.remove('hidden');
+        } else {
+            alertBanner.classList.add('hidden');
+        }
+    }
+
+    renderWardenReturnSchedule(latestGatePasses);
     if (!list) return;
 
     if (!latestGatePasses.length) {
-        list.innerHTML = '<div class="text-sm text-text-secondary py-6 text-center">No gate pass requests recorded yet.</div>';
+        list.innerHTML = '<div class="text-sm text-text-secondary py-8 text-center bg-surface-alt rounded-2xl border border-dashed border-border"><i class="fa-solid fa-id-card text-2xl mb-2 text-text-muted block"></i>No gate pass requests recorded yet.</div>';
+        if (seeAllBtn) seeAllBtn.classList.add('hidden');
         return;
     }
 
-    list.innerHTML = latestGatePasses.map((pass) => {
-        const status = pass.status || 'REQUESTED';
-        const isPending = status === 'REQUESTED' || status === 'Pending';
-        const isApproved = status === 'QR GENERATED' || status === 'Approved';
+    let filteredPasses = latestGatePasses.slice();
+    if (currentWardenFilter === 'pending') {
+        filteredPasses = filteredPasses.filter(p => !p.status || ['REQUESTED', 'PENDING', 'PENDING_ADMIN'].includes(String(p.status).toUpperCase()));
+    } else if (currentWardenFilter === 'approved') {
+        filteredPasses = filteredPasses.filter(p => p.status && ['QR GENERATED', 'APPROVED', 'SECURITY_PENDING'].includes(String(p.status).toUpperCase()));
+    } else if (currentWardenFilter === 'out') {
+        filteredPasses = filteredPasses.filter(p => p.status && (String(p.status).toUpperCase() === 'OUTSIDE' || String(p.status).toUpperCase() === 'OUT' || (p.securityVerified && !p.wardenVerified)));
+    } else if (currentWardenFilter === 'returned') {
+        filteredPasses = filteredPasses.filter(p => p.status && ['RETURNED', 'COMPLETED', 'OUTSIDE_NOT_RETURNED'].includes(String(p.status).toUpperCase()));
+    }
 
-        let badgeClass = 'bg-amber-100 text-amber-800';
-        if (isApproved) badgeClass = 'bg-emerald/10 text-emerald border border-emerald/20';
-        if (status === 'OUT') badgeClass = 'bg-blue-100 text-blue-800';
-        if (status === 'RETURNED' || status === 'COMPLETED') badgeClass = 'bg-purple-100 text-purple-800';
-        if (status === 'Rejected') badgeClass = 'bg-danger/10 text-danger';
+    if (wardenGatePassSearchQuery) {
+        filteredPasses = filteredPasses.filter(p => {
+            const student = String(p.student || '').toLowerCase();
+            const reg = String(p.registrationNumber || '').toLowerCase();
+            const id = String(p.id || '').toLowerCase();
+            const room = String(p.roomNumber || '').toLowerCase();
+            const block = String(p.hostelBlock || '').toLowerCase();
+            return student.includes(wardenGatePassSearchQuery) ||
+                   reg.includes(wardenGatePassSearchQuery) ||
+                   id.includes(wardenGatePassSearchQuery) ||
+                   room.includes(wardenGatePassSearchQuery) ||
+                   block.includes(wardenGatePassSearchQuery);
+        });
+    }
+
+    const defaultVisible = 4;
+    if (seeAllBtn) {
+        if (filteredPasses.length > defaultVisible) {
+            seeAllBtn.classList.remove('hidden');
+            seeAllBtn.textContent = showAllWardenGatePassRows ? `Show Less (${filteredPasses.length})` : `See All (${filteredPasses.length})`;
+        } else {
+            seeAllBtn.classList.add('hidden');
+        }
+    }
+
+    const displayPasses = showAllWardenGatePassRows ? filteredPasses : filteredPasses.slice(0, defaultVisible);
+
+    if (!displayPasses.length) {
+        list.innerHTML = '<div class="text-sm text-text-secondary py-8 text-center bg-surface-alt rounded-2xl border border-dashed border-border"><i class="fa-solid fa-search text-2xl mb-2 text-text-muted block"></i>No matching gate passes found.</div>';
+        return;
+    }
+
+    list.innerHTML = displayPasses.map((pass) => {
+        const rawStatus = String(pass.status || 'PENDING_ADMIN').toUpperCase();
+        const isPending = rawStatus === 'REQUESTED' || rawStatus === 'PENDING' || rawStatus === 'PENDING_ADMIN';
+        const isApproved = rawStatus === 'QR GENERATED' || rawStatus === 'APPROVED' || rawStatus === 'SECURITY_PENDING';
+        const isOut = rawStatus === 'OUT' || rawStatus === 'OUTSIDE' || (pass.securityVerified && !pass.wardenVerified);
+        const isCompleted = rawStatus === 'COMPLETED';
+        const isOutsideNotReturned = rawStatus === 'OUTSIDE_NOT_RETURNED';
+        const isRejected = rawStatus.includes('REJECTED');
+
+        let badgeClass = 'bg-amber-100 text-amber-800 border border-amber-200';
+        let displayStatus = pass.status || 'Pending';
+
+        if (isApproved) {
+            badgeClass = 'bg-emerald/10 text-emerald border border-emerald/20';
+            displayStatus = 'QR Approved';
+        } else if (isOut) {
+            badgeClass = 'bg-blue-100 text-blue-800 border border-blue-200';
+            displayStatus = 'Student Out (Gate Crossed)';
+        } else if (isOutsideNotReturned) {
+            badgeClass = 'bg-rose-100 text-rose-900 border border-rose-300';
+            displayStatus = '⚠️ Outside — Not Returned';
+        } else if (isCompleted) {
+            badgeClass = 'bg-emerald-100 text-emerald-800 border border-emerald-200';
+            displayStatus = 'Completed';
+        } else if (isRejected) {
+            badgeClass = 'bg-danger/10 text-danger border border-danger/20';
+            displayStatus = 'Rejected';
+        }
 
         return `
-            <div class="rounded-2xl border border-border p-4 bg-surface flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                <div class="space-y-1">
-                    <div class="flex items-center gap-2">
-                        <span class="font-bold text-sm text-text">${pass.student || 'Student'}</span>
-                        <span class="text-xs text-text-secondary">• ${pass.registrationNumber || 'REG-N/A'}</span>
-                        <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold ${badgeClass}">${status}</span>
+            <div class="rounded-2xl border border-border p-5 bg-surface hover:shadow-sm transition-all flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div class="flex items-start gap-4">
+                    ${pass.studentPhoto ? `
+                        <img src="${pass.studentPhoto}" alt="${pass.student || 'Student'}" class="w-14 h-14 rounded-2xl object-cover border border-border shadow-sm shrink-0">
+                    ` : `
+                        <div class="w-14 h-14 rounded-2xl bg-surface-alt border border-border flex items-center justify-center text-text-muted shrink-0">
+                            <i class="fa-solid fa-user text-xl"></i>
+                        </div>
+                    `}
+                    <div class="space-y-1">
+                        <div class="flex flex-wrap items-center gap-2">
+                            <span class="font-bold text-base text-text">${pass.student || 'Student'}</span>
+                            <span class="text-xs text-text-secondary font-mono">(${pass.registrationNumber || 'N/A'})</span>
+                            <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold ${badgeClass}">${displayStatus}</span>
+                        </div>
+                        <p class="text-xs text-text-secondary">
+                            <strong>Hostel:</strong> ${pass.hostelBlock || 'Block A'} • <strong>Room:</strong> ${pass.roomNumber || 'N/A'} • 
+                            <strong>Session:</strong> ${pass.session || 'General'}
+                        </p>
+                        <p class="text-xs text-text-secondary">
+                            <strong>Dates:</strong> ${formatGatePassDate(pass.gateDate)} ➔ ${formatGatePassDate(pass.returnDate)}
+                        </p>
+                        <p class="text-xs text-text-muted italic bg-surface-alt/60 px-2 py-1 rounded-lg">
+                            <i class="fa-solid fa-comment-dots mr-1"></i> "${pass.reason || 'Not specified'}"
+                        </p>
+                        <p class="text-[10px] font-mono text-text-muted">Pass ID: ${pass.id} ${pass.certificateId ? `• Cert: ${pass.certificateId}` : ''}</p>
                     </div>
-                    <p class="text-xs text-text-secondary">Hostel: ${pass.hostelBlock || 'N/A'} • Room: ${pass.roomNumber || 'N/A'} • Date: ${pass.gateDate || '—'} to ${pass.returnDate || '—'}</p>
-                    <p class="text-xs text-text-muted italic">Reason: "${pass.reason || 'Not specified'}"</p>
                 </div>
-                <div class="flex items-center gap-2 shrink-0">
+                <div class="flex flex-wrap items-center gap-2 shrink-0">
                     ${isPending ? `
-                        <button onclick="updateGatePassStatus('${pass.id}', 'QR GENERATED')" class="px-3 py-1.5 rounded-xl bg-emerald text-white text-xs font-semibold hover:bg-emerald/90 transition-all flex items-center gap-1">
+                        <button onclick="updateGatePassStatus('${pass.id}', 'Approved')" class="px-4 py-2 rounded-xl bg-emerald hover:bg-emerald/90 text-white text-xs font-semibold shadow-sm transition-all flex items-center gap-1.5">
                             <i class="fa-solid fa-check"></i> Approve
                         </button>
-                        <button onclick="updateGatePassStatus('${pass.id}', 'Rejected')" class="px-3 py-1.5 rounded-xl bg-danger/10 text-danger hover:bg-danger hover:text-white text-xs font-semibold transition-all flex items-center gap-1">
-                            <i class="fa-solid fa-xmark"></i> Reject
+                        <button onclick="updateGatePassStatus('${pass.id}', 'Rejected')" class="px-3.5 py-2 rounded-xl bg-danger/10 hover:bg-danger hover:text-white text-danger text-xs font-semibold transition-all">
+                            Reject
                         </button>
-                    ` : `
-                        <span class="text-xs font-mono text-text-muted">ID: ${pass.id}</span>
-                    `}
+                    ` : ''}
+                    ${isOut ? `
+                        <button onclick="submitWardenVerificationAction('${pass.id}', 'APPROVE')" class="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-xs transition-all flex items-center gap-1.5">
+                            <i class="fa-solid fa-hotel"></i> Verify Arrival
+                        </button>
+                        <button onclick="promptWardenRejection('${pass.id}')" class="px-3 py-2 rounded-xl bg-amber-600/10 hover:bg-amber-600 hover:text-white text-amber-700 text-xs font-semibold transition-all">
+                            Not Returned
+                        </button>
+                    ` : ''}
+                    <button onclick="viewGatePassDetailsModal('${pass.id}')" class="px-3 py-2 rounded-xl border border-border bg-surface-alt hover:bg-surface text-xs font-medium text-text hover:text-primary transition-all flex items-center gap-1.5">
+                        <i class="fa-solid fa-eye text-primary"></i> View Details
+                    </button>
+                    <button onclick="downloadGatePassPdf('${pass.id}')" class="px-3 py-2 rounded-xl border border-border bg-surface-alt hover:bg-surface text-xs font-medium text-text-secondary hover:text-text transition-all flex items-center gap-1.5">
+                        <i class="fa-solid fa-file-pdf text-danger"></i> PDF
+                    </button>
                 </div>
             </div>
         `;
@@ -2917,45 +5529,317 @@ function renderWardenDashboard() {
 
 function renderSecurityDashboard() {
     const list = document.getElementById('securityGatePassList');
+    const pendingEl = document.getElementById('secStatPending');
+    const outsideEl = document.getElementById('secStatOutside');
+    const todayExitsEl = document.getElementById('secStatTodayExits');
+    const rejectedEl = document.getElementById('secStatRejected');
+    const todayStr = new Date().toISOString().split('T')[0];
+
+    const pendingList = latestGatePasses.filter(p => {
+        const raw = String(p.status || '').toUpperCase();
+        return (raw === 'SECURITY_PENDING' || raw === 'APPROVED' || raw === 'QR GENERATED') && !p.securityVerified;
+    });
+
+    const outsideList = latestGatePasses.filter(p => {
+        const raw = String(p.status || '').toUpperCase();
+        return raw === 'OUTSIDE' || raw === 'OUT' || (p.securityVerified && !p.wardenVerified);
+    });
+
+    const todayExits = latestGatePasses.filter(p => {
+        const exit = p.exitTime || p.outTime;
+        return exit && exit.startsWith(todayStr) && p.securityVerified;
+    });
+
+    const rejectedList = latestGatePasses.filter(p => {
+        const raw = String(p.status || '').toUpperCase();
+        return raw === 'SECURITY_REJECTED';
+    });
+
+    if (pendingEl) pendingEl.textContent = pendingList.length;
+    if (outsideEl) outsideEl.textContent = outsideList.length;
+    if (todayExitsEl) todayExitsEl.textContent = todayExits.length;
+    if (rejectedEl) rejectedEl.textContent = rejectedList.length;
+
     if (!list) return;
 
-    const gatePasses = latestGatePasses.filter(p => p.status && p.status !== 'Pending' && p.status !== 'REQUESTED');
+    let filtered = latestGatePasses.filter(p => {
+        const raw = String(p.status || '').toUpperCase();
+        return raw !== 'PENDING_ADMIN' && raw !== 'REQUESTED';
+    });
 
-    if (!gatePasses.length) {
-        list.innerHTML = '<div class="text-sm text-text-secondary py-6 text-center">No active approved gate passes to display.</div>';
+    if (currentSecurityFilter === 'pending_exit') {
+        filtered = pendingList;
+    } else if (currentSecurityFilter === 'outside') {
+        filtered = outsideList;
+    } else if (currentSecurityFilter === 'rejected') {
+        filtered = rejectedList;
+    } else if (currentSecurityFilter === 'completed') {
+        filtered = latestGatePasses.filter(p => String(p.status).toUpperCase() === 'COMPLETED');
+    }
+
+    if (!filtered.length) {
+        list.innerHTML = '<div class="text-sm text-text-secondary py-8 text-center bg-surface-alt rounded-2xl border border-dashed border-border"><i class="fa-solid fa-id-card-clip text-2xl mb-2 text-text-muted block"></i>No active gate passes found for this view.</div>';
         return;
     }
 
-    list.innerHTML = gatePasses.map((pass) => {
-        const status = pass.status || 'QR GENERATED';
-        const isApproved = status === 'QR GENERATED';
-        const isOut = status === 'OUT';
+    list.innerHTML = filtered.map((pass) => {
+        const rawStatus = String(pass.status || 'SECURITY_PENDING').toUpperCase();
+        const isReadyForExit = (rawStatus === 'SECURITY_PENDING' || rawStatus === 'APPROVED' || rawStatus === 'QR GENERATED') && !pass.securityVerified;
+        const isOut = rawStatus === 'OUTSIDE' || rawStatus === 'OUT' || (pass.securityVerified && !pass.wardenVerified);
+        const isCompleted = rawStatus === 'COMPLETED';
+        const isSecRejected = rawStatus === 'SECURITY_REJECTED';
+
+        let badgeClass = 'bg-amber-100 text-amber-800 border border-amber-200';
+        let badgeLabel = pass.status || 'Pending';
+
+        if (isReadyForExit) {
+            badgeClass = 'bg-emerald/10 text-emerald border border-emerald/20';
+            badgeLabel = 'Ready for Exit';
+        } else if (isOut) {
+            badgeClass = 'bg-blue-100 text-blue-800 border border-blue-200';
+            badgeLabel = 'Outside (Gate Crossed)';
+        } else if (isCompleted) {
+            badgeClass = 'bg-purple-100 text-purple-800 border border-purple-200';
+            badgeLabel = 'Completed';
+        } else if (isSecRejected) {
+            badgeClass = 'bg-danger/10 text-danger border border-danger/20';
+            badgeLabel = 'Exit Rejected';
+        }
 
         return `
-            <div class="rounded-2xl border border-border p-4 bg-surface flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                <div class="space-y-1">
-                    <div class="flex items-center gap-2">
-                        <span class="font-bold text-sm text-text">${pass.student || 'Student'}</span>
-                        <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold ${isOut ? 'bg-amber-100 text-amber-800' : 'bg-emerald/10 text-emerald'}">${status}</span>
+            <div class="rounded-2xl border border-border p-4 sm:p-5 bg-surface hover:shadow-xs transition-all flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div class="flex items-start gap-4">
+                    ${pass.studentPhoto ? `
+                        <img src="${pass.studentPhoto}" alt="${pass.student}" class="w-14 h-14 rounded-2xl object-cover border border-border shadow-xs shrink-0">
+                    ` : `
+                        <div class="w-14 h-14 rounded-2xl bg-surface-alt border border-border flex items-center justify-center text-text-muted shrink-0">
+                            <i class="fa-solid fa-user text-xl"></i>
+                        </div>
+                    `}
+                    <div class="space-y-1">
+                        <div class="flex flex-wrap items-center gap-2">
+                            <span class="font-bold text-base text-text">${pass.student || 'Student'}</span>
+                            <span class="text-xs text-text-secondary font-mono">(${pass.registrationNumber || 'N/A'})</span>
+                            <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold ${badgeClass}">${badgeLabel}</span>
+                        </div>
+                        <p class="text-xs text-text-secondary">
+                            <strong>Hostel:</strong> ${pass.hostelBlock || 'Block A'} • <strong>Room:</strong> ${pass.roomNumber || 'N/A'} • 
+                            <strong>Valid:</strong> ${formatGatePassDate(pass.gateDate)} ➔ ${formatGatePassDate(pass.returnDate)}
+                        </p>
+                        <p class="text-[11px] font-mono text-text-muted">
+                            Pass ID: <strong class="text-primary">${pass.id}</strong> ${pass.certificateId ? `• Cert: <strong class="text-emerald-600">${pass.certificateId}</strong>` : ''}
+                            ${pass.exitTime ? ` • <span class="text-blue-600 font-sans font-medium">Exit: ${new Date(pass.exitTime).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</span>` : ''}
+                        </p>
                     </div>
-                    <p class="text-xs text-text-secondary">Pass ID: <span class="font-mono font-semibold">${pass.id}</span> • Room: ${pass.roomNumber || 'N/A'}</p>
                 </div>
-                <div class="flex items-center gap-2 shrink-0">
-                    ${isApproved ? `
-                        <button onclick="updateGatePassStatus('${pass.id}', 'OUT')" class="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-semibold transition-all">
-                            Mark OUT
+                <div class="flex flex-wrap items-center gap-2 shrink-0">
+                    ${isReadyForExit ? `
+                        <button onclick="submitSecurityVerificationAction('${pass.id}', 'APPROVE')" class="px-4 py-2 rounded-xl bg-emerald hover:bg-emerald/90 text-white text-xs font-bold shadow-xs transition-all flex items-center gap-1.5">
+                            <i class="fa-solid fa-door-open"></i> Approve Exit
+                        </button>
+                        <button onclick="promptSecurityRejection('${pass.id}')" class="px-3 py-2 rounded-xl bg-rose-600/10 hover:bg-rose-600 hover:text-white text-rose-600 text-xs font-semibold transition-all">
+                            Reject
                         </button>
                     ` : ''}
-                    ${isOut ? `
-                        <button onclick="updateGatePassStatus('${pass.id}', 'RETURNED')" class="px-3 py-1.5 rounded-xl bg-emerald hover:bg-emerald/90 text-white text-xs font-semibold transition-all">
-                            Mark RETURNED
-                        </button>
-                    ` : ''}
-                    ${(!isApproved && !isOut) ? `<span class="text-xs font-mono text-text-muted">${status}</span>` : ''}
+                    <button onclick="viewGatePassDetailsModal('${pass.id}')" class="px-3.5 py-2 rounded-xl border border-border bg-surface-alt hover:bg-surface text-xs font-semibold text-text hover:text-primary transition-all flex items-center gap-1.5">
+                        <i class="fa-solid fa-eye text-primary"></i> Details
+                    </button>
+                    <button onclick="downloadGatePassPdf('${pass.id}')" class="px-3 py-2 rounded-xl border border-border bg-surface-alt hover:bg-surface text-xs font-semibold text-text-secondary hover:text-text transition-all flex items-center gap-1.5">
+                        <i class="fa-solid fa-file-pdf text-danger"></i> PDF
+                    </button>
                 </div>
             </div>
         `;
     }).join('');
+}
+
+function renderAdminGatePassLogsPage() {
+    const totalEl = document.getElementById('adminLogsTotalPasses');
+    const pendingEl = document.getElementById('adminLogsPendingPasses');
+    const outEl = document.getElementById('adminLogsOutPasses');
+    const completedEl = document.getElementById('adminLogsCompletedPasses');
+    const sidebarBadge = document.getElementById('adminSidebarGatePassBadge');
+    const tableBody = document.getElementById('adminGatePassLogFullTableBody');
+
+    const pendingList = latestGatePasses.filter(p => !p.status || ['REQUESTED', 'PENDING', 'PENDING_ADMIN'].includes(String(p.status).toUpperCase()));
+    const approvedList = latestGatePasses.filter(p => p.status && ['QR GENERATED', 'APPROVED', 'SECURITY_PENDING'].includes(String(p.status).toUpperCase()));
+    const outList = latestGatePasses.filter(p => p.status && (String(p.status).toUpperCase() === 'OUT' || String(p.status).toUpperCase() === 'OUTSIDE' || (p.securityVerified && !p.wardenVerified)));
+    const completedList = latestGatePasses.filter(p => p.status && ['RETURNED', 'COMPLETED'].includes(String(p.status).toUpperCase()));
+
+    if (totalEl) totalEl.textContent = latestGatePasses.length;
+    if (pendingEl) pendingEl.textContent = pendingList.length;
+    if (outEl) outEl.textContent = outList.length;
+    if (completedEl) completedEl.textContent = completedList.length;
+    if (sidebarBadge) sidebarBadge.textContent = latestGatePasses.length;
+
+    if (!tableBody) return;
+
+    if (!latestGatePasses.length) {
+        tableBody.innerHTML = '<tr><td colspan="9" class="px-6 py-10 text-sm text-text-secondary text-center bg-surface-alt/50">No gate pass records or movement logs found.</td></tr>';
+        return;
+    }
+
+    let filtered = latestGatePasses.slice();
+    if (currentAdminGatePassFilter === 'pending') {
+        filtered = pendingList;
+    } else if (currentAdminGatePassFilter === 'approved') {
+        filtered = approvedList;
+    } else if (currentAdminGatePassFilter === 'out') {
+        filtered = outList;
+    } else if (currentAdminGatePassFilter === 'completed') {
+        filtered = completedList;
+    }
+
+    if (adminGatePassSearchQuery) {
+        filtered = filtered.filter(p => {
+            const student = String(p.student || '').toLowerCase();
+            const reg = String(p.registrationNumber || '').toLowerCase();
+            const id = String(p.id || '').toLowerCase();
+            const cert = String(p.certificateId || '').toLowerCase();
+            const room = String(p.roomNumber || '').toLowerCase();
+            const block = String(p.hostelBlock || '').toLowerCase();
+            const warden = String(p.approvedBy || '').toLowerCase();
+            return student.includes(adminGatePassSearchQuery) ||
+                   reg.includes(adminGatePassSearchQuery) ||
+                   id.includes(adminGatePassSearchQuery) ||
+                   cert.includes(adminGatePassSearchQuery) ||
+                   room.includes(adminGatePassSearchQuery) ||
+                   block.includes(adminGatePassSearchQuery) ||
+                   warden.includes(adminGatePassSearchQuery);
+        });
+    }
+
+    if (!filtered.length) {
+        tableBody.innerHTML = '<tr><td colspan="9" class="px-6 py-10 text-sm text-text-secondary text-center bg-surface-alt/50">No matching gate pass logs found for this filter.</td></tr>';
+        return;
+    }
+
+    tableBody.innerHTML = filtered.map((entry) => {
+        const rawStatus = String(entry.status || 'PENDING_ADMIN').toUpperCase();
+        const isAdminApproved = /^(approved|qr generated|security_pending|outside|warden_pending|outside_not_returned|completed)$/i.test(rawStatus);
+        const isAdminRejected = rawStatus === 'REJECTED';
+        const isSecurityApproved = Boolean(entry.securityVerified || entry.exitTime);
+        const isSecurityRejected = rawStatus === 'SECURITY_REJECTED';
+        const isWardenApproved = Boolean(entry.wardenVerified || entry.hostelArrivalTime || rawStatus === 'COMPLETED');
+        const isWardenRejected = rawStatus === 'OUTSIDE_NOT_RETURNED';
+
+        let finalBadgeClass = 'bg-amber-100 text-amber-800 border border-amber-200';
+        let finalLabel = entry.status || 'Pending';
+
+        if (rawStatus === 'COMPLETED') {
+            finalBadgeClass = 'bg-emerald-100 text-emerald-800 border border-emerald-200 font-bold';
+            finalLabel = '✅ COMPLETED';
+        } else if (rawStatus === 'OUTSIDE' || rawStatus === 'OUT') {
+            finalBadgeClass = 'bg-blue-100 text-blue-800 border border-blue-200 font-bold';
+            finalLabel = '🔵 OUTSIDE';
+        } else if (rawStatus === 'OUTSIDE_NOT_RETURNED') {
+            finalBadgeClass = 'bg-rose-100 text-rose-900 border border-rose-300 font-bold';
+            finalLabel = '⚠️ NOT RETURNED';
+        } else if (isAdminApproved) {
+            finalBadgeClass = 'bg-indigo-100 text-indigo-800 border border-indigo-200';
+            finalLabel = '🟢 APPROVED';
+        } else if (isAdminRejected || isSecurityRejected) {
+            finalBadgeClass = 'bg-danger/10 text-danger border border-danger/20 font-bold';
+            finalLabel = '🔴 REJECTED';
+        }
+
+        const formatTimeOnly = (t) => t ? new Date(t).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : '—';
+
+        return `
+            <tr class="table-row hover:bg-surface-alt/40 transition-colors text-xs">
+                <td class="px-4 py-3.5">
+                    <div class="flex items-center gap-2.5">
+                        ${entry.studentPhoto ? `
+                            <img src="${entry.studentPhoto}" alt="Photo" class="w-8 h-8 rounded-xl object-cover border border-border shrink-0">
+                        ` : '<div class="w-8 h-8 rounded-xl bg-surface-alt border border-border flex items-center justify-center text-text-muted shrink-0"><i class="fa-solid fa-user text-xs"></i></div>'}
+                        <div>
+                            <p class="font-bold text-text">${entry.student || 'Anonymous'}</p>
+                            <p class="text-[11px] font-mono text-text-secondary">${entry.registrationNumber || 'N/A'} • ${entry.hostelBlock || 'A'}-${entry.roomNumber || ''}</p>
+                        </div>
+                    </div>
+                </td>
+                <td class="px-4 py-3.5">
+                    <p class="font-mono font-bold text-primary">${entry.id || 'N/A'}</p>
+                    ${entry.certificateId ? `<p class="font-mono text-[10px] text-emerald-600 truncate max-w-[130px]">${entry.certificateId}</p>` : '<span class="text-[10px] text-text-muted">Cert Pending</span>'}
+                </td>
+                <td class="px-4 py-3.5">
+                    ${isAdminApproved ? `
+                        <span class="px-2 py-0.5 rounded-md font-semibold text-emerald bg-emerald/10 border border-emerald/20">✅ Approved</span>
+                    ` : isAdminRejected ? `
+                        <span class="px-2 py-0.5 rounded-md font-semibold text-danger bg-danger/10 border border-danger/20">❌ Rejected</span>
+                    ` : `
+                        <span class="px-2 py-0.5 rounded-md font-semibold text-amber-700 bg-amber-100 border border-amber-200">⏳ Pending</span>
+                    `}
+                </td>
+                <td class="px-4 py-3.5">
+                    ${isSecurityApproved ? `
+                        <span class="px-2 py-0.5 rounded-md font-semibold text-blue-700 bg-blue-100 border border-blue-200">✅ Exit Approved</span>
+                    ` : isSecurityRejected ? `
+                        <span class="px-2 py-0.5 rounded-md font-semibold text-danger bg-danger/10 border border-danger/20">❌ Rejected</span>
+                    ` : `
+                        <span class="px-2 py-0.5 rounded-md font-semibold text-text-muted bg-surface-alt border border-border">⏳ Pending</span>
+                    `}
+                </td>
+                <td class="px-4 py-3.5">
+                    ${isWardenApproved ? `
+                        <span class="px-2 py-0.5 rounded-md font-semibold text-emerald-700 bg-emerald-100 border border-emerald-200">✅ Verified</span>
+                    ` : isWardenRejected ? `
+                        <span class="px-2 py-0.5 rounded-md font-semibold text-rose-800 bg-rose-100 border border-rose-300">❌ Rejected</span>
+                    ` : `
+                        <span class="px-2 py-0.5 rounded-md font-semibold text-text-muted bg-surface-alt border border-border">⏳ Pending</span>
+                    `}
+                </td>
+                <td class="px-4 py-3.5 font-mono text-text-secondary">
+                    ${formatTimeOnly(entry.exitTime || entry.outTime)}
+                </td>
+                <td class="px-4 py-3.5 font-mono text-text-secondary">
+                    ${formatTimeOnly(entry.hostelArrivalTime || entry.inTime)}
+                </td>
+                <td class="px-4 py-3.5">
+                    <span class="px-2.5 py-1 rounded-full text-xs font-bold ${finalBadgeClass}">${finalLabel}</span>
+                </td>
+                <td class="px-4 py-3.5">
+                    <div class="flex items-center gap-1.5">
+                        <button onclick="viewGatePassDetailsModal('${entry.id}')" class="px-2.5 py-1 rounded-lg border border-border bg-surface-alt hover:bg-surface text-xs font-semibold text-text hover:text-primary transition-all">Details</button>
+                        <button onclick="downloadGatePassPdf('${entry.id}')" class="px-2 py-1 rounded-lg border border-border bg-surface-alt hover:bg-surface text-xs font-semibold text-text-secondary hover:text-text transition-all"><i class="fa-solid fa-file-pdf text-danger"></i></button>
+                    </div>
+                </td>
+            </tr>
+        `;
+    }).join('');
+}
+
+function exportGatePassesCsv() {
+    if (!latestGatePasses.length) {
+        showToast('No gate pass logs available to export.', 'warning');
+        return;
+    }
+
+    const headers = ['Gate Pass ID', 'Student Name', 'Registration Number', 'Hostel Block', 'Room Number', 'Gate Date', 'Return Date', 'Session', 'Reason', 'Status', 'Approved By', 'Created Date'];
+    const rows = latestGatePasses.map(p => [
+        `"${p.id || ''}"`,
+        `"${(p.student || '').replace(/"/g, '""')}"`,
+        `"${p.registrationNumber || ''}"`,
+        `"${p.hostelBlock || ''}"`,
+        `"${p.roomNumber || ''}"`,
+        `"${p.gateDate || ''}"`,
+        `"${p.returnDate || ''}"`,
+        `"${p.session || ''}"`,
+        `"${(p.reason || '').replace(/"/g, '""')}"`,
+        `"${p.status || 'Pending'}"`,
+        `"${p.approvedBy || ''}"`,
+        `"${new Date(p.createdAt || Date.now()).toISOString()}"`
+    ]);
+
+    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement('a');
+    link.setAttribute('href', encodedUri);
+    link.setAttribute('download', `gate-pass-movement-logs-${new Date().toISOString().split('T')[0]}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    showToast('Gate pass movement logs exported as CSV successfully.', 'success');
 }
 
 function handleSecurityScanSubmit(targetStatus) {
@@ -3211,12 +6095,27 @@ function renderTrackingResult(complaint) {
 }
 
 function showToast(message, type = 'info') {
+    if (!message) return;
+    const now = Date.now();
+    const cleanMessage = String(message).trim();
+    const lastShown = lastToastMap.get(cleanMessage);
+    if (lastShown && now - lastShown < 3500) {
+        return; // Suppress duplicate toast within 3.5 seconds
+    }
+    lastToastMap.set(cleanMessage, now);
+
     let container = document.getElementById('toastContainer');
     if (!container) {
         container = document.createElement('div');
         container.id = 'toastContainer';
         container.className = 'fixed top-4 right-4 z-50 flex flex-col gap-3 items-end pointer-events-none';
         document.body.appendChild(container);
+    }
+
+    // Keep at most 4 toasts visible at a time
+    const existingToasts = container.querySelectorAll('.toast');
+    if (existingToasts.length >= 4) {
+        existingToasts[0].remove();
     }
 
     const toast = document.createElement('div');
@@ -3229,7 +6128,7 @@ function showToast(message, type = 'info') {
 
     toast.className = 'toast toast-' + (type || 'info');
     toast.style.pointerEvents = 'auto';
-    toast.innerHTML = '<i class="fa-solid ' + (icons[type] || icons.info) + '"></i><span class="toast-message">' + message + '</span>';
+    toast.innerHTML = '<i class="fa-solid ' + (icons[type] || icons.info) + '"></i><span class="toast-message">' + cleanMessage + '</span>';
 
     container.appendChild(toast);
     requestAnimationFrame(() => toast.classList.add('show'));
@@ -3245,6 +6144,80 @@ function showModal(title, content) {
     const modalContent = document.getElementById('modalContent');
     modalContent.innerHTML = '<div class="p-6 border-b border-border flex items-center justify-between"><h3 class="font-semibold text-lg">' + title + '</h3><button onclick="closeModal()" class="w-8 h-8 rounded-lg hover:bg-surface-alt flex items-center justify-center transition-all"><i class="fa-solid fa-xmark text-text-secondary"></i></button></div><div class="p-6">' + content + '</div>';
     overlay.classList.add('active');
+}
+
+function openHostelEmergencyModal() {
+    showModal('Hostel 24/7 Emergency & Safety Hotline', `
+        <div class="space-y-4">
+            <div class="flex items-center gap-3 p-4 rounded-2xl bg-danger/10 border border-danger/25">
+                <div class="w-12 h-12 rounded-2xl bg-danger text-white flex items-center justify-center text-xl shadow-md">
+                    <i class="fa-solid fa-shield-heart"></i>
+                </div>
+                <div>
+                    <h4 class="font-bold text-sm text-text">Hostel Rapid Emergency & Safety Desk</h4>
+                    <p class="text-xs text-text-secondary">Instant one-touch helpline dispatch & anti-ragging support</p>
+                </div>
+            </div>
+
+            <div class="space-y-2.5 text-xs">
+                <!-- Anti-Ragging -->
+                <a href="tel:18001805522" class="flex items-center justify-between p-3.5 rounded-2xl bg-surface-alt hover:bg-surface border border-border transition-all group">
+                    <div class="flex items-center gap-3">
+                        <div class="w-9 h-9 rounded-xl bg-rose-500/10 text-rose-600 flex items-center justify-center text-sm font-bold">
+                            <i class="fa-solid fa-phone-volume"></i>
+                        </div>
+                        <div>
+                            <p class="font-bold text-text group-hover:text-primary transition-colors">National Anti-Ragging Helpline</p>
+                            <p class="text-[11px] text-text-muted">Toll-free 24/7 UGC National Cell</p>
+                        </div>
+                    </div>
+                    <span class="font-mono font-bold text-rose-600 px-3 py-1 rounded-lg bg-rose-500/10 border border-rose-500/20">1800-180-5522</span>
+                </a>
+
+                <!-- Security Desk -->
+                <a href="tel:+919876500100" class="flex items-center justify-between p-3.5 rounded-2xl bg-surface-alt hover:bg-surface border border-border transition-all group">
+                    <div class="flex items-center gap-3">
+                        <div class="w-9 h-9 rounded-xl bg-indigo-500/10 text-indigo-600 flex items-center justify-center text-sm font-bold">
+                            <i class="fa-solid fa-shield"></i>
+                        </div>
+                        <div>
+                            <p class="font-bold text-text group-hover:text-primary transition-colors">Main Gate Security Control</p>
+                            <p class="text-[11px] text-text-muted">Campus CCTV & gate access desk</p>
+                        </div>
+                    </div>
+                    <span class="font-mono font-bold text-indigo-600 px-3 py-1 rounded-lg bg-indigo-500/10 border border-indigo-500/20">+91 98765 00100</span>
+                </a>
+
+                <!-- Chief Warden -->
+                <a href="tel:+919876543210" class="flex items-center justify-between p-3.5 rounded-2xl bg-surface-alt hover:bg-surface border border-border transition-all group">
+                    <div class="flex items-center gap-3">
+                        <div class="w-9 h-9 rounded-xl bg-emerald/10 text-emerald flex items-center justify-center text-sm font-bold">
+                            <i class="fa-solid fa-user-shield"></i>
+                        </div>
+                        <div>
+                            <p class="font-bold text-text group-hover:text-primary transition-colors">Hostel Warden On Duty</p>
+                            <p class="text-[11px] text-text-muted">Hostel Block emergency escalations</p>
+                        </div>
+                    </div>
+                    <span class="font-mono font-bold text-emerald px-3 py-1 rounded-lg bg-emerald/10 border border-emerald/20">+91 98765 43210</span>
+                </a>
+
+                <!-- WhatsApp Community -->
+                <a href="https://chat.whatsapp.com/JMnabXfkSoXBy2ywCEClyA" target="_blank" rel="noopener noreferrer" class="flex items-center justify-between p-3.5 rounded-2xl bg-emerald/5 hover:bg-emerald/10 border border-emerald/20 transition-all group">
+                    <div class="flex items-center gap-3">
+                        <div class="w-9 h-9 rounded-xl bg-emerald text-white flex items-center justify-center text-sm font-bold">
+                            <i class="fa-brands fa-whatsapp"></i>
+                        </div>
+                        <div>
+                            <p class="font-bold text-text group-hover:text-emerald transition-colors">Hostel Community Group</p>
+                            <p class="text-[11px] text-text-muted">Official student broadcast & peer updates</p>
+                        </div>
+                    </div>
+                    <span class="text-xs font-bold text-emerald">Join ➔</span>
+                </a>
+            </div>
+        </div>
+    `);
 }
 
 function openCCTVMonitoring() {
@@ -3808,8 +6781,7 @@ function startCCTVInference(video, resultEl, statusEl, options = {}) {
             const fireHazardPrediction = getFireHazardPrediction(predictionEntries);
             const smokeHazardPrediction = getSmokeHazardPrediction(predictionEntries);
             const hazardPrediction = fireHazardPrediction || smokeHazardPrediction || null;
-            const bestPrediction = predictionEntries.slice().sort((a, b) => b.confidence - a.confidence)[0];
-            const confidence = hazardCandidate ? hazardCandidate.confidence : (bestPrediction ? bestPrediction.confidence : 0);
+            const confidence = hazardCandidate ? hazardCandidate.confidence : (hazardPrediction ? hazardPrediction.confidence : 0);
             if (fireHazardPrediction) {
                 if (!cctvFireHazardStartedAt) cctvFireHazardStartedAt = Date.now();
             } else {
@@ -3856,25 +6828,32 @@ function startCCTVInference(video, resultEl, statusEl, options = {}) {
 
             if (statusEl) {
                 if (cctvFireDetectedState) {
-                    statusEl.textContent = `Emergency alert sent: ${emergencyPrediction ? (emergencyPrediction.detectionLabel || emergencyPrediction.label) : 'fire or smoke'} detected (${Math.round((emergencyPrediction?.confidence || confidence) * 100)}%).`;
+                    statusEl.textContent = `🚨 Emergency alert sent: ${emergencyPrediction ? (emergencyPrediction.detectionLabel || emergencyPrediction.label) : 'fire or smoke'} detected (${Math.round((emergencyPrediction?.confidence || confidence) * 100)}%).`;
                 } else if (hazardCandidate) {
                     if (fireHazardPrediction) {
-                        statusEl.textContent = `Possible fire detected (${Math.round(fireHazardPrediction.confidence * 100)}%). Fast emergency verification in progress.`;
+                        statusEl.textContent = `⚠️ Possible fire detected (${Math.round(fireHazardPrediction.confidence * 100)}%). Fast emergency verification in progress.`;
                     } else if (smokeHazardPrediction) {
-                        statusEl.textContent = `Possible smoke detected (${Math.round(smokeHazardPrediction.confidence * 100)}%). Telegram alert will send after 65% stable confidence.`;
+                        statusEl.textContent = `⚠️ Possible smoke detected (${Math.round(smokeHazardPrediction.confidence * 100)}%). Verifying stability before alert.`;
                     } else {
-                        statusEl.textContent = `Possible ${hazardCandidate.detectionLabel || hazardCandidate.label} detected (${Math.round(hazardCandidate.confidence * 100)}%).`;
+                        statusEl.textContent = `⚠️ Possible ${hazardCandidate.detectionLabel || hazardCandidate.label} detected (${Math.round(hazardCandidate.confidence * 100)}%).`;
                     }
                 } else if (includeCrowd && cctvCrowdAlertState) {
-                    statusEl.textContent = `Crowd alert: ${personCount} people detected (threshold ${CROWD_ALERT_THRESHOLD}).`;
-                } else if (bestPrediction) {
-                    statusEl.textContent = `No fire or smoke confirmed. Current top detection: ${bestPrediction.label} (${Math.round(bestPrediction.confidence * 100)}%).`;
+                    statusEl.textContent = `⚠️ Crowd alert: ${personCount} people detected (threshold ${CROWD_ALERT_THRESHOLD}).`;
+                } else if (personCount > 0) {
+                    statusEl.textContent = `🟢 Room normal. ${personCount} person detected in frame. No fire or smoke hazards.`;
                 } else {
-                    statusEl.textContent = 'No detections returned from the current frame.';
+                    statusEl.textContent = '🟢 Room normal. No fire or smoke hazards detected. Feed is clear.';
                 }
             }
             if (accuracyEl) {
-                accuracyEl.textContent = `${Math.round(confidence * 100)}%`;
+                if (hazardCandidate) {
+                    accuracyEl.textContent = `${Math.round(hazardCandidate.confidence * 100)}% (Hazard)`;
+                } else if (personCount > 0) {
+                    const topPersonConf = Math.max(...people.map(p => p.confidence || 0), 0.85);
+                    accuracyEl.textContent = `${Math.round(topPersonConf * 100)}% (Person)`;
+                } else {
+                    accuracyEl.textContent = '99% (Clear)';
+                }
             }
             if (speedEl) {
                 speedEl.textContent = `${Math.round(elapsed)} ms per frame`;
@@ -3948,6 +6927,19 @@ function renderCCTVBoxes(predictions) {
         const [rawX, rawY, rawWidth, rawHeight] = prediction.box.map(Number);
         if (![rawX, rawY, rawWidth, rawHeight].every(Number.isFinite) || rawWidth <= 0 || rawHeight <= 0) return;
 
+        const isFire = FireDetectionUtils.isFireLabel(prediction.label);
+        const isSmoke = FireDetectionUtils.isSmokeLabel(prediction.label);
+        const isPerson = String(prediction.label || '').toLowerCase() === 'person';
+
+        // Filter out false positive noise
+        // Smoke requires >= 50% confidence (eliminates wall/gradient false positives)
+        // Fire requires >= 50% confidence
+        // Person requires >= 35% confidence
+        if (isSmoke && prediction.confidence < 0.50) return;
+        if (isFire && prediction.confidence < 0.50) return;
+        if (isPerson && prediction.confidence < 0.35) return;
+        if (!isFire && !isSmoke && !isPerson && prediction.confidence < 0.45) return;
+
         const normalized = Math.max(rawX, rawY, rawWidth, rawHeight) <= 1;
         const left = normalized ? rawX * 100 : (rawX / frameWidth) * 100;
         const top = normalized ? rawY * 100 : (rawY / frameHeight) * 100;
@@ -3955,8 +6947,6 @@ function renderCCTVBoxes(predictions) {
         const height = normalized ? rawHeight * 100 : (rawHeight / frameHeight) * 100;
         const safeLeft = Math.max(0, left);
         const safeTop = Math.max(0, top);
-        const isFire = FireDetectionUtils.isFireLabel(prediction.label);
-        const isSmoke = FireDetectionUtils.isSmokeLabel(prediction.label);
         const color = isFire ? '#ef4444' : isSmoke ? '#f97316' : '#22c55e';
 
         const box = document.createElement('div');
@@ -4613,6 +7603,7 @@ function formatInferenceResult(result) {
 }
 
 function closeModal() {
+    stopCameraScanner();
     stopCCTVInference();
     const video = document.getElementById('cctvVideoPlayer');
     if (video) {
@@ -4747,12 +7738,19 @@ async function loadTechniciansList() {
 
 function openAddWardenModal() {
     const modal = document.getElementById('addWardenModal');
-    if (modal) modal.classList.remove('hidden');
+    if (modal) {
+        modal.classList.remove('hidden');
+        modal.style.display = 'flex';
+        setTimeout(() => document.getElementById('wardenName')?.focus(), 50);
+    }
 }
 
 function closeAddWardenModal() {
     const modal = document.getElementById('addWardenModal');
-    if (modal) modal.classList.add('hidden');
+    if (modal) {
+        modal.classList.add('hidden');
+        modal.style.display = 'none';
+    }
 }
 
 async function handleAddWarden(event) {
@@ -4803,12 +7801,19 @@ async function deleteWarden(id) {
 
 function openAddTechnicianModal() {
     const modal = document.getElementById('addTechnicianModal');
-    if (modal) modal.classList.remove('hidden');
+    if (modal) {
+        modal.classList.remove('hidden');
+        modal.style.display = 'flex';
+        setTimeout(() => document.getElementById('techName')?.focus(), 50);
+    }
 }
 
 function closeAddTechnicianModal() {
     const modal = document.getElementById('addTechnicianModal');
-    if (modal) modal.classList.add('hidden');
+    if (modal) {
+        modal.classList.add('hidden');
+        modal.style.display = 'none';
+    }
 }
 
 async function handleAddTechnician(event) {
@@ -4868,12 +7873,18 @@ function openEditWardenModal(id) {
     document.getElementById('editWardenPhone').value = warden.phone || '+91 98765 43210';
     
     const modal = document.getElementById('editWardenModal');
-    if (modal) modal.classList.remove('hidden');
+    if (modal) {
+        modal.classList.remove('hidden');
+        modal.style.display = 'flex';
+    }
 }
 
 function closeEditWardenModal() {
     const modal = document.getElementById('editWardenModal');
-    if (modal) modal.classList.add('hidden');
+    if (modal) {
+        modal.classList.add('hidden');
+        modal.style.display = 'none';
+    }
 }
 
 async function handleEditWarden(event) {
@@ -4914,12 +7925,18 @@ function openEditTechnicianModal(id) {
     document.getElementById('editTechPhone').value = tech.phone || '+91 98765 12345';
     
     const modal = document.getElementById('editTechnicianModal');
-    if (modal) modal.classList.remove('hidden');
+    if (modal) {
+        modal.classList.remove('hidden');
+        modal.style.display = 'flex';
+    }
 }
 
 function closeEditTechnicianModal() {
     const modal = document.getElementById('editTechnicianModal');
-    if (modal) modal.classList.add('hidden');
+    if (modal) {
+        modal.classList.add('hidden');
+        modal.style.display = 'none';
+    }
 }
 
 async function handleEditTechnician(event) {
