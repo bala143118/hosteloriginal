@@ -17,12 +17,14 @@ const {
   testTelegramConnection,
   formatTelegramAnnouncement,
   formatTelegramAdminApproval,
-  formatTelegramSecurityExit,
+  formatTelegramSecurityExit, 
   formatTelegramSecurityRejection,
   formatTelegramWardenArrival,
   formatTelegramWardenRejection
-} = require('./telegram_service');
+} = require('./telegram_service'); 
 
+const { signGatePass, verifyGatePassSignature, getPublicKeyPem } = require('./gatepass_signature');
+const { createLeaveAuthorizationCertificate } = require('./gatepass_certificate');
 const DATA_DIR = path.join(__dirname, 'data');
 const DATA_PATH = path.join(DATA_DIR, 'db.json');
 const ALERT_IMAGES_DIR = path.join(DATA_DIR, 'alert-images');
@@ -907,10 +909,12 @@ function gatePassExpiry(returnDate) {
   return Number.isNaN(expiry.getTime()) ? new Date(Date.now() + 24 * 60 * 60 * 1000) : expiry;
 }
 
+
 async function provisionGatePassQr(gatePass, req) {
   if (!gatePass.certificateId) {
     gatePass.certificateId = generateCertificateId(gatePass.id);
   }
+  signGatePass(gatePass);
   const expiresAt = gatePassExpiry(gatePass.returnDate);
   const token = jwt.sign({
     gp: gatePass.id,
@@ -2780,22 +2784,16 @@ app.post('/api/gate-passes/export-pdf', (req, res) => {
 });
 
 app.get('/api/gate-passes/:id/pdf', async (req, res) => {
+  const data = readData();
+  const gatePass = (data.gatePasses || []).find(item => item.id === req.params.id);
+  if (!gatePass) return res.status(404).json({ error: 'Gate pass not found' });
   try {
-    const data = readData();
-    const gatePass = (data.gatePasses || []).find((item) => item.id === req.params.id);
-    if (!gatePass) {
-      return res.status(404).json({ error: 'Gate pass not found.' });
-    }
-
-    if (await backfillApprovedGatePassQrs(data, req)) writeData(data);
-
-    const pdfBuffer = await createSingleGatePassPdfBuffer(gatePass);
+    const pdfBuffer = await createLeaveAuthorizationCertificate(gatePass);
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="${gatePass.id || 'gate-pass'}.pdf"`);
-    res.send(pdfBuffer);
-  } catch (error) {
-    console.error('Single gate pass PDF generation failed:', error);
-    res.status(500).json({ error: 'Unable to generate the gate pass PDF.' });
+    res.setHeader('Content-Disposition', `attachment; filename="Leave-Auth-${gatePass.id}.pdf"`);
+    res.end(pdfBuffer);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to generate certificate' });
   }
 });
 
@@ -3038,6 +3036,29 @@ io.on('connection', (socket) => {
 });
 
 const port = process.env.PORT || 5000;
+
+app.get('/api/gatepass/verify/:id', (req, res) => {
+  const data = readData();
+  const gatePass = (data.gatePasses || []).find(item => item.id === req.params.id);
+  if (!gatePass) return res.status(404).json({ valid: false, error: 'Gate pass not found' });
+  const result = verifyGatePassSignature(gatePass);
+  res.json({
+    gatePassId: gatePass.id,
+    certificateId: gatePass.certificateId,
+    student: gatePass.student,
+    valid: result.valid,
+    reason: result.reason,
+    signedAt: gatePass.signedAt,
+    signatureFingerprint: gatePass.signatureFingerprint,
+    approvedBy: gatePass.approvedBy,
+    status: gatePass.status
+  });
+});
+
+app.get('/api/gatepass/public-key', (req, res) => {
+  res.setHeader('Content-Type', 'text/plain');
+  res.send(getPublicKeyPem());
+});
 server.listen(port, () => {
   console.log(`HostelFix Server is running at http://localhost:${port}`);
 });
