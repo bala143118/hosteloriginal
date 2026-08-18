@@ -136,21 +136,24 @@ async function sendTelegramAlert({ alertType, confidence, cameraName, location, 
   return { messageId: message.message_id, message: messageText, delivery: 'text' };
 }
 
-function formatTelegramAdminApproval({ student, registrationNumber, gatePassId, certificateId, gateDate, returnDate }) {
+function formatTelegramWardenApproval({ student, registrationNumber, gatePassId, certificateId, gateDate, returnDate, approvedBy }) {
   return [
-    '🎫 GATE PASS APPROVED',
+    '🎫 GATE PASS APPROVED BY WARDEN',
     '',
     `Student: ${student || 'Student'}`,
     `Register: ${registrationNumber || 'N/A'}`,
     `Pass ID: ${gatePassId || 'N/A'}`,
     certificateId ? `Certificate: ${certificateId}` : '',
+    `Approved By: ${approvedBy || 'Hostel Warden'}`,
     `Leave Date: ${gateDate || 'Today'}`,
     `Expected Return: ${returnDate || 'Same Day'}`,
     '',
     'Status: APPROVED (QR Code Generated)',
-    'Next Step: Security Gate Verification'
+    'Next Step: Security Gate Exit Verification'
   ].filter(Boolean).join('\n');
 }
+
+const formatTelegramAdminApproval = formatTelegramWardenApproval;
 
 function formatTelegramSecurityExit({ student, registrationNumber, exitTime, securityName }) {
   const formattedTime = exitTime ? new Date(exitTime).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true }) : new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
@@ -163,9 +166,10 @@ function formatTelegramSecurityExit({ student, registrationNumber, exitTime, sec
     '',
     `Exit Time:\n${formattedTime}`,
     '',
-    `Verified By:\n${securityName || 'Security'}`,
+    `Verified By:\n${securityName || 'Gate Security'}`,
     '',
-    'Status:\nOUTSIDE'
+    'Status:\nOUTSIDE (Gate Crossed)',
+    'Next Step: Warden Return Arrival Verification'
   ].join('\n');
 }
 
@@ -177,7 +181,7 @@ function formatTelegramSecurityRejection({ student, registrationNumber, security
     '',
     `Register:\n${registrationNumber || 'N/A'}`,
     '',
-    `Rejected By:\n${securityName || 'Security'}`,
+    `Rejected By:\n${securityName || 'Gate Security'}`,
     '',
     `Reason:\n${reason || 'Unauthorized / Verification failed'}`,
     '',
@@ -185,18 +189,20 @@ function formatTelegramSecurityRejection({ student, registrationNumber, security
   ].join('\n');
 }
 
-function formatTelegramWardenArrival({ student, registrationNumber, arrivalTime, wardenName }) {
-  const formattedTime = arrivalTime ? new Date(arrivalTime).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true }) : new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
+function formatTelegramWardenArrival({ student, registrationNumber, hostelArrivalTime, wardenName }) {
+  const formattedTime = hostelArrivalTime ? new Date(hostelArrivalTime).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true }) : new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
   return [
-    '🏠 HOSTEL ARRIVAL VERIFIED',
+    '🏨 STUDENT RETURN VERIFIED (COMPLETED)',
     '',
     `Student:\n${student || 'Student'}`,
     '',
+    `Register:\n${registrationNumber || 'N/A'}`,
+    '',
     `Arrival Time:\n${formattedTime}`,
     '',
-    `Verified By:\n${wardenName || 'Warden'}`,
+    `Confirmed By:\n${wardenName || 'Hostel Warden'}`,
     '',
-    'Status:\nCOMPLETED'
+    'Status:\nCOMPLETED (Safely Returned)'
   ].join('\n');
 }
 
@@ -223,6 +229,7 @@ module.exports = {
   sendTelegramMessage,
   testTelegramConnection,
   formatTelegramAnnouncement,
+  formatTelegramWardenApproval,
   formatTelegramAdminApproval,
   formatTelegramSecurityExit,
   formatTelegramSecurityRejection,

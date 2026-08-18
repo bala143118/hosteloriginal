@@ -1742,8 +1742,8 @@ function renderStudentGatePassQr() {
         return;
     }
 
-    const rawStatus = String(pass.status || 'PENDING_ADMIN').toUpperCase();
-    const isPendingAdmin = ['PENDING_ADMIN', 'REQUESTED', 'PENDING'].includes(rawStatus);
+    const rawStatus = String(pass.status || 'PENDING_WARDEN').toUpperCase();
+    const isPendingWarden = ['PENDING_WARDEN', 'PENDING_ADMIN', 'REQUESTED', 'PENDING'].includes(rawStatus);
     const isSecurityPending = rawStatus === 'SECURITY_PENDING' || rawStatus === 'QR GENERATED' || rawStatus === 'APPROVED';
     const isOutside = rawStatus === 'OUTSIDE' || rawStatus === 'OUT';
     const isOutsideNotReturned = rawStatus === 'OUTSIDE_NOT_RETURNED';
@@ -1751,7 +1751,7 @@ function renderStudentGatePassQr() {
     const isRejected = rawStatus.includes('REJECTED');
 
     let badgeClass = 'bg-amber-100 text-amber-800 border border-amber-200';
-    let badgeText = 'Pending Admin Approval';
+    let badgeText = 'Pending Warden Approval';
 
     if (isSecurityPending) {
         badgeClass = 'bg-emerald/10 text-emerald border border-emerald/20';
@@ -1791,10 +1791,10 @@ function renderStudentGatePassQr() {
         if (datesEl) datesEl.textContent = `Valid: ${formatGatePassDate(pass.gateDate)} ➔ ${formatGatePassDate(pass.returnDate)}`;
         if (roomEl) roomEl.textContent = `${pass.hostelBlock || 'Block A'} • Room ${pass.roomNumber || 'N/A'}`;
         if (sessionEl) sessionEl.textContent = pass.session || 'General';
-        if (wardenEl) wardenEl.textContent = pass.approvedBy ? `Approved by ${pass.approvedBy}` : 'Admin Review Pending';
+        if (wardenEl) wardenEl.textContent = pass.approvedBy ? `Approved by ${pass.approvedBy}` : 'Warden Review Pending';
 
         if (qrImg && qrPlaceholder) {
-            const hasApprovedQr = pass.qrImage && !isPendingAdmin && !isRejected;
+            const hasApprovedQr = pass.qrImage && !isPendingWarden && !isRejected;
             if (hasApprovedQr) {
                 qrImg.src = pass.qrImage;
                 qrImg.classList.remove('hidden');
@@ -1811,8 +1811,8 @@ function renderStudentGatePassQr() {
                 ` : `
                     <div class="space-y-1">
                         <i class="fa-solid fa-hourglass-half text-2xl text-amber-500 block mb-1"></i>
-                        <p class="font-bold text-amber-800 text-xs">Pending Admin Approval</p>
-                        <p class="text-[9px] text-text-muted leading-tight">One unique QR code will be generated upon approval</p>
+                        <p class="font-bold text-amber-800 text-xs">Pending Warden Approval</p>
+                        <p class="text-[9px] text-text-muted leading-tight">One unique QR code will be generated upon warden approval</p>
                     </div>
                 `;
             }
@@ -1912,15 +1912,15 @@ function renderGatePassTable(gatePasses = []) {
     const visibleGatePasses = showAllAdminGatePassRows ? filteredGatePasses : filteredGatePasses.slice(0, defaultVisibleRows);
 
     tableBody.innerHTML = visibleGatePasses.map((entry) => {
-        const rawStatus = String(entry.status || 'PENDING_ADMIN').toUpperCase();
-        const isPendingAdmin = ['PENDING_ADMIN', 'PENDING', 'REQUESTED'].includes(rawStatus);
+        const rawStatus = String(entry.status || 'PENDING_WARDEN').toUpperCase();
+        const isPendingWarden = ['PENDING_WARDEN', 'PENDING_ADMIN', 'PENDING', 'REQUESTED'].includes(rawStatus);
         const isApproved = ['SECURITY_PENDING', 'APPROVED', 'QR GENERATED'].includes(rawStatus);
         const isOutside = rawStatus === 'OUTSIDE' || rawStatus === 'OUT';
         const isOutsideNotReturned = rawStatus === 'OUTSIDE_NOT_RETURNED';
         const isCompleted = rawStatus === 'COMPLETED';
         const isRejected = rawStatus.includes('REJECTED');
 
-        let statusBadgeHtml = `<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-800 border border-amber-300 shadow-2xs"><i class="fa-solid fa-clock text-amber-600"></i> Pending Admin</span>`;
+        let statusBadgeHtml = `<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-800 border border-amber-300 shadow-2xs"><i class="fa-solid fa-clock text-amber-600"></i> Pending Warden</span>`;
 
         if (isApproved) {
             statusBadgeHtml = `<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald/10 text-emerald border border-emerald/30 shadow-2xs"><i class="fa-solid fa-qrcode text-emerald"></i> Approved (QR Ready)</span>`;
@@ -4946,7 +4946,7 @@ function viewGatePassDetailsModal(passId) {
     const pass = latestGatePasses.find(p => p.id === passId || p.id?.toLowerCase() === passId?.toLowerCase());
     if (!pass) return showToast('Gate pass record not found.', 'error');
 
-    const rawStatus = String(pass.status || 'PENDING_ADMIN').toUpperCase();
+    const rawStatus = String(pass.status || 'PENDING_WARDEN').toUpperCase();
     const isApproved = /^(approved|qr generated|security_pending|outside|warden_pending|outside_not_returned|completed)$/i.test(rawStatus);
     const isSecurityPending = rawStatus === 'SECURITY_PENDING' || rawStatus === 'APPROVED' || rawStatus === 'QR GENERATED';
     const isOutside = rawStatus === 'OUTSIDE' || rawStatus === 'OUT';
@@ -4955,7 +4955,7 @@ function viewGatePassDetailsModal(passId) {
     const isRejected = rawStatus.includes('REJECTED');
 
     let badgeClass = 'bg-amber-100 text-amber-800 border border-amber-200';
-    let badgeText = 'Pending Admin Approval';
+    let badgeText = 'Pending Warden Approval';
 
     if (isSecurityPending) {
         badgeClass = 'bg-indigo-100 text-indigo-800 border border-indigo-200';
@@ -4985,11 +4985,11 @@ function viewGatePassDetailsModal(passId) {
             bg: 'bg-indigo-500'
         },
         {
-            stage: 'Admin',
-            title: pass.adminApproval?.status === 'APPROVED' || isApproved ? 'Admin Approved' : isRejected ? 'Admin Rejected' : 'Admin Approval Pending',
-            time: pass.approvedAt || pass.adminApproval?.approvedAt ? new Date(pass.approvedAt || pass.adminApproval?.approvedAt).toLocaleString('en-IN') : 'Pending',
-            actor: pass.approvedBy || pass.adminApproval?.approvedBy || 'Admin',
-            done: Boolean(pass.approvedAt || pass.adminApproval?.approvedAt || isApproved),
+            stage: 'Warden',
+            title: pass.wardenApproval?.status === 'APPROVED' || isApproved ? 'Warden Approved' : isRejected ? 'Warden Rejected' : 'Warden Approval Pending',
+            time: pass.approvedAt || pass.wardenApproval?.approvedAt || pass.adminApproval?.approvedAt ? new Date(pass.approvedAt || pass.wardenApproval?.approvedAt || pass.adminApproval?.approvedAt).toLocaleString('en-IN') : 'Pending',
+            actor: pass.approvedBy || pass.wardenApproval?.approvedBy || pass.adminApproval?.approvedBy || 'Hostel Warden',
+            done: Boolean(pass.approvedAt || pass.wardenApproval?.approvedAt || pass.adminApproval?.approvedAt || isApproved),
             cert: pass.certificateId || '',
             icon: isApproved ? 'fa-solid fa-user-shield text-emerald' : 'fa-solid fa-clock text-amber-500',
             bg: isApproved ? 'bg-emerald' : 'bg-amber-400'
@@ -5046,11 +5046,11 @@ function viewGatePassDetailsModal(passId) {
                 </p>
                 <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
                     <div class="p-3 rounded-xl bg-surface border border-border">
-                        <span class="text-[10px] text-text-muted uppercase font-bold block">1. Admin Status</span>
+                        <span class="text-[10px] text-text-muted uppercase font-bold block">1. Warden Approval</span>
                         <p class="font-bold mt-1 ${isApproved ? 'text-emerald' : isRejected ? 'text-danger' : 'text-amber-600'}">
                             ${isApproved ? '✅ Approved' : isRejected ? '❌ Rejected' : '⏳ Pending'}
                         </p>
-                        <p class="text-[11px] text-text-muted mt-0.5">${pass.approvedBy ? `By: ${pass.approvedBy}` : 'Awaiting review'}</p>
+                        <p class="text-[11px] text-text-muted mt-0.5">${pass.approvedBy ? `By: ${pass.approvedBy}` : 'Awaiting warden review'}</p>
                     </div>
                     <div class="p-3 rounded-xl bg-surface border border-border">
                         <span class="text-[10px] text-text-muted uppercase font-bold block">2. Security Gate Exit</span>
@@ -5129,7 +5129,7 @@ function viewGatePassDetailsModal(passId) {
             ` : ''}
 
             <div class="flex flex-wrap gap-2.5 pt-2 border-t border-border">
-                ${rawStatus === 'PENDING_ADMIN' || rawStatus === 'REQUESTED' || rawStatus === 'PENDING' ? `
+                ${rawStatus === 'PENDING_WARDEN' || rawStatus === 'PENDING_ADMIN' || rawStatus === 'REQUESTED' || rawStatus === 'PENDING' ? `
                     <button onclick="updateGatePassStatus('${pass.id}', 'Approved'); closeModal();" class="flex-1 py-2.5 rounded-xl bg-emerald hover:bg-emerald/90 text-white text-xs font-semibold shadow-sm transition-all flex items-center justify-center gap-1.5">
                         <i class="fa-solid fa-check"></i> Approve Pass (Generate QR)
                     </button>
@@ -5465,7 +5465,7 @@ function renderScanPreviewCard(pass, role, token) {
                     <span class="font-bold text-purple-700">${formatGatePassDate(pass.returnDate)}</span>
                 </div>
                 <div class="p-2.5 rounded-xl bg-surface-alt border border-border/70">
-                    <span class="text-text-muted block text-[10px] uppercase font-bold">Admin Status</span>
+                    <span class="text-text-muted block text-[10px] uppercase font-bold">Warden Approval</span>
                     <span class="font-semibold text-emerald">${pass.approvedBy ? `Approved by ${pass.approvedBy}` : 'Approved'}</span>
                 </div>
                 <div class="p-2.5 rounded-xl bg-surface-alt border border-border/70">
@@ -5615,7 +5615,7 @@ function renderWardenDashboard() {
     const tabOverdueEl = document.getElementById('tabOverdueCount');
     const totalReturnBadge = document.getElementById('wardenReturnTotalBadge');
 
-    const pendingPasses = latestGatePasses.filter(p => !p.status || ['REQUESTED', 'PENDING', 'PENDING_ADMIN'].includes(String(p.status).toUpperCase()));
+    const pendingPasses = latestGatePasses.filter(p => !p.status || ['REQUESTED', 'PENDING', 'PENDING_WARDEN', 'PENDING_ADMIN'].includes(String(p.status).toUpperCase()));
     const approvedPasses = latestGatePasses.filter(p => p.status && ['QR GENERATED', 'APPROVED', 'SECURITY_PENDING', 'OUTSIDE', 'OUT', 'RETURNED', 'COMPLETED'].includes(String(p.status).toUpperCase()));
     const outPasses = latestGatePasses.filter(p => p.status && (String(p.status).toUpperCase() === 'OUTSIDE' || String(p.status).toUpperCase() === 'OUT' || (p.securityVerified && !p.wardenVerified)));
 
@@ -5735,7 +5735,7 @@ function renderWardenDashboard() {
 
     let filteredPasses = latestGatePasses.slice();
     if (currentWardenFilter === 'pending') {
-        filteredPasses = filteredPasses.filter(p => !p.status || ['REQUESTED', 'PENDING', 'PENDING_ADMIN'].includes(String(p.status).toUpperCase()));
+        filteredPasses = filteredPasses.filter(p => !p.status || ['REQUESTED', 'PENDING', 'PENDING_WARDEN', 'PENDING_ADMIN'].includes(String(p.status).toUpperCase()));
     } else if (currentWardenFilter === 'approved') {
         filteredPasses = filteredPasses.filter(p => p.status && ['QR GENERATED', 'APPROVED', 'SECURITY_PENDING'].includes(String(p.status).toUpperCase()));
     } else if (currentWardenFilter === 'out') {
@@ -5777,8 +5777,8 @@ function renderWardenDashboard() {
     }
 
     list.innerHTML = displayPasses.map((pass) => {
-        const rawStatus = String(pass.status || 'PENDING_ADMIN').toUpperCase();
-        const isPending = rawStatus === 'REQUESTED' || rawStatus === 'PENDING' || rawStatus === 'PENDING_ADMIN';
+        const rawStatus = String(pass.status || 'PENDING_WARDEN').toUpperCase();
+        const isPending = rawStatus === 'REQUESTED' || rawStatus === 'PENDING' || rawStatus === 'PENDING_WARDEN' || rawStatus === 'PENDING_ADMIN';
         const isApproved = rawStatus === 'QR GENERATED' || rawStatus === 'APPROVED' || rawStatus === 'SECURITY_PENDING';
         const isOut = rawStatus === 'OUT' || rawStatus === 'OUTSIDE' || (pass.securityVerified && !pass.wardenVerified);
         const isCompleted = rawStatus === 'COMPLETED';
@@ -5900,7 +5900,7 @@ function renderSecurityDashboard() {
 
     let filtered = latestGatePasses.filter(p => {
         const raw = String(p.status || '').toUpperCase();
-        return raw !== 'PENDING_ADMIN' && raw !== 'REQUESTED';
+        return raw !== 'PENDING_WARDEN' && raw !== 'PENDING_ADMIN' && raw !== 'REQUESTED' && raw !== 'PENDING';
     });
 
     if (currentSecurityFilter === 'pending_exit') {
@@ -5997,7 +5997,7 @@ function renderAdminGatePassLogsPage() {
     const sidebarBadge = document.getElementById('adminSidebarGatePassBadge');
     const tableBody = document.getElementById('adminGatePassLogFullTableBody');
 
-    const pendingList = latestGatePasses.filter(p => !p.status || ['REQUESTED', 'PENDING', 'PENDING_ADMIN'].includes(String(p.status).toUpperCase()));
+    const pendingList = latestGatePasses.filter(p => !p.status || ['REQUESTED', 'PENDING', 'PENDING_WARDEN', 'PENDING_ADMIN'].includes(String(p.status).toUpperCase()));
     const approvedList = latestGatePasses.filter(p => p.status && ['QR GENERATED', 'APPROVED', 'SECURITY_PENDING'].includes(String(p.status).toUpperCase()));
     const outList = latestGatePasses.filter(p => p.status && (String(p.status).toUpperCase() === 'OUT' || String(p.status).toUpperCase() === 'OUTSIDE' || (p.securityVerified && !p.wardenVerified)));
     const completedList = latestGatePasses.filter(p => p.status && ['RETURNED', 'COMPLETED'].includes(String(p.status).toUpperCase()));
@@ -6051,7 +6051,7 @@ function renderAdminGatePassLogsPage() {
     }
 
     tableBody.innerHTML = filtered.map((entry) => {
-        const rawStatus = String(entry.status || 'PENDING_ADMIN').toUpperCase();
+        const rawStatus = String(entry.status || 'PENDING_WARDEN').toUpperCase();
         const isAdminApproved = /^(approved|qr generated|security_pending|outside|warden_pending|outside_not_returned|completed)$/i.test(rawStatus);
         const isAdminRejected = rawStatus === 'REJECTED';
         const isSecurityApproved = Boolean(entry.securityVerified || entry.exitTime);

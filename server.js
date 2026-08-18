@@ -15,7 +15,8 @@ const {
   sendTelegramAlert,
   sendTelegramMessage,
   testTelegramConnection,
-  formatTelegramAnnouncement,
+  sendSurveillanceTelegramAlert,
+  formatTelegramWardenApproval,
   formatTelegramAdminApproval,
   formatTelegramSecurityExit, 
   formatTelegramSecurityRejection,
@@ -1294,9 +1295,10 @@ app.post('/api/gate-passes', (req, res) => {
     gateDate,
     returnDate,
     studentPhoto: normalizeImageDataUrl(req.body.studentPhoto || req.body.photo || req.body.studentImage || ''),
-    status: 'PENDING_ADMIN',
-    workflowStatus: 'PENDING_ADMIN',
-    currentStatus: 'PENDING_ADMIN',
+    status: 'PENDING_WARDEN',
+    workflowStatus: 'PENDING_WARDEN',
+    currentStatus: 'PENDING_WARDEN',
+    wardenApproval: { status: 'PENDING', approvedBy: '', approvedAt: null, remarks: '' },
     adminApproval: { status: 'PENDING', approvedBy: '', approvedAt: null, remarks: '' },
     securityVerification: { status: 'PENDING', verifiedBy: '', verifiedAt: null, rejectionReason: '' },
     wardenVerification: { status: 'PENDING', verifiedBy: '', verifiedAt: null, rejectionReason: '' },
@@ -1370,7 +1372,7 @@ app.put('/api/gate-passes/:id/status', async (req, res) => {
   const isApproval = /^(approved|security_pending)$/i.test(status);
   const isRejection = /^rejected$/i.test(status);
 
-  gatePass.approvedBy = req.body.approvedBy || req.body.adminName || 'Admin User';
+  gatePass.approvedBy = req.body.approvedBy || req.body.wardenName || (req.body.role === 'admin' ? (req.body.adminName || 'Admin') : 'Hostel Warden');
   gatePass.approvedAt = new Date().toISOString();
   gatePass.facultyId = req.body.facultyId || '';
   gatePass.facultyRemarks = String(req.body.remarks || '').trim();
@@ -1381,32 +1383,34 @@ app.put('/api/gate-passes/:id/status', async (req, res) => {
     gatePass.workflowStatus = 'SECURITY_PENDING';
     gatePass.currentStatus = 'SECURITY_PENDING';
     gatePass.certificateId = gatePass.certificateId || generateCertificateId(gatePass.id);
-    gatePass.adminApproval = {
+    gatePass.wardenApproval = {
       status: 'APPROVED',
       approvedBy: gatePass.approvedBy,
       approvedAt: gatePass.approvedAt,
       remarks: gatePass.facultyRemarks
     };
+    gatePass.adminApproval = gatePass.wardenApproval;
     gatePass.securityVerification = gatePass.securityVerification || { status: 'PENDING', verifiedBy: '', verifiedAt: null, rejectionReason: '' };
     gatePass.wardenVerification = gatePass.wardenVerification || { status: 'PENDING', verifiedBy: '', verifiedAt: null, rejectionReason: '' };
 
     await provisionGatePassQr(gatePass, req);
 
-    addGatePassTimelineEvent(gatePass, 'ADMIN_APPROVED', 'Admin Approved', `Gate Pass approved by ${gatePass.approvedBy}. Secure QR Certificate ${gatePass.certificateId} generated.`, gatePass.approvedBy, 'admin');
-    addGatePassAudit(data, gatePass, 'Admin Approved & QR Generated', { name: gatePass.approvedBy, role: 'admin', ip: req.ip }, gatePass.facultyRemarks);
+    addGatePassTimelineEvent(gatePass, 'WARDEN_APPROVED', 'Warden Approved', `Gate Pass approved by ${gatePass.approvedBy}. Secure QR Certificate ${gatePass.certificateId} generated.`, gatePass.approvedBy, 'warden');
+    addGatePassAudit(data, gatePass, 'Warden Approved & QR Generated', { name: gatePass.approvedBy, role: 'warden', ip: req.ip }, gatePass.facultyRemarks);
 
-    createdNotification = createGatePassNotification(data, gatePass, 'gate-pass-approved', 'Gate Pass Approved — QR Ready', `Your gate pass ${gatePass.id} has been approved. Your secure QR code is ready for gate security exit scanning.`);
+    createdNotification = createGatePassNotification(data, gatePass, 'gate-pass-approved', 'Gate Pass Approved by Warden — QR Ready', `Your gate pass ${gatePass.id} has been approved by the Warden. Your secure QR code is ready for gate security exit scanning.`);
 
     // Dispatch Telegram Alert if configured
     if (getTelegramConfig()) {
       try {
-        const msg = formatTelegramAdminApproval({
+        const msg = formatTelegramWardenApproval({
           student: gatePass.student,
           registrationNumber: gatePass.registrationNumber,
           gatePassId: gatePass.id,
           certificateId: gatePass.certificateId,
           gateDate: gatePass.gateDate,
-          returnDate: gatePass.returnDate
+          returnDate: gatePass.returnDate,
+          approvedBy: gatePass.approvedBy
         });
         sendTelegramMessage(msg).catch((e) => console.warn('Telegram approval alert warning:', e.message));
       } catch (err) {
@@ -1417,12 +1421,13 @@ app.put('/api/gate-passes/:id/status', async (req, res) => {
     gatePass.status = 'REJECTED';
     gatePass.workflowStatus = 'REJECTED';
     gatePass.currentStatus = 'REJECTED';
-    gatePass.adminApproval = {
+    gatePass.wardenApproval = {
       status: 'REJECTED',
       approvedBy: gatePass.approvedBy,
       approvedAt: gatePass.approvedAt,
       remarks: gatePass.facultyRemarks
     };
+    gatePass.adminApproval = gatePass.wardenApproval;
     gatePass.qrImage = null;
     gatePass.token = null;
     gatePass.qrToken = null;
@@ -1431,13 +1436,13 @@ app.put('/api/gate-passes/:id/status', async (req, res) => {
     gatePass.qrGeneratedAt = null;
     gatePass.expiryDate = null;
 
-    addGatePassTimelineEvent(gatePass, 'ADMIN_REJECTED', 'Admin Rejected', gatePass.facultyRemarks || 'Gate pass request was rejected by admin.', gatePass.approvedBy, 'admin');
-    addGatePassAudit(data, gatePass, 'Admin Rejected', { name: gatePass.approvedBy, role: 'admin', ip: req.ip }, gatePass.facultyRemarks);
-    createdNotification = createGatePassNotification(data, gatePass, 'gate-pass-rejected', 'Gate Pass Request Rejected', `Your gate pass ${gatePass.id} was rejected.${gatePass.facultyRemarks ? ` Remarks: ${gatePass.facultyRemarks}` : ''}`);
+    addGatePassTimelineEvent(gatePass, 'WARDEN_REJECTED', 'Warden Rejected', gatePass.facultyRemarks || 'Gate pass request was rejected by warden.', gatePass.approvedBy, 'warden');
+    addGatePassAudit(data, gatePass, 'Warden Rejected', { name: gatePass.approvedBy, role: 'warden', ip: req.ip }, gatePass.facultyRemarks);
+    createdNotification = createGatePassNotification(data, gatePass, 'gate-pass-rejected', 'Gate Pass Request Rejected', `Your gate pass ${gatePass.id} was rejected by the Warden.${gatePass.facultyRemarks ? ` Remarks: ${gatePass.facultyRemarks}` : ''}`);
   } else {
-    gatePass.status = 'PENDING_ADMIN';
-    gatePass.workflowStatus = 'PENDING_ADMIN';
-    gatePass.currentStatus = 'PENDING_ADMIN';
+    gatePass.status = 'PENDING_WARDEN';
+    gatePass.workflowStatus = 'PENDING_WARDEN';
+    gatePass.currentStatus = 'PENDING_WARDEN';
   }
 
   writeData(data);
@@ -1464,7 +1469,7 @@ app.post('/api/gatepass/approve', async (req, res) => {
   const gatePass = (data.gatePasses || []).find((entry) => entry.id === id || String(entry.id).toLowerCase() === id.toLowerCase());
   if (!gatePass) return res.status(404).json({ error: 'Gate pass not found.' });
 
-  gatePass.approvedBy = req.body.approvedBy || req.body.adminName || 'Admin User';
+  gatePass.approvedBy = req.body.approvedBy || req.body.wardenName || (req.body.role === 'admin' ? (req.body.adminName || 'Admin') : 'Hostel Warden');
   gatePass.approvedAt = new Date().toISOString();
   gatePass.facultyId = req.body.facultyId || '';
   gatePass.facultyRemarks = String(req.body.remarks || '').trim();
@@ -1473,31 +1478,33 @@ app.post('/api/gatepass/approve', async (req, res) => {
   gatePass.workflowStatus = 'SECURITY_PENDING';
   gatePass.currentStatus = 'SECURITY_PENDING';
   gatePass.certificateId = gatePass.certificateId || generateCertificateId(gatePass.id);
-  gatePass.adminApproval = {
+  gatePass.wardenApproval = {
     status: 'APPROVED',
     approvedBy: gatePass.approvedBy,
     approvedAt: gatePass.approvedAt,
     remarks: gatePass.facultyRemarks
   };
+  gatePass.adminApproval = gatePass.wardenApproval;
   gatePass.securityVerification = gatePass.securityVerification || { status: 'PENDING', verifiedBy: '', verifiedAt: null, rejectionReason: '' };
   gatePass.wardenVerification = gatePass.wardenVerification || { status: 'PENDING', verifiedBy: '', verifiedAt: null, rejectionReason: '' };
 
   await provisionGatePassQr(gatePass, req);
 
-  addGatePassTimelineEvent(gatePass, 'ADMIN_APPROVED', 'Admin Approved', `Gate Pass approved by ${gatePass.approvedBy}. Secure QR Certificate ${gatePass.certificateId} generated.`, gatePass.approvedBy, 'admin');
-  addGatePassAudit(data, gatePass, 'Admin Approved & QR Generated', { name: gatePass.approvedBy, role: 'admin', ip: req.ip }, gatePass.facultyRemarks);
+  addGatePassTimelineEvent(gatePass, 'WARDEN_APPROVED', 'Warden Approved', `Gate Pass approved by ${gatePass.approvedBy}. Secure QR Certificate ${gatePass.certificateId} generated.`, gatePass.approvedBy, 'warden');
+  addGatePassAudit(data, gatePass, 'Warden Approved & QR Generated', { name: gatePass.approvedBy, role: 'warden', ip: req.ip }, gatePass.facultyRemarks);
 
-  const createdNotification = createGatePassNotification(data, gatePass, 'gate-pass-approved', 'Gate Pass Approved — QR Ready', `Your gate pass ${gatePass.id} has been approved. Your secure QR code is ready for gate security exit scanning.`);
+  const createdNotification = createGatePassNotification(data, gatePass, 'gate-pass-approved', 'Gate Pass Approved by Warden — QR Ready', `Your gate pass ${gatePass.id} has been approved by the Warden. Your secure QR code is ready for gate security exit scanning.`);
 
   if (getTelegramConfig()) {
     try {
-      const msg = formatTelegramAdminApproval({
+      const msg = formatTelegramWardenApproval({
         student: gatePass.student,
         registrationNumber: gatePass.registrationNumber,
         gatePassId: gatePass.id,
         certificateId: gatePass.certificateId,
         gateDate: gatePass.gateDate,
-        returnDate: gatePass.returnDate
+        returnDate: gatePass.returnDate,
+        approvedBy: gatePass.approvedBy
       });
       sendTelegramMessage(msg).catch((e) => console.warn('Telegram approval alert warning:', e.message));
     } catch (err) {
@@ -1532,7 +1539,7 @@ app.post('/api/gatepass/verify-preview', (req, res) => {
   if (!isApproved) {
     return res.status(400).json({
       error: 'GATE_PASS_NOT_APPROVED',
-      message: 'This gate pass has not been approved by an administrator yet.',
+      message: 'This gate pass has not been approved by the hostel warden yet.',
       gatePass
     });
   }
@@ -1991,7 +1998,7 @@ app.get(['/qr/:token', '/gatepass/verify/:token'], (req, res) => {
 
       <div id="twoStepStatusBox" class="p-3.5 rounded-2xl bg-slate-800/90 border border-slate-700 space-y-2 text-xs">
         <div class="flex items-center justify-between">
-          <span class="text-slate-400 flex items-center gap-1.5"><i class="fa-solid fa-user-shield text-indigo-400"></i> Admin Status:</span>
+          <span class="text-slate-400 flex items-center gap-1.5"><i class="fa-solid fa-user-shield text-indigo-400"></i> Warden Approval:</span>
           <span id="adminStatusBadge" class="font-bold text-emerald-400">Approved</span>
         </div>
         <div class="flex items-center justify-between">
