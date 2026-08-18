@@ -1953,7 +1953,7 @@ function renderGatePassTable(gatePasses = []) {
                         : `<div class="w-10 h-10 rounded-xl bg-indigo-50 border border-indigo-100 flex items-center justify-center font-bold text-xs text-indigo-600">${(entry.student || 'S').slice(0, 2).toUpperCase()}</div>`}
                 </td>
                 <td class="px-6 py-4 text-xs">
-                    ${isPendingAdmin ? `
+                    ${isPendingWarden ? `
                         <div class="flex flex-wrap items-center gap-1.5">
                             <button onclick="approveGatePass('${entry.id}', 'Approved')" class="px-3 py-1.5 rounded-lg bg-emerald hover:bg-emerald/90 text-white font-bold shadow-2xs transition-all flex items-center gap-1">
                                 <i class="fa-solid fa-check"></i> Approve
@@ -5387,12 +5387,12 @@ async function handleQrScannedToken(rawToken, role = 'warden') {
     `;
 
     try {
-        const res = await fetch('/api/gatepass/verify-preview', {
+        const res = await apiRequest('/api/gatepass/verify-preview', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ token, role, user: currentUser })
         });
-        const data = await res.json();
+        const data = await parseJsonResponse(res);
 
         if (!res.ok || !data.gatePass) {
             resultBox.innerHTML = `
@@ -5540,7 +5540,7 @@ async function executeWardenVerification(tokenOrId, action, reason = '') {
 
 async function submitSecurityVerificationAction(token, action, reason = '') {
     try {
-        const res = await fetch('/api/gatepass/security/verify', {
+        const res = await apiRequest('/api/gatepass/security/verify', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -5553,7 +5553,7 @@ async function submitSecurityVerificationAction(token, action, reason = '') {
                 location: 'Main Campus Gate'
             })
         });
-        const data = await res.json();
+        const data = await parseJsonResponse(res);
         if (!res.ok) {
             alert('Error: ' + (data.message || data.error || 'Security verification failed.'));
             return;
@@ -5565,13 +5565,14 @@ async function submitSecurityVerificationAction(token, action, reason = '') {
         await loadDashboardData();
         renderSecurityDashboard();
     } catch (err) {
-        showToast('Network error processing security verification.', 'error');
+        console.error('Security verification error:', err);
+        showToast('Network error processing security verification: ' + (err.message || 'Server unreachable'), 'error');
     }
 }
 
 async function submitWardenVerificationAction(token, action, reason = '') {
     try {
-        const res = await fetch('/api/gatepass/warden/verify', {
+        const res = await apiRequest('/api/gatepass/warden/verify', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -5583,7 +5584,7 @@ async function submitWardenVerificationAction(token, action, reason = '') {
                 wardenId: currentUser?.userId || 'WRD-001'
             })
         });
-        const data = await res.json();
+        const data = await parseJsonResponse(res);
         if (!res.ok) {
             alert('Error: ' + (data.message || data.error || 'Warden verification failed.'));
             return;
@@ -5595,7 +5596,8 @@ async function submitWardenVerificationAction(token, action, reason = '') {
         await loadDashboardData();
         renderWardenDashboard();
     } catch (err) {
-        showToast('Network error processing warden verification.', 'error');
+        console.error('Warden verification error:', err);
+        showToast('Network error processing warden verification: ' + (err.message || 'Server unreachable'), 'error');
     }
 }
 
