@@ -62,6 +62,7 @@ let cctvDetectionLogEntries = [];
 let cctvDetectionSessionStartedAt = null;
 let showAllAdminGatePassRows = false;
 let adminGatePassSearchQuery = '';
+let currentAdminGatePassFilter = 'all';
 let faceAuthInferenceInterval = null;
 let faceAuthCanvas = null;
 let faceAuthVideoSourceUrl = '';
@@ -1455,6 +1456,41 @@ function playNotificationTone() {
         oscillator.onended = () => ctx.close();
     } catch (err) {
         console.warn('Notification tone failed:', err);
+    }
+}
+
+function playChimeSound() {
+    try {
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        if (!AudioCtx) return;
+        const ctx = new AudioCtx();
+        const now = ctx.currentTime;
+        
+        const osc1 = ctx.createOscillator();
+        const gain1 = ctx.createGain();
+        osc1.type = 'sine';
+        osc1.frequency.setValueAtTime(587.33, now);
+        gain1.gain.setValueAtTime(0.08, now);
+        gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
+        osc1.connect(gain1);
+        gain1.connect(ctx.destination);
+        osc1.start(now);
+        osc1.stop(now + 0.25);
+
+        const osc2 = ctx.createOscillator();
+        const gain2 = ctx.createGain();
+        osc2.type = 'sine';
+        osc2.frequency.setValueAtTime(880, now + 0.1);
+        gain2.gain.setValueAtTime(0.08, now + 0.1);
+        gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
+        osc2.connect(gain2);
+        gain2.connect(ctx.destination);
+        osc2.start(now + 0.1);
+        osc2.stop(now + 0.35);
+
+        setTimeout(() => { ctx.close().catch(() => {}); }, 400);
+    } catch (err) {
+        // Safe silent fail for browser audio policies
     }
 }
 
@@ -4662,6 +4698,48 @@ function setWardenReturnFilter(filterType) {
 function handleWardenReturnSearch(query) {
     wardenReturnSearchQuery = (query || '').toLowerCase().trim();
     renderWardenReturnSchedule(latestGatePasses);
+}
+
+function setAdminGatePassFilter(filterType) {
+    currentAdminGatePassFilter = filterType;
+    document.querySelectorAll('.admin-pass-filter-btn').forEach((btn) => {
+        const active = btn.dataset.adminFilter === filterType;
+        if (active) {
+            btn.className = 'admin-pass-filter-btn px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-primary text-white transition-all shadow-sm';
+        } else {
+            btn.className = 'admin-pass-filter-btn px-3.5 py-1.5 rounded-xl text-xs font-semibold border border-border bg-surface text-text-secondary hover:text-text transition-all';
+        }
+    });
+    renderAdminGatePassLogsPage();
+}
+
+function handleAdminGatePassSearch(query) {
+    adminGatePassSearchQuery = (query || '').toLowerCase().trim();
+    renderGatePassTable(latestGatePasses);
+    renderAdminGatePassLogsPage();
+}
+
+function handleAdminGatePassLogSearch(query) {
+    adminGatePassSearchQuery = (query || '').toLowerCase().trim();
+    renderAdminGatePassLogsPage();
+}
+
+function setSecurityPassFilter(filterType) {
+    currentSecurityFilter = filterType;
+    document.querySelectorAll('.sec-pass-filter-btn').forEach((btn) => {
+        const active = btn.dataset.secFilter === filterType;
+        if (active) {
+            btn.className = 'sec-pass-filter-btn px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-indigo-600 text-white transition-all shadow-xs';
+        } else {
+            btn.className = 'sec-pass-filter-btn px-3.5 py-1.5 rounded-xl text-xs font-semibold border border-border bg-surface text-text-secondary hover:text-text transition-all';
+        }
+    });
+    renderSecurityDashboard();
+}
+
+function handleSecurityPassSearch(query) {
+    securityGatePassSearchQuery = (query || '').toLowerCase().trim();
+    renderSecurityDashboard();
 }
 
 function calculateGatePassReturnInfo(pass) {
