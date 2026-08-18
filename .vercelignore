@@ -1,0 +1,21 @@
+# Python & AI Models
+.venv
+__pycache__
+*.pyc
+*.pt
+dataset
+dataset_clean
+runs
+training_runs
+training_reports
+*.zip
+
+# Tests & temporary build artifacts
+tests
+tmp
+data/server-runtime*.log
+data/surveillance.db
+data/surveillance_events
+data/surveillance_live
+data/alert-images
+.github

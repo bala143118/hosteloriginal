@@ -1,0 +1,21 @@
+{
+  "version": 2,
+  "rewrites": [
+    {
+      "source": "/api/(.*)",
+      "destination": "/api/index.js"
+    },
+    {
+      "source": "/alert-images/(.*)",
+      "destination": "/api/index.js"
+    },
+    {
+      "source": "/qr/(.*)",
+      "destination": "/api/index.js"
+    },
+    {
+      "source": "/gatepass/verify/(.*)",
+      "destination": "/api/index.js"
+    }
+  ]
+}

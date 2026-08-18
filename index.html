@@ -403,7 +403,7 @@
             box-shadow:0 4px 12px rgba(37,99,235,.25);
         }
     </style>
-    <link rel="stylesheet" href="styles.css?v=profile-live-2">
+    <link rel="stylesheet" href="styles.css?v=night-panel-4">
 </head>
 <body class="bg-surface-alt text-text antialiased">
     <div id="toastContainer" class="fixed top-4 right-4 z-50 space-y-3"></div>
@@ -432,10 +432,10 @@
                     </button>
                     <button onclick="navigateTo('notifications')" class="relative w-11 h-11 rounded-2xl bg-surface border border-border flex items-center justify-center hover:bg-surface-alt transition-all">
                         <i class="fa-solid fa-bell text-text-secondary"></i>
-                        <span class="absolute -top-1 -right-1 w-5 h-5 bg-danger text-white text-xs rounded-full flex items-center justify-center font-bold">3</span>
+                        <span id="globalNotificationBadge" class="absolute -top-1 -right-1 w-5 h-5 bg-danger text-white text-xs rounded-full flex items-center justify-center font-bold">0</span>
                     </button>
-                    <button onclick="navigateTo('login')" id="navProfileBtn" class="hidden sm:flex items-center gap-2 px-5 py-3 rounded-2xl bg-primary text-white text-base font-semibold hover:bg-primary-dark transition-all">
-                        <i class="fa-solid fa-user"></i><span>Login</span>
+                    <button onclick="navigateTo('login')" id="navProfileBtn" class="hidden items-center gap-2 px-5 py-3 rounded-2xl bg-primary text-white text-base font-semibold hover:bg-primary-dark transition-all">
+                        <i class="fa-solid fa-user"></i><span>Profile</span>
                     </button>
                     <button onclick="toggleMobileMenu()" class="md:hidden w-11 h-11 rounded-2xl bg-surface border border-border flex items-center justify-center">
                         <i class="fa-solid fa-bars text-text-secondary"></i>
@@ -471,21 +471,9 @@
                                 Report hostel maintenance issues instantly and track repairs in real time. A seamless experience for students, technicians, and administrators.
                             </p>
                             <div class="flex flex-wrap gap-4">
-                                <button onclick="navigateTo('complaint-registration')" class="btn-primary px-8 py-4 rounded-2xl text-white font-semibold text-base flex items-center gap-2">
-                                    <i class="fa-solid fa-plus-circle"></i> Report Complaint
+                                <button onclick="navigateTo('login')" class="btn-primary px-8 py-4 rounded-2xl text-white font-semibold text-base flex items-center gap-2 shadow-lg shadow-primary/25 hover:-translate-y-0.5 transition-all">
+                                    <i class="fa-solid fa-right-to-bracket"></i> Sign In to Portal
                                 </button>
-                                <button onclick="navigateTo('complaint-tracking')" class="px-8 py-4 rounded-2xl border-2 border-border text-text font-semibold text-base flex items-center gap-2 hover:border-primary hover:text-primary transition-all bg-surface">
-                                    <i class="fa-solid fa-search"></i> Track Complaint
-                                </button>
-                            </div>
-                            <div class="mt-12 flex items-center gap-6 text-text-muted text-sm">
-                                <div class="flex -space-x-2">
-                                    <div class="w-8 h-8 rounded-full bg-primary flex items-center justify-center text-white text-xs font-bold border-2 border-surface">S</div>
-                                    <div class="w-8 h-8 rounded-full bg-emerald flex items-center justify-center text-white text-xs font-bold border-2 border-surface">T</div>
-                                    <div class="w-8 h-8 rounded-full bg-warning flex items-center justify-center text-white text-xs font-bold border-2 border-surface">A</div>
-                                    <div class="w-8 h-8 rounded-full bg-info flex items-center justify-center text-white text-xs font-bold border-2 border-surface">+</div>
-                                </div>
-                                <span>Trusted by 2,000+ students</span>
                             </div>
                         </div>
                         <div class="hidden lg:flex justify-center animate-float">
@@ -731,8 +719,8 @@
                 <div class="w-full lg:w-1/2 flex items-center justify-center p-6 sm:p-12 bg-surface">
                     <div class="w-full max-w-md animate-fade-in">
                         <div class="text-center mb-8">
-                            <div class="w-16 h-16 rounded-2xl bg-gradient-to-br from-primary to-emerald flex items-center justify-center mx-auto mb-4">
-                                <i class="fa-solid fa-user-plus text-white text-2xl"></i>
+                            <div class="w-16 h-16 rounded-2xl bg-gradient-to-br from-primary to-emerald flex items-center justify-center mx-auto mb-4 text-white">
+                                <i class="fa-solid fa-user-plus text-2xl"></i>
                             </div>
                             <h2 class="text-2xl font-bold mb-1">Register</h2>
                             <p class="text-text-secondary text-sm">Create an account with your name, email, password, and role.</p>
@@ -1250,12 +1238,13 @@
                             <label class="block text-sm font-medium mb-2">Complaint Category</label>
                             <div class="relative">
                                 <i class="fa-solid fa-tags absolute left-4 top-1/2 -translate-y-1/2 text-text-muted"></i>
-                                <select id="complaintCategory" class="input-focus w-full pl-12 pr-4 py-3 rounded-xl border border-border bg-surface-alt text-sm appearance-none">
+                                <select id="complaintCategory" onchange="handleComplaintCategoryChange()" class="input-focus w-full pl-12 pr-4 py-3 rounded-xl border border-border bg-surface-alt text-sm appearance-none">
                                     <option value="">Select Category</option>
                                     <option value="electrical">Electrical</option>
                                     <option value="plumbing">Plumbing</option>
                                     <option value="furniture">Furniture</option>
                                     <option value="wifi">Wi-Fi</option>
+                                    <option value="laundry">Laundry Services</option>
                                     <option value="door">Door & Lock</option>
                                     <option value="ac">AC</option>
                                     <option value="lighting">Lighting</option>
@@ -1453,15 +1442,24 @@
                             <input id="laundryRoomNumber" type="text" placeholder="Enter room number" class="input-focus w-full pl-4 pr-4 py-3 rounded-xl border border-border bg-surface-alt text-sm">
                         </div>
                     </div>
-                    <div class="grid sm:grid-cols-2 gap-6">
-                        <div>
-                            <label class="block text-sm font-medium mb-2">Dress Count</label>
-                            <input id="laundryDressCount" type="number" min="1" placeholder="Number of dresses" class="input-focus w-full pl-4 pr-4 py-3 rounded-xl border border-border bg-surface-alt text-sm" required>
+                    <div>
+                        <label class="block text-sm font-medium mb-2">Dress Count</label>
+                        <input id="laundryDressCount" type="number" min="1" placeholder="Number of dresses" class="input-focus w-full pl-4 pr-4 py-3 rounded-xl border border-border bg-surface-alt text-sm" required>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium mb-2 flex items-center justify-between">
+                            <span>Upload Dress / Laundry Photos</span>
+                            <span class="text-xs text-text-secondary font-normal">(Helps admin verify items at pickup)</span>
+                        </label>
+                        <div class="border-2 border-dashed border-border rounded-xl p-5 text-center bg-surface-alt/50 hover:bg-surface-alt transition-colors cursor-pointer" onclick="document.getElementById('laundryPhotoInput').click()">
+                            <input id="laundryPhotoInput" type="file" accept="image/*" multiple class="hidden" onchange="handleLaundryPhotoSelect(event)">
+                            <div class="flex flex-col items-center gap-2">
+                                <i class="fa-solid fa-cloud-arrow-up text-3xl text-emerald"></i>
+                                <p class="text-sm font-semibold text-text">Click or drag dress photos here to upload</p>
+                                <p class="text-xs text-text-secondary">Upload photos of your clothes before submitting (PNG, JPG, JPEG)</p>
+                            </div>
                         </div>
-                        <div>
-                            <label class="block text-sm font-medium mb-2">Pickup Date</label>
-                            <input id="laundryPickupDate" type="date" class="input-focus w-full pl-4 pr-4 py-3 rounded-xl border border-border bg-surface-alt text-sm">
-                        </div>
+                        <div id="laundryPhotoPreviewList" class="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-3"></div>
                     </div>
                     <div>
                         <label class="block text-sm font-medium mb-2">Laundry Details</label>
@@ -1474,6 +1472,14 @@
                         <button type="button" onclick="navigateTo('student-dashboard')" class="px-6 py-3 rounded-xl border border-border text-text font-medium hover:bg-surface-alt transition-all">Cancel</button>
                     </div>
                 </form>
+
+                <!-- Student Laundry Requests History Section -->
+                <div class="mt-12">
+                    <h2 class="text-xl font-bold mb-4 flex items-center gap-2">
+                        <i class="fa-solid fa-clock-rotate-left text-emerald"></i> My Laundry Requests & Status
+                    </h2>
+                    <div id="studentLaundryHistoryList" class="space-y-4"></div>
+                </div>
             </div>
         </div>
 
@@ -2016,6 +2022,10 @@
                                 <i class="fa-solid fa-passport w-5 text-center"></i> Gate Passes
                                 <span id="adminSidebarGatePassBadge" class="admin-gate-pass-badge ml-auto bg-primary/10 text-primary text-xs px-2 py-0.5 rounded-full font-semibold">0</span>
                             </button>
+                            <button onclick="navigateTo('admin-laundry')" class="sidebar-item w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 text-text-secondary hover:text-text">
+                                <i class="fa-solid fa-shirt w-5 text-center"></i> Laundry
+                                <span class="adminSidebarLaundryBadge ml-auto bg-emerald/10 text-emerald text-xs px-2 py-0.5 rounded-full font-semibold">0</span>
+                            </button>
                             <button onclick="navigateTo('admin-complaints')" class="sidebar-item w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 text-text-secondary hover:text-text">
                                 <i class="fa-solid fa-clipboard-list w-5 text-center"></i> Complaints
                                 <span id="adminSidebarComplaintBadge" class="admin-complaints-badge ml-auto bg-danger text-white text-xs px-2 py-0.5 rounded-full font-semibold">0</span>
@@ -2051,6 +2061,21 @@
                             <button onclick="toggleSidebar()" class="lg:hidden w-10 h-10 rounded-xl border border-border flex items-center justify-center">
                                 <i class="fa-solid fa-bars text-text-secondary"></i>
                             </button>
+                        </div>
+                    </div>
+                    <div class="glass rounded-2xl border border-rose-200/70 bg-gradient-to-r from-rose-500/10 via-amber-500/10 to-transparent p-5 mb-8">
+                        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                            <div class="flex items-center gap-3">
+                                <div class="w-11 h-11 rounded-xl bg-rose-600 text-white flex items-center justify-center shadow-sm"><i class="fa-solid fa-shield-halved"></i></div>
+                                <div><h3 class="font-semibold text-base">Night Security Alerts</h3><p class="text-xs text-text-secondary">Evidence-backed unauthorized activity from Hostel CCTV.</p></div>
+                            </div>
+                            <button onclick="openSecurityAlertHistory()" class="px-4 py-2.5 rounded-xl bg-rose-600 text-white text-xs font-semibold hover:bg-rose-700 transition-all"><i class="fa-solid fa-clock-rotate-left mr-1.5"></i> View Alert History</button>
+                        </div>
+                        <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mt-4">
+                            <div class="rounded-xl bg-surface/80 border border-border p-3"><p id="adminNightAlertsToday" class="text-xl font-bold">0</p><p class="text-[11px] text-text-secondary">Night Alerts Today</p></div>
+                            <div class="rounded-xl bg-surface/80 border border-border p-3"><p id="adminUnknownPersons" class="text-xl font-bold text-amber-600">0</p><p class="text-[11px] text-text-secondary">Unknown Persons</p></div>
+                            <div class="rounded-xl bg-surface/80 border border-border p-3"><p id="adminUnauthorizedStudents" class="text-xl font-bold text-rose-600">0</p><p class="text-[11px] text-text-secondary">Unauthorized Students</p></div>
+                            <div class="rounded-xl bg-surface/80 border border-border p-3"><p id="adminUnacknowledgedAlerts" class="text-xl font-bold text-indigo-600">0</p><p class="text-[11px] text-text-secondary">Unacknowledged</p></div>
                         </div>
                     </div>
                     <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4 mb-8">
@@ -2117,12 +2142,16 @@
                         </div>
                     </div>
                     <div class="glass rounded-2xl border border-border overflow-hidden mb-8">
-                        <div class="p-6 border-b border-border flex items-center justify-between gap-4">
+                        <div class="p-6 border-b border-border flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                             <div>
                                 <h3 class="font-semibold text-lg">Gate Pass Requests</h3>
                                 <p class="text-sm text-text-secondary mt-1">Download each gate pass record individually as a PDF.</p>
                             </div>
-                            <div class="flex items-center gap-3">
+                            <div class="flex flex-col sm:flex-row sm:items-center gap-3 w-full sm:w-auto">
+                                <div class="relative w-full sm:w-72">
+                                    <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-1/2 -translate-y-1/2 text-text-muted text-xs"></i>
+                                    <input id="adminGatePassSearchInput" type="search" oninput="handleAdminGatePassSearch(this.value)" placeholder="Search gate passes..." aria-label="Search gate pass requests" class="input-focus w-full rounded-xl border border-border bg-surface-alt py-2 pl-9 pr-3 text-sm text-text">
+                                </div>
                                 <button id="adminGatePassSeeAllButton" onclick="toggleAdminGatePassSeeAll()" class="hidden px-4 py-2 rounded-xl border border-border text-sm font-medium text-text-secondary hover:bg-surface-alt transition-all">See all</button>
                                 <span id="adminGatePassCount" class="text-sm font-medium text-primary">0</span>
                             </div>
@@ -2430,6 +2459,62 @@
             </div>
         </div>
 
+        <!-- ===== ADMIN LAUNDRY MONITORING ===== -->
+        <div id="page-admin-laundry" class="page">
+            <div class="flex min-h-screen">
+                <aside class="sidebar-mobile fixed lg:sticky top-16 left-0 h-[calc(100vh-4rem)] w-64 bg-surface border-r border-border z-30 overflow-y-auto">
+                    <div class="p-6">
+                        <div class="flex items-center gap-3 mb-8 pb-6 border-b border-border">
+                            <div class="w-12 h-12 rounded-full bg-gradient-to-br from-primary to-info flex items-center justify-center text-white font-bold text-lg">AD</div>
+                            <div><p class="font-semibold text-sm">Admin User</p><p class="text-xs text-text-secondary">Administrator</p></div>
+                        </div>
+                        <nav class="space-y-1">
+                            <button onclick="navigateTo('admin-dashboard')" class="sidebar-item w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 text-text-secondary hover:text-text">
+                                <i class="fa-solid fa-grid-2 w-5 text-center"></i> Dashboard
+                            </button>
+                            <button onclick="navigateTo('admin-students')" class="sidebar-item w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 text-text-secondary hover:text-text">
+                                <i class="fa-solid fa-graduation-cap w-5 text-center"></i> Students
+                            </button>
+                            <button onclick="navigateTo('admin-technicians')" class="sidebar-item w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 text-text-secondary hover:text-text">
+                                <i class="fa-solid fa-screwdriver-wrench w-5 text-center"></i> Technicians
+                            </button>
+                            <button onclick="navigateTo('admin-gate-passes')" class="sidebar-item w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 text-text-secondary hover:text-text">
+                                <i class="fa-solid fa-passport w-5 text-center"></i> Gate Passes
+                            </button>
+                            <button onclick="navigateTo('admin-laundry')" class="sidebar-item active w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 text-primary bg-primary/10">
+                                <i class="fa-solid fa-shirt w-5 text-center"></i> Laundry
+                                <span class="adminSidebarLaundryBadge ml-auto bg-emerald/10 text-emerald text-xs px-2 py-0.5 rounded-full font-semibold">0</span>
+                            </button>
+                            <button onclick="navigateTo('admin-complaints')" class="sidebar-item w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 text-text-secondary hover:text-text">
+                                <i class="fa-solid fa-clipboard-list w-5 text-center"></i> Complaints
+                            </button>
+                            <button onclick="navigateTo('admin-reports')" class="sidebar-item w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 text-text-secondary hover:text-text">
+                                <i class="fa-solid fa-chart-line w-5 text-center"></i> Reports
+                            </button>
+                            <button onclick="navigateTo('admin-settings')" class="sidebar-item w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 text-text-secondary hover:text-text">
+                                <i class="fa-solid fa-gear w-5 text-center"></i> Settings
+                            </button>
+                        </nav>
+                        <div class="mt-8 pt-6 border-t border-border">
+                            <button onclick="navigateTo('landing')" class="w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 text-danger hover:bg-danger/5 transition-all">
+                                <i class="fa-solid fa-right-from-bracket w-5 text-center"></i> Logout
+                            </button>
+                        </div>
+                    </div>
+                </aside>
+                <div class="flex-1 p-4 sm:p-6 lg:p-8 space-y-6">
+                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-2">
+                        <div>
+                            <h1 class="text-2xl font-bold">Laundry Requests Monitoring</h1>
+                            <p class="text-text-secondary text-sm">Monitor student laundry requests, view dress photos, and assign pickup dates.</p>
+                        </div>
+                        <button onclick="loadDashboardData()" class="px-4 py-2.5 rounded-xl bg-primary text-white text-xs font-bold flex items-center gap-2"><i class="fa-solid fa-rotate"></i> Refresh</button>
+                    </div>
+                    <div id="adminLaundryRequestList" class="space-y-4"></div>
+                </div>
+            </div>
+        </div>
+
         <!-- ===== ADMIN GATE PASS LOGS & MOVEMENT AUDIT ===== -->
         <div id="page-admin-gate-passes" class="page">
             <div class="flex min-h-screen">
@@ -2451,6 +2536,10 @@
                             </button>
                             <button onclick="navigateTo('admin-gate-passes')" class="sidebar-item active w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 text-primary bg-primary/10">
                                 <i class="fa-solid fa-passport w-5 text-center"></i> Gate Passes
+                            </button>
+                            <button onclick="navigateTo('admin-laundry')" class="sidebar-item w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 text-text-secondary hover:text-text">
+                                <i class="fa-solid fa-shirt w-5 text-center"></i> Laundry
+                                <span class="adminSidebarLaundryBadge ml-auto bg-emerald/10 text-emerald text-xs px-2 py-0.5 rounded-full font-semibold">0</span>
                             </button>
                             <button onclick="navigateTo('admin-complaints')" class="sidebar-item w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 text-text-secondary hover:text-text">
                                 <i class="fa-solid fa-clipboard-list w-5 text-center"></i> Complaints
@@ -2591,6 +2680,10 @@
                             <button onclick="navigateTo('admin-gate-passes')" class="sidebar-item w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 text-text-secondary hover:text-text">
                                 <i class="fa-solid fa-passport w-5 text-center"></i> Gate Passes
                             </button>
+                            <button onclick="navigateTo('admin-laundry')" class="sidebar-item w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 text-text-secondary hover:text-text">
+                                <i class="fa-solid fa-shirt w-5 text-center"></i> Laundry
+                                <span class="adminSidebarLaundryBadge ml-auto bg-emerald/10 text-emerald text-xs px-2 py-0.5 rounded-full font-semibold">0</span>
+                            </button>
                             <button onclick="navigateTo('admin-complaints')" class="sidebar-item w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 text-text-secondary hover:text-text">
                                 <i class="fa-solid fa-clipboard-list w-5 text-center"></i> Complaints
                             </button>
@@ -2682,6 +2775,10 @@
                             <button onclick="navigateTo('admin-technicians')" class="sidebar-item w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 text-text-secondary hover:text-text">
                                 <i class="fa-solid fa-screwdriver-wrench w-5 text-center"></i> Technicians
                             </button>
+                            <button onclick="navigateTo('admin-laundry')" class="sidebar-item w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 text-text-secondary hover:text-text">
+                                <i class="fa-solid fa-shirt w-5 text-center"></i> Laundry
+                                <span class="adminSidebarLaundryBadge ml-auto bg-emerald/10 text-emerald text-xs px-2 py-0.5 rounded-full font-semibold">0</span>
+                            </button>
                             <button onclick="navigateTo('admin-complaints')" class="sidebar-item w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 text-text-secondary hover:text-text">
                                 <i class="fa-solid fa-clipboard-list w-5 text-center"></i> Complaints
                             </button>
@@ -2738,6 +2835,10 @@
                             <button onclick="navigateTo('admin-technicians')" class="sidebar-item active w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 text-primary bg-primary/10">
                                 <i class="fa-solid fa-screwdriver-wrench w-5 text-center"></i> Technicians
                             </button>
+                            <button onclick="navigateTo('admin-laundry')" class="sidebar-item w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 text-text-secondary hover:text-text">
+                                <i class="fa-solid fa-shirt w-5 text-center"></i> Laundry
+                                <span class="adminSidebarLaundryBadge ml-auto bg-emerald/10 text-emerald text-xs px-2 py-0.5 rounded-full font-semibold">0</span>
+                            </button>
                             <button onclick="navigateTo('admin-complaints')" class="sidebar-item w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 text-text-secondary hover:text-text">
                                 <i class="fa-solid fa-clipboard-list w-5 text-center"></i> Complaints
                             </button>
@@ -2790,6 +2891,10 @@
                             </button>
                             <button onclick="navigateTo('admin-technicians')" class="sidebar-item w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 text-text-secondary hover:text-text">
                                 <i class="fa-solid fa-screwdriver-wrench w-5 text-center"></i> Technicians
+                            </button>
+                            <button onclick="navigateTo('admin-laundry')" class="sidebar-item w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 text-text-secondary hover:text-text">
+                                <i class="fa-solid fa-shirt w-5 text-center"></i> Laundry
+                                <span class="adminSidebarLaundryBadge ml-auto bg-emerald/10 text-emerald text-xs px-2 py-0.5 rounded-full font-semibold">0</span>
                             </button>
                             <button onclick="navigateTo('admin-complaints')" class="sidebar-item active w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 text-primary">
                                 <i class="fa-solid fa-clipboard-list w-5 text-center"></i> Complaints
@@ -2944,8 +3049,12 @@
                             <button onclick="navigateTo('admin-students')" class="sidebar-item w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 text-text-secondary hover:text-text">
                                 <i class="fa-solid fa-graduation-cap w-5 text-center"></i> Students
                             </button>
-                            <button onclick="navigateTo('admin-technicians')" class="sidebar-item w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 text-text-secondary hover:text-text">
-                                <i class="fa-solid fa-screwdriver-wrench w-5 text-center"></i> Technicians
+                            <button onclick="navigateTo('admin-gate-passes')" class="sidebar-item w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 text-text-secondary hover:text-text">
+                                <i class="fa-solid fa-passport w-5 text-center"></i> Gate Passes
+                            </button>
+                            <button onclick="navigateTo('admin-laundry')" class="sidebar-item w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 text-text-secondary hover:text-text">
+                                <i class="fa-solid fa-shirt w-5 text-center"></i> Laundry
+                                <span class="adminSidebarLaundryBadge ml-auto bg-emerald/10 text-emerald text-xs px-2 py-0.5 rounded-full font-semibold">0</span>
                             </button>
                             <button onclick="navigateTo('admin-complaints')" class="sidebar-item w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 text-text-secondary hover:text-text">
                                 <i class="fa-solid fa-clipboard-list w-5 text-center"></i> Complaints
@@ -3009,8 +3118,12 @@
                             <button onclick="navigateTo('admin-students')" class="sidebar-item w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 text-text-secondary hover:text-text">
                                 <i class="fa-solid fa-graduation-cap w-5 text-center"></i> Students
                             </button>
-                            <button onclick="navigateTo('admin-technicians')" class="sidebar-item w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 text-text-secondary hover:text-text">
-                                <i class="fa-solid fa-screwdriver-wrench w-5 text-center"></i> Technicians
+                            <button onclick="navigateTo('admin-gate-passes')" class="sidebar-item w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 text-text-secondary hover:text-text">
+                                <i class="fa-solid fa-passport w-5 text-center"></i> Gate Passes
+                            </button>
+                            <button onclick="navigateTo('admin-laundry')" class="sidebar-item w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 text-text-secondary hover:text-text">
+                                <i class="fa-solid fa-shirt w-5 text-center"></i> Laundry
+                                <span class="adminSidebarLaundryBadge ml-auto bg-emerald/10 text-emerald text-xs px-2 py-0.5 rounded-full font-semibold">0</span>
                             </button>
                             <button onclick="navigateTo('admin-complaints')" class="sidebar-item w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 text-text-secondary hover:text-text">
                                 <i class="fa-solid fa-clipboard-list w-5 text-center"></i> Complaints
@@ -3151,7 +3264,6 @@
                                         <p class="text-text-secondary">When CCTV AI detection reaches confidence threshold continuously for 4 seconds, the server captures a high-resolution screenshot and broadcasts an instant alert to the configured Telegram group chat.</p>
                                     </div>
                                 </div>
-
                                 <form onsubmit="saveEmergencyAlertSettings(event)" class="space-y-5">
                                     <div class="grid sm:grid-cols-2 gap-6">
                                         <div>
@@ -3223,8 +3335,8 @@
                                         <i class="fa-solid fa-rotate"></i> Refresh
                                     </button>
                                 </div>
-                                <div class="overflow-x-auto rounded-xl border border-border/80">
-                                    <table class="w-full text-left text-xs">
+                                <div class="hidden sm:block min-w-0 overflow-x-auto rounded-xl border border-border/80">
+                                    <table class="min-w-[760px] w-full text-left text-xs">
                                         <thead class="bg-surface-alt text-text-secondary uppercase font-semibold">
                                             <tr>
                                                 <th class="py-3 px-4">Date / Time</th>
@@ -3239,6 +3351,9 @@
                                             <tr><td colspan="6" class="py-5 text-center text-text-secondary">No alerts loaded.</td></tr>
                                         </tbody>
                                     </table>
+                                </div>
+                                <div id="alertHistoryMobileList" class="sm:hidden space-y-3">
+                                    <div class="rounded-xl border border-border bg-surface-alt px-4 py-5 text-center text-sm text-text-secondary">No alerts loaded.</div>
                                 </div>
                             </div>
 
@@ -4339,9 +4454,9 @@
             </div>
         </div>
     </div>
-    <script src="/socket.io/socket.io.js"></script>
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
     <script src="public/fire-detection-utils.js"></script>
-    <script src="script.js?v=telegram-emergency-alerts-2"></script>
+    <script src="script.js?v=night-panel-5"></script>
 </body>
 </html>
 

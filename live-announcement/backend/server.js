@@ -4,7 +4,6 @@ const express = require('express');
 const http = require('http');
 const path = require('path');
 const cors = require('cors');
-const mongoose = require('mongoose');
 
 const announcementRoutes = require('./routes/announcements');
 
@@ -38,13 +37,6 @@ const io = require('socket.io')(server, {
 // Configuration
 
 const PORT = process.env.PORT || 6000;
-
-const MONGODB_URI =
-process.env.MONGODB_URI ||
-"mongodb://localhost:27017/hostelfix-announcements";
-
-
-
 
 // ==========================
 // Middleware
@@ -454,41 +446,12 @@ app.use((err,req,res,next)=>{
 
 
 // =================================================
-// MongoDB + Server Start
+// Server Start
 // =================================================
 
 
-mongoose.connect(MONGODB_URI)
-
-.then(()=>{
-
-
-    console.log("MongoDB connected");
-
-
-    server.listen(PORT,()=>{
-
-
-        console.log(
-        `HostelFix Backend Running: http://localhost:${PORT}`
-        );
-
-
-    });
-
-
-})
-
-
-.catch((error)=>{
-
-
-    console.log(
-        "MongoDB Connection Failed:",
-        error
-    );
-
-
+server.listen(PORT,()=>{
+    console.log(`HostelFix Backend Running: http://localhost:${PORT}`);
 });
 
 

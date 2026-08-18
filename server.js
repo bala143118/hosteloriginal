@@ -25,13 +25,15 @@ const {
 
 const { signGatePass, verifyGatePassSignature, getPublicKeyPem } = require('./gatepass_signature');
 const { createLeaveAuthorizationCertificate } = require('./gatepass_certificate');
-const DATA_DIR = path.join(__dirname, 'data');
+const isVercel = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.NOW_REGION);
+const DATA_DIR = isVercel ? path.join('/tmp', 'data') : path.join(__dirname, 'data');
+const BUNDLED_DATA_PATH = path.join(__dirname, 'data', 'db.json');
 const DATA_PATH = path.join(DATA_DIR, 'db.json');
 const ALERT_IMAGES_DIR = path.join(DATA_DIR, 'alert-images');
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const MAIN_HTML = path.join(__dirname, 'index.html');
 const FACE_AUTH_DIR = path.join(__dirname, 'face_auth');
-const FACE_AUTH_EMBEDDINGS_DIR = path.join(FACE_AUTH_DIR, 'face_auth', 'embeddings');
+const FACE_AUTH_EMBEDDINGS_DIR = isVercel ? path.join('/tmp', 'face_auth', 'embeddings') : path.join(FACE_AUTH_DIR, 'face_auth', 'embeddings');
 
 const app = express();
 const server = http.createServer(app);
@@ -68,11 +70,23 @@ app.get(['/public', '/public/', '/public/index.html', '/public/*'], (req, res) =
 });
 
 function ensureDataStore() {
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
+  try {
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+  } catch (err) {
+    console.warn('Data directory creation warning:', err.message);
   }
 
   if (!fs.existsSync(DATA_PATH)) {
+    if (BUNDLED_DATA_PATH !== DATA_PATH && fs.existsSync(BUNDLED_DATA_PATH)) {
+      try {
+        fs.copyFileSync(BUNDLED_DATA_PATH, DATA_PATH);
+        return;
+      } catch (err) {
+        console.warn('Could not copy bundled db.json, generating defaults:', err.message);
+      }
+    }
     const initialData = {
       users: [
         {
@@ -102,7 +116,11 @@ function ensureDataStore() {
       announcements: [],
       personalNotifications: []
     };
-    fs.writeFileSync(DATA_PATH, JSON.stringify(initialData, null, 2), 'utf8');
+    try {
+      fs.writeFileSync(DATA_PATH, JSON.stringify(initialData, null, 2), 'utf8');
+    } catch (err) {
+      console.warn('Unable to write initial db.json:', err.message);
+    }
   }
 }
 
@@ -1849,6 +1867,35 @@ app.get('/api/gatepass/verification-monitoring', (req, res) => {
   res.json({ metrics, stats: metrics, passes: list });
 });
 
+app.get('/api/gatepass/public-key', (req, res) => {
+  res.setHeader('Content-Type', 'text/plain');
+  res.send(getPublicKeyPem());
+});
+
+app.get('/api/gatepass/history', (req, res) => {
+  const data = readData();
+  const userId = String(req.query.userId || '');
+  res.json(userId ? (data.gatePasses || []).filter((item) => item.userId === userId) : (data.gatePasses || []));
+});
+
+app.get('/api/gatepass/verify/:id', (req, res) => {
+  const data = readData();
+  const gatePass = (data.gatePasses || []).find(item => item.id === req.params.id);
+  if (!gatePass) return res.status(404).json({ valid: false, error: 'Gate pass not found' });
+  const result = verifyGatePassSignature(gatePass);
+  res.json({
+    gatePassId: gatePass.id,
+    certificateId: gatePass.certificateId,
+    student: gatePass.student,
+    valid: result.valid,
+    reason: result.reason,
+    signedAt: gatePass.signedAt,
+    signatureFingerprint: gatePass.signatureFingerprint,
+    approvedBy: gatePass.approvedBy,
+    status: gatePass.status
+  });
+});
+
 app.get('/api/gatepass/:id', (req, res) => {
   const data = readData();
   const gatePass = (data.gatePasses || []).find((item) => item.id === req.params.id || item.token === req.params.id);
@@ -1858,12 +1905,6 @@ app.get('/api/gatepass/:id', (req, res) => {
     scanLogs: (data.gatePassScanLogs || []).filter((log) => log.gatePassId === gatePass.id),
     auditLogs: (data.auditLogs || []).filter((log) => log.gatePassId === gatePass.id)
   });
-});
-
-app.get('/api/gatepass/history', (req, res) => {
-  const data = readData();
-  const userId = String(req.query.userId || '');
-  res.json(userId ? (data.gatePasses || []).filter((item) => item.userId === userId) : (data.gatePasses || []));
 });
 
 // Standalone Web Verification Page (for Phone / QR Scan)
@@ -3028,6 +3069,14 @@ app.get('*', (req, res) => {
   res.set('Cache-Control', 'no-store').sendFile(MAIN_HTML);
 });
 
+app.use((err, req, res, next) => {
+  if (err && err.type === 'entity.too.large') {
+    return res.status(413).json({ error: 'Image payload is too large. Please try again with a smaller frame.' });
+  }
+  console.error(err);
+  res.status(500).json({ error: 'Internal server error' });
+});
+
 io.on('connection', (socket) => {
   console.log('Socket connected:', socket.id);
   socket.on('disconnect', () => {
@@ -3037,36 +3086,12 @@ io.on('connection', (socket) => {
 
 const port = process.env.PORT || 5000;
 
-app.get('/api/gatepass/verify/:id', (req, res) => {
-  const data = readData();
-  const gatePass = (data.gatePasses || []).find(item => item.id === req.params.id);
-  if (!gatePass) return res.status(404).json({ valid: false, error: 'Gate pass not found' });
-  const result = verifyGatePassSignature(gatePass);
-  res.json({
-    gatePassId: gatePass.id,
-    certificateId: gatePass.certificateId,
-    student: gatePass.student,
-    valid: result.valid,
-    reason: result.reason,
-    signedAt: gatePass.signedAt,
-    signatureFingerprint: gatePass.signatureFingerprint,
-    approvedBy: gatePass.approvedBy,
-    status: gatePass.status
+if (require.main === module) {
+  server.listen(port, () => {
+    console.log(`HostelFix Server is running at http://localhost:${port}`);
   });
-});
+}
 
-app.get('/api/gatepass/public-key', (req, res) => {
-  res.setHeader('Content-Type', 'text/plain');
-  res.send(getPublicKeyPem());
-});
-server.listen(port, () => {
-  console.log(`HostelFix Server is running at http://localhost:${port}`);
-});
-
-app.use((err, req, res, next) => {
-  if (err && err.type === 'entity.too.large') {
-    return res.status(413).json({ error: 'Image payload is too large. Please try again with a smaller frame.' });
-  }
-  console.error(err);
-  res.status(500).json({ error: 'Internal server error' });
-});
+module.exports = app;
+module.exports.server = server;
+module.exports.io = io;

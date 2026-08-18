@@ -2,7 +2,9 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 
-const KEYS_DIR = path.join(__dirname, 'data', 'keys');
+const isVercel = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.NOW_REGION);
+const KEYS_DIR = isVercel ? path.join('/tmp', 'data', 'keys') : path.join(__dirname, 'data', 'keys');
+const BUNDLED_KEYS_DIR = path.join(__dirname, 'data', 'keys');
 const PRIVATE_KEY_PATH = path.join(KEYS_DIR, 'gatepass-private.pem');
 const PUBLIC_KEY_PATH = path.join(KEYS_DIR, 'gatepass-public.pem');
 
@@ -12,14 +14,42 @@ let _publicKey = null;
 
 function loadKeys() {
   if (!_privateKey) {
-    if (!fs.existsSync(PRIVATE_KEY_PATH)) {
-      throw new Error(
-        'Gate pass signing keys not found. Run: node generate-signing-keys.js\n' +
-        `Expected at: ${PRIVATE_KEY_PATH}`
-      );
+    if (process.env.GATEPASS_PRIVATE_KEY && process.env.GATEPASS_PUBLIC_KEY) {
+      _privateKey = process.env.GATEPASS_PRIVATE_KEY.replace(/\\n/g, '\n');
+      _publicKey = process.env.GATEPASS_PUBLIC_KEY.replace(/\\n/g, '\n');
+      return { privateKey: _privateKey, publicKey: _publicKey };
     }
-    _privateKey = fs.readFileSync(PRIVATE_KEY_PATH, 'utf8');
-    _publicKey = fs.readFileSync(PUBLIC_KEY_PATH, 'utf8');
+
+    if (fs.existsSync(PRIVATE_KEY_PATH) && fs.existsSync(PUBLIC_KEY_PATH)) {
+      _privateKey = fs.readFileSync(PRIVATE_KEY_PATH, 'utf8');
+      _publicKey = fs.readFileSync(PUBLIC_KEY_PATH, 'utf8');
+      return { privateKey: _privateKey, publicKey: _publicKey };
+    }
+
+    const bundledPrivate = path.join(BUNDLED_KEYS_DIR, 'gatepass-private.pem');
+    const bundledPublic = path.join(BUNDLED_KEYS_DIR, 'gatepass-public.pem');
+    if (fs.existsSync(bundledPrivate) && fs.existsSync(bundledPublic)) {
+      _privateKey = fs.readFileSync(bundledPrivate, 'utf8');
+      _publicKey = fs.readFileSync(bundledPublic, 'utf8');
+      return { privateKey: _privateKey, publicKey: _publicKey };
+    }
+
+    // Auto-generate ECDSA keypair if none exists
+    const keyPair = crypto.generateKeyPairSync('ec', {
+      namedCurve: 'P-256',
+      privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+      publicKeyEncoding: { type: 'spki', format: 'pem' }
+    });
+    _privateKey = keyPair.privateKey;
+    _publicKey = keyPair.publicKey;
+
+    try {
+      if (!fs.existsSync(KEYS_DIR)) fs.mkdirSync(KEYS_DIR, { recursive: true });
+      fs.writeFileSync(PRIVATE_KEY_PATH, _privateKey, { mode: 0o600 });
+      fs.writeFileSync(PUBLIC_KEY_PATH, _publicKey);
+    } catch (e) {
+      // In read-only serverless, keeping in-memory keypair is fine
+    }
   }
   return { privateKey: _privateKey, publicKey: _publicKey };
 }

@@ -141,7 +141,9 @@ def main():
                     'authorizedCount': sum(1 for face in faces if face['authorized']),
                     'unauthorizedCount': sum(1 for face in faces if not face['authorized']),
                     'knownFacesCount': len(system.known_embeddings),
-                    'topConfidence': float(top_confidence)
+                    'topConfidence': float(top_confidence),
+                    'imageWidth': int(frame.shape[1]),
+                    'imageHeight': int(frame.shape[0])
                 }
             }
         except Exception as error:

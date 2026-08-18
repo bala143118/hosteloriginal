@@ -397,17 +397,27 @@ async function runAllTests() {
     // WORKFLOW 7: Laundry Requests Workflow
     console.log('\n--- Process 7: Laundry Requests Workflow ---');
     {
+      const dummyPhoto = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP...';
       const postLaundryRes = await makeRequest('POST', '/api/laundry-requests', {
         student: 'Test Student',
         email: testStudentEmail,
-        registrationNumber: `REG-${timestamp}`,
+        registrationNumber: '714024149018',
         hostelBlock: 'Block A',
-        roomNumber: 'A-101',
+        roomNumber: '101',
         dressCount: 3,
-        pickupDate: '2026-08-16',
+        photos: [dummyPhoto],
         details: '3 shirts, 2 pants'
       });
-      recordResult('POST /api/laundry-requests', postLaundryRes.status === 201 && postLaundryRes.body.dressCount === 3, `Status: ${postLaundryRes.status}`);
+      const laundryId = postLaundryRes.body ? postLaundryRes.body.id : null;
+      recordResult('POST /api/laundry-requests (Student with photos, no pickup date)', postLaundryRes.status === 201 && postLaundryRes.body.dressCount === 3 && postLaundryRes.body.photos.length === 1, `Status: ${postLaundryRes.status}`);
+
+      if (laundryId) {
+        const patchLaundryRes = await makeRequest('PATCH', `/api/laundry-requests/${laundryId}`, {
+          pickupDate: '2026-08-18',
+          status: 'Pickup Scheduled'
+        });
+        recordResult('PATCH /api/laundry-requests/:id (Admin assign pickup date & status)', patchLaundryRes.status === 200 && patchLaundryRes.body.pickupDate === '2026-08-18' && patchLaundryRes.body.status === 'Pickup Scheduled', `Pickup: ${patchLaundryRes.body.pickupDate}`);
+      }
 
       const getLaundryRes = await makeRequest('GET', '/api/laundry-requests');
       recordResult('GET /api/laundry-requests', getLaundryRes.status === 200 && getLaundryRes.body.some(l => l.email === testStudentEmail), `Count: ${getLaundryRes.body.length}`);

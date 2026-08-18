@@ -1,13 +1,38 @@
 {
-  "name": "hostel-fix",
+  "name": "hostelfix",
   "version": "1.0.0",
-  "description": "Smart hostel maintenance website with backend API",
+  "description": "Enterprise-grade smart hostel operations platform featuring AI computer vision surveillance, ECDSA cryptographic gate pass authorization, real-time alerts, and maintenance automation.",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "dev": "node server.js",
+    "test": "node tests/serverless.test.js"
   },
+  "keywords": [
+    "hostel-management",
+    "smart-campus",
+    "ai-surveillance",
+    "cryptography",
+    "ecdsa",
+    "qr-code-verification",
+    "express",
+    "supabase",
+    "vercel",
+    "nodejs"
+  ],
+  "author": "Balamurugan S",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/bala143118/hostel01.git"
+  },
+  "bugs": {
+    "url": "https://github.com/bala143118/hostel01/issues"
+  },
+  "homepage": "https://github.com/bala143118/hostel01#readme",
   "dependencies": {
     "@fortawesome/fontawesome-free": "^7.3.1",
+    "@supabase/supabase-js": "^2.112.3",
     "@tailwindcss/browser": "^4.3.3",
     "axios": "^1.19.0",
     "body-parser": "^1.20.2",
@@ -15,6 +40,7 @@
     "cors": "^2.8.5",
     "dotenv": "^16.6.1",
     "express": "^4.18.2",
+    "jsonwebtoken": "^9.0.2",
     "localtunnel": "^2.0.2",
     "pdfkit": "^0.19.1",
     "qrcode": "^1.5.4",

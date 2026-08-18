@@ -33,6 +33,8 @@ let cctvEmergencyAlertCooldownUntil = 0;
 let lastEmergencyModalAlertId = '';
 let lastEmergencyModalShownAt = 0;
 let lastToastMap = new Map();
+const handledSurveillanceEventIds = new Set();
+let websiteSurveillanceStatusTimer = null;
 const FACE_AUTH_INFERENCE_API = '/api/face-auth-inference';
 const FACE_AUTH_LIVE_CAPTURE_MAX_WIDTH = 640;
 const FACE_AUTH_UPLOAD_CAPTURE_MAX_WIDTH = 960;
@@ -59,6 +61,7 @@ let cctvSmokeHazardStartedAt = null;
 let cctvDetectionLogEntries = [];
 let cctvDetectionSessionStartedAt = null;
 let showAllAdminGatePassRows = false;
+let adminGatePassSearchQuery = '';
 let faceAuthInferenceInterval = null;
 let faceAuthCanvas = null;
 let faceAuthVideoSourceUrl = '';
@@ -495,8 +498,35 @@ async function loadEmergencyAlertSettings() {
 
 function renderAlertHistory(alerts) {
     const body = document.getElementById('alertHistoryTableBody');
-    if (!body) return;
-    body.innerHTML = alerts.length ? alerts.map((alert) => `<tr><td class="py-3 pr-4">${alert.date}<br><span class="text-xs text-text-secondary">${alert.time}</span></td><td class="py-3 pr-4 font-medium">${alert.detectionType}</td><td class="py-3 pr-4">${alert.confidence}%</td><td class="py-3 pr-4">${alert.cameraName || alert.camera}<br><span class="text-xs text-text-secondary">${alert.location || ''}</span></td><td class="py-3 pr-4"><span class="${alert.telegramStatus === 'Sent' ? 'badge-completed' : alert.telegramStatus === 'Not Configured' ? 'badge-pending' : 'badge-high'} px-2.5 py-0.5 rounded-full text-xs">${alert.telegramStatus || alert.status}</span></td><td class="py-3">${alert.imagePath ? `<a href="${alert.imagePath}" target="_blank"><img src="${alert.imagePath}" alt="Emergency screenshot" class="h-12 w-16 rounded-lg object-cover border border-border"></a>` : '-'}</td></tr>`).join('') : '<tr><td colspan="6" class="py-5 text-center text-text-secondary">No alerts have been logged yet.</td></tr>';
+    const mobileList = document.getElementById('alertHistoryMobileList');
+    const alertList = Array.isArray(alerts) ? alerts : [];
+    const statusClass = (alert) => alert.telegramStatus === 'Sent' ? 'badge-completed' : alert.telegramStatus === 'Not Configured' ? 'badge-pending' : 'badge-high';
+
+    if (body) {
+        body.innerHTML = alertList.length ? alertList.map((alert) => `<tr>
+            <td class="px-4 py-3 whitespace-nowrap">${escapeHtml(alert.date || '-')}<br><span class="text-xs text-text-secondary">${escapeHtml(alert.time || '-')}</span></td>
+            <td class="px-4 py-3 font-medium whitespace-nowrap">${escapeHtml(alert.detectionType || '-')}</td>
+            <td class="px-4 py-3 whitespace-nowrap">${escapeHtml(alert.confidence ?? '-')}%</td>
+            <td class="px-4 py-3">${escapeHtml(alert.cameraName || alert.camera || '-')}<br><span class="text-xs text-text-secondary">${escapeHtml(alert.location || '')}</span></td>
+            <td class="px-4 py-3 whitespace-nowrap"><span class="${statusClass(alert)} px-2.5 py-0.5 rounded-full text-xs">${escapeHtml(alert.telegramStatus || alert.status || '-')}</span></td>
+            <td class="px-4 py-3">${alert.imagePath ? `<a href="${escapeHtml(alert.imagePath)}" target="_blank" rel="noopener"><img src="${escapeHtml(alert.imagePath)}" alt="Emergency screenshot" class="h-12 w-16 rounded-lg object-cover border border-border"></a>` : '-'}</td>
+        </tr>`).join('') : '<tr><td colspan="6" class="py-5 text-center text-text-secondary">No alerts have been logged yet.</td></tr>';
+    }
+
+    if (mobileList) {
+        mobileList.innerHTML = alertList.length ? alertList.map((alert) => `
+            <article class="rounded-xl border border-border bg-surface-alt p-4 space-y-3">
+                <div class="flex items-start justify-between gap-3">
+                    <div><p class="font-semibold text-text">${escapeHtml(alert.detectionType || 'Emergency Alert')}</p><p class="mt-0.5 text-xs text-text-secondary">${escapeHtml(alert.date || '-')} · ${escapeHtml(alert.time || '-')}</p></div>
+                    <span class="${statusClass(alert)} shrink-0 px-2.5 py-0.5 rounded-full text-xs">${escapeHtml(alert.telegramStatus || alert.status || '-')}</span>
+                </div>
+                <div class="grid grid-cols-2 gap-3 text-xs">
+                    <div><p class="text-text-muted">Confidence</p><p class="mt-1 font-semibold text-text">${escapeHtml(alert.confidence ?? '-')}%</p></div>
+                    <div><p class="text-text-muted">Camera</p><p class="mt-1 font-semibold text-text break-words">${escapeHtml(alert.cameraName || alert.camera || '-')}</p></div>
+                </div>
+                ${alert.location ? `<p class="border-t border-border pt-3 text-xs text-text-secondary"><i class="fa-solid fa-location-dot mr-1 text-primary"></i>${escapeHtml(alert.location)}</p>` : ''}
+            </article>`).join('') : '<div class="rounded-xl border border-border bg-surface-alt px-4 py-5 text-center text-sm text-text-secondary">No alerts have been logged yet.</div>';
+    }
 }
 
 async function loadAlertHistory() {
@@ -621,6 +651,17 @@ function navigateTo(pageId, options = {}) {
         pageHistory.push(pageId);
     }
 
+    const navProfileBtn = document.getElementById('navProfileBtn');
+    if (navProfileBtn) {
+        if (!currentUser || pageId === 'login' || pageId === 'register') {
+            navProfileBtn.classList.add('hidden');
+        } else {
+            navProfileBtn.classList.remove('hidden');
+            navProfileBtn.innerHTML = `<i class="fa-solid fa-user"></i><span>${currentUser?.name || 'Profile'}</span>`;
+            navProfileBtn.onclick = () => navigateTo('profile');
+        }
+    }
+
     if (pageId === 'login') {
         const loginForm = document.querySelector('#page-login form');
         if (loginForm) loginForm.reset();
@@ -681,6 +722,7 @@ function navigateTo(pageId, options = {}) {
             if (pageId === 'warden-dashboard') renderWardenDashboard();
             if (pageId === 'security-dashboard') renderSecurityDashboard();
             if (pageId === 'admin-gate-passes') renderAdminGatePassLogsPage();
+            if (pageId === 'admin-laundry') renderAdminLaundryRequests();
         }).catch((error) => console.error(error));
     }
 
@@ -784,10 +826,10 @@ function isNotificationForCurrentUser(notification) {
     const currentUserId = normalizeText(currentUser.userId);
 
     return (
-        (currentEmail && normalizeText(notification.targetEmail) === currentEmail)
-        || (currentName && normalizeText(notification.targetName) === currentName)
-        || (currentRegistrationNumber && normalizeText(notification.targetRegistrationNumber) === currentRegistrationNumber)
-        || (currentUserId && normalizeText(notification.targetUserId) === currentUserId)
+        (currentEmail && (normalizeText(notification.targetEmail) === currentEmail || normalizeText(notification.email) === currentEmail))
+        || (currentName && (normalizeText(notification.targetName) === currentName || normalizeText(notification.student) === currentName))
+        || (currentRegistrationNumber && (normalizeText(notification.targetRegistrationNumber) === currentRegistrationNumber || normalizeText(notification.registrationNumber) === currentRegistrationNumber))
+        || (currentUserId && (normalizeText(notification.targetUserId) === currentUserId || normalizeText(notification.userId) === currentUserId))
     );
 }
 
@@ -860,7 +902,7 @@ function syncCurrentUserStudentProfile() {
     }
 }
 
-function prepareComplaintForm() {
+async function prepareComplaintForm() {
     const studentNameInput = document.getElementById('complaintStudentName');
     const regInput = document.getElementById('complaintRegistrationNumber');
     const roomInput = document.getElementById('complaintRoomNumber');
@@ -868,20 +910,103 @@ function prepareComplaintForm() {
 
     if (studentNameInput) {
         studentNameInput.readOnly = false;
-        studentNameInput.value = '';
+        studentNameInput.value = currentUser?.name || '';
     }
     if (regInput) {
         regInput.readOnly = false;
-        regInput.value = '';
+        regInput.value = currentUser?.registrationNumber || '';
     }
     if (roomInput) {
         roomInput.readOnly = false;
-        roomInput.value = '';
+        roomInput.value = currentUser?.roomNumber || '';
     }
     if (hostelBlockInput) {
         hostelBlockInput.disabled = false;
-        hostelBlockInput.value = 'Block A';
+        if (currentUser?.hostelBlock) hostelBlockInput.value = currentUser.hostelBlock;
     }
+
+    try {
+        const res = await apiRequest('/api/technicians');
+        if (res.ok) {
+            const techList = await parseJsonResponse(res);
+            populateTechnicianDropdown(techList);
+        }
+    } catch (e) {
+        console.warn('Unable to load technician list in complaint form:', e);
+    }
+}
+
+let selectedLaundryPhotos = [];
+
+async function handleLaundryPhotoSelect(event) {
+    const files = Array.from(event.target.files || []);
+    if (!files.length) return;
+
+    showLoading();
+    try {
+        for (const file of files) {
+            if (!file.type.startsWith('image/')) {
+                showToast('Please select valid image files (PNG, JPG, JPEG).', 'warning');
+                continue;
+            }
+            if (selectedLaundryPhotos.length >= 6) {
+                showToast('Maximum 6 laundry photos allowed per request.', 'warning');
+                break;
+            }
+            const dataUrl = await resizeImageToJpeg(file, 800, 0.82);
+            selectedLaundryPhotos.push(dataUrl);
+        }
+        renderLaundryPhotoPreviews();
+    } catch (err) {
+        console.error('Error processing laundry photo:', err);
+        showToast('Could not process selected image file.', 'error');
+    } finally {
+        hideLoading();
+        if (event.target) event.target.value = '';
+    }
+}
+
+function removeLaundryPhoto(index) {
+    if (index >= 0 && index < selectedLaundryPhotos.length) {
+        selectedLaundryPhotos.splice(index, 1);
+        renderLaundryPhotoPreviews();
+    }
+}
+
+function renderLaundryPhotoPreviews() {
+    const container = document.getElementById('laundryPhotoPreviewList');
+    if (!container) return;
+
+    if (!selectedLaundryPhotos.length) {
+        container.innerHTML = '';
+        return;
+    }
+
+    container.innerHTML = selectedLaundryPhotos.map((imgSrc, idx) => `
+        <div class="relative group rounded-xl overflow-hidden border border-border bg-surface shadow-xs aspect-square">
+            <img src="${imgSrc}" alt="Laundry dress photo ${idx + 1}" class="w-full h-full object-cover cursor-pointer" onclick="showLaundryImageModal('${imgSrc}')">
+            <button type="button" onclick="removeLaundryPhoto(${idx})" class="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-black/70 text-white flex items-center justify-center text-xs hover:bg-danger transition-colors">
+                <i class="fa-solid fa-xmark"></i>
+            </button>
+            <span class="absolute bottom-1 left-1 bg-black/60 text-white text-[10px] px-1.5 py-0.5 rounded font-mono">#${idx + 1}</span>
+        </div>
+    `).join('');
+}
+
+function showLaundryImageModal(src) {
+    const modal = document.getElementById('laundryPhotoModal');
+    const modalImg = document.getElementById('laundryPhotoModalImg');
+    if (modal && modalImg) {
+        modalImg.src = src;
+        modal.classList.remove('hidden');
+    } else {
+        showModal('Laundry Photo Preview', `<div class="text-center p-4"><img src="${src}" class="max-h-[70vh] mx-auto rounded-xl shadow-lg border border-border"></div>`);
+    }
+}
+
+function closeLaundryPhotoModal() {
+    const modal = document.getElementById('laundryPhotoModal');
+    if (modal) modal.classList.add('hidden');
 }
 
 function prepareLaundryForm() {
@@ -894,6 +1019,79 @@ function prepareLaundryForm() {
     if (regInput) regInput.value = '';
     if (blockInput) blockInput.value = '';
     if (roomInput) roomInput.value = '';
+
+    selectedLaundryPhotos = [];
+    renderLaundryPhotoPreviews();
+    renderStudentLaundryHistory();
+}
+
+function renderStudentLaundryHistory() {
+    const container = document.getElementById('studentLaundryHistoryList');
+    if (!container) return;
+
+    const myRequests = (latestLaundryRequests || []).filter(req => {
+        if (!currentUser) return true;
+        const studentEmail = (currentUser.email || '').toLowerCase();
+        const reqEmail = (req.email || '').toLowerCase();
+        const studentName = (currentUser.name || '').toLowerCase();
+        const reqStudent = (req.student || '').toLowerCase();
+        return (studentEmail && reqEmail === studentEmail) || (studentName && reqStudent === studentName);
+    });
+
+    if (!myRequests.length) {
+        container.innerHTML = '<div class="rounded-2xl border border-dashed border-border bg-surface-alt p-6 text-center text-text-secondary text-sm">You have not submitted any laundry requests yet.</div>';
+        return;
+    }
+
+    container.innerHTML = myRequests.map(request => {
+        const photos = Array.isArray(request.photos) ? request.photos : (request.photo ? [request.photo] : []);
+        const formattedPickup = request.pickupDate ? formatGatePassDate(request.pickupDate) : '⏳ Not assigned yet (Admin will specify pickup date)';
+        
+        let statusBadge = '<span class="px-2.5 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-800 border border-amber-200">Pending</span>';
+        if (request.status === 'Pickup Scheduled') statusBadge = '<span class="px-2.5 py-1 rounded-full text-xs font-bold bg-blue-100 text-blue-800 border border-blue-200">Pickup Scheduled</span>';
+        if (request.status === 'Picked Up') statusBadge = '<span class="px-2.5 py-1 rounded-full text-xs font-bold bg-indigo-100 text-indigo-800 border border-indigo-200">Picked Up</span>';
+        if (request.status === 'Completed') statusBadge = '<span class="px-2.5 py-1 rounded-full text-xs font-bold bg-emerald/20 text-emerald-800 border border-emerald/30">Completed</span>';
+        if (request.status === 'Cancelled') statusBadge = '<span class="px-2.5 py-1 rounded-full text-xs font-bold bg-rose-100 text-rose-800 border border-rose-200">Cancelled</span>';
+
+        return `
+            <div class="glass rounded-2xl border border-border p-5 space-y-3 bg-surface/90">
+                <div class="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 pb-3">
+                    <div>
+                        <span class="text-xs font-mono font-bold text-primary mr-2">${request.id || ''}</span>
+                        <span class="text-xs text-text-secondary">${formatGatePassDate(request.createdAt || new Date().toISOString())}</span>
+                    </div>
+                    <div>${statusBadge}</div>
+                </div>
+
+                <div class="grid sm:grid-cols-2 gap-4 text-xs">
+                    <div>
+                        <p class="text-text-secondary">Dress Count: <strong class="text-text font-bold">${request.dressCount || 0} items</strong></p>
+                        <p class="text-text-secondary mt-1">Room & Block: <strong class="text-text">${request.hostelBlock || ''} • Room ${request.roomNumber || ''}</strong></p>
+                        <p class="text-text-secondary mt-1">Details: <span class="text-text">${request.details || 'None'}</span></p>
+                    </div>
+                    <div class="bg-surface-alt/70 p-3 rounded-xl border border-border">
+                        <p class="text-xs font-semibold text-text mb-1 flex items-center gap-1.5">
+                            <i class="fa-solid fa-calendar-day text-emerald"></i> Pickup Date:
+                        </p>
+                        <p class="text-xs ${request.pickupDate ? 'font-bold text-emerald' : 'text-amber-600 font-medium'}">
+                            ${formattedPickup}
+                        </p>
+                    </div>
+                </div>
+
+                ${photos.length ? `
+                    <div class="pt-2">
+                        <p class="text-[11px] font-medium text-text-secondary mb-1.5">Uploaded Dress Photos (${photos.length}):</p>
+                        <div class="flex flex-wrap gap-2">
+                            ${photos.map((src, i) => `
+                                <img src="${src}" alt="Dress photo ${i+1}" onclick="showLaundryImageModal('${src}')" class="w-14 h-14 object-cover rounded-lg border border-border cursor-pointer hover:opacity-80 transition-opacity">
+                            `).join('')}
+                        </div>
+                    </div>
+                ` : ''}
+            </div>
+        `;
+    }).join('');
 }
 
 function fillStudentForm(user) {
@@ -1131,13 +1329,16 @@ function renderStudentNotifications() {
                 ? '<span class="px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-amber-50 text-amber-700 border border-amber-200/60">Important</span>'
                 : '<span class="px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-surface-alt text-text-secondary border border-border">Normal</span>';
 
+        const isLaundry = String(announcement.type || '').startsWith('laundry') || String(announcement.title || '').toLowerCase().includes('laundry');
         const iconClass = isEmergency
             ? 'fa-triangle-exclamation text-danger bg-danger/10'
-            : isImportant
-                ? 'fa-circle-exclamation text-amber-600 bg-amber-500/10'
-                : 'fa-bell text-primary bg-primary/10';
+            : isLaundry
+                ? 'fa-shirt text-indigo-600 bg-indigo-50 border border-indigo-200'
+                : isImportant
+                    ? 'fa-circle-exclamation text-amber-600 bg-amber-500/10'
+                    : 'fa-bell text-primary bg-primary/10';
 
-        const iconName = isEmergency ? 'fa-triangle-exclamation' : isImportant ? 'fa-circle-exclamation' : 'fa-bell';
+        const iconName = isEmergency ? 'fa-triangle-exclamation' : isLaundry ? 'fa-shirt' : isImportant ? 'fa-circle-exclamation' : 'fa-bell';
 
         return `
             <div class="glass rounded-2xl border border-border p-4 sm:p-5 shadow-xs transition-all hover:border-border/80 ${isEmergency ? 'border-danger/30 bg-danger/[0.02]' : ''}">
@@ -1314,6 +1515,32 @@ function setupAnnouncementSocket() {
         announcementSocket.on('connect_error', (error) => {
             console.warn('Live announcement socket connection error:', error);
         });
+        const handleSurveillanceAlert = (event) => {
+            if (!event || !['admin', 'warden'].includes(currentUser?.role)) return;
+            if (event.event_id && handledSurveillanceEventIds.has(event.event_id)) return;
+            if (event.event_id) handledSurveillanceEventIds.add(event.event_id);
+            playNotificationTone();
+            showToast(`🚨 Unauthorized night activity: ${event.student_name || 'Unknown person'} • ${event.camera_id || 'CCTV'}`, 'error');
+            loadSecurityAlertStats().catch(console.error);
+            if (getActivePageId() === 'admin-dashboard' || getActivePageId() === 'warden-dashboard') {
+                showModal('🚨 NIGHT RESTRICTION ALERT', `<div class="space-y-4"><div class="rounded-2xl border border-rose-300 bg-rose-500/10 p-4"><p class="font-bold text-rose-700">Unauthorized activity detected</p><p class="text-sm text-text-secondary mt-1">Evidence captured from ${escapeHtml(event.camera_id || 'Hostel CCTV')}</p></div><div class="grid sm:grid-cols-2 gap-3 text-sm"><div><p class="text-xs text-text-secondary">Student</p><p class="font-semibold">${escapeHtml(event.student_name || 'Unknown person')}</p></div><div><p class="text-xs text-text-secondary">ID</p><p class="font-semibold">${escapeHtml(event.student_id || 'Unknown')}</p></div><div><p class="text-xs text-text-secondary">Time</p><p class="font-semibold">${escapeHtml(new Date(event.timestamp).toLocaleString())}</p></div><div><p class="text-xs text-text-secondary">Status</p><p class="font-semibold text-rose-600">UNAUTHORIZED</p></div></div><div class="flex gap-2"><button onclick='openSecurityEvidence(${JSON.stringify(event)})' class="flex-1 px-4 py-3 rounded-xl bg-primary text-white font-semibold">View Evidence</button><button onclick="acknowledgeSecurityEvent('${event.event_id}')" class="flex-1 px-4 py-3 rounded-xl bg-emerald text-white font-semibold">Acknowledge</button></div></div>`);
+            }
+        };
+        announcementSocket.on('security_alert', handleSurveillanceAlert);
+        announcementSocket.on('surveillance_alert', handleSurveillanceAlert);
+        announcementSocket.on('surveillance_status_changed', () => {
+            refreshWebsiteSurveillanceStatus().catch(() => null);
+        });
+        announcementSocket.on('disconnect', () => {
+            if (['admin', 'warden'].includes(currentUser?.role)) showToast('🔴 REAL-TIME CONNECTION LOST', 'warning');
+        });
+        announcementSocket.on('reconnect', () => {
+            if (['admin', 'warden'].includes(currentUser?.role)) {
+                showToast('🟢 REAL-TIME CONNECTED', 'success');
+                loadSecurityAlertStats().catch(console.error);
+            }
+        });
+        announcementSocket.on('security_alert.acknowledged', () => loadSecurityAlertStats().catch(console.error));
         announcementSocket.on('announcement.created', (announcement) => {
             if (!announcement || !announcement.id) return;
             mergeAnnouncements([announcement]);
@@ -1631,6 +1858,12 @@ function toggleAdminGatePassSeeAll() {
     renderGatePassTable(latestGatePasses);
 }
 
+function handleAdminGatePassSearch(query) {
+    adminGatePassSearchQuery = String(query || '').trim().toLowerCase();
+    showAllAdminGatePassRows = Boolean(adminGatePassSearchQuery);
+    renderGatePassTable(latestGatePasses);
+}
+
 function renderGatePassTable(gatePasses = []) {
     const tableBody = document.getElementById('adminGatePassTableBody');
     const seeAllButton = document.getElementById('adminGatePassSeeAllButton');
@@ -1645,23 +1878,38 @@ function renderGatePassTable(gatePasses = []) {
     if (!tableBody) return;
 
     const defaultVisibleRows = 4;
+    const filteredGatePasses = gatePasses.filter((entry) => {
+        if (!adminGatePassSearchQuery) return true;
+        const searchableText = [
+            entry.id,
+            entry.certificateId,
+            entry.student,
+            entry.registrationNumber,
+            entry.reason,
+            entry.session,
+            entry.status,
+            entry.gateDate,
+            entry.returnDate
+        ].filter(Boolean).join(' ').toLowerCase();
+        return searchableText.includes(adminGatePassSearchQuery);
+    });
 
-    if (!gatePasses.length) {
-        tableBody.innerHTML = '<tr><td colspan="10" class="px-6 py-8 text-sm text-text-secondary text-center">No gate pass requests recorded yet.</td></tr>';
+    if (!filteredGatePasses.length) {
+        tableBody.innerHTML = `<tr><td colspan="10" class="px-6 py-8 text-sm text-text-secondary text-center">${gatePasses.length ? 'No gate pass requests match your search.' : 'No gate pass requests recorded yet.'}</td></tr>`;
         if (seeAllButton) seeAllButton.classList.add('hidden');
         return;
     }
 
     if (seeAllButton) {
-        if (gatePasses.length > defaultVisibleRows) {
+        if (filteredGatePasses.length > defaultVisibleRows && !adminGatePassSearchQuery) {
             seeAllButton.classList.remove('hidden');
-            seeAllButton.textContent = showAllAdminGatePassRows ? `Show less (${defaultVisibleRows})` : `See all (${gatePasses.length})`;
+            seeAllButton.textContent = showAllAdminGatePassRows ? `Show less (${defaultVisibleRows})` : `See all (${filteredGatePasses.length})`;
         } else {
             seeAllButton.classList.add('hidden');
         }
     }
 
-    const visibleGatePasses = showAllAdminGatePassRows ? gatePasses : gatePasses.slice(0, defaultVisibleRows);
+    const visibleGatePasses = showAllAdminGatePassRows ? filteredGatePasses : filteredGatePasses.slice(0, defaultVisibleRows);
 
     tableBody.innerHTML = visibleGatePasses.map((entry) => {
         const rawStatus = String(entry.status || 'PENDING_ADMIN').toUpperCase();
@@ -2098,9 +2346,41 @@ function populateTechnicianDropdown(technicianList = []) {
     if (!techSelect) return;
 
     technicians = Array.isArray(technicianList) ? technicianList : [];
+    if (!technicians.length) {
+        techSelect.innerHTML = '<option value="">No technicians registered yet</option>';
+        return;
+    }
+
     techSelect.innerHTML = '<option value="">Select technician (optional)</option>' + technicians
-        .map((tech) => `<option value="${tech.name}">${tech.name}</option>`)
+        .map((tech) => {
+            const spec = tech.specialization ? ` (${tech.specialization})` : '';
+            return `<option value="${tech.name}">${tech.name}${spec}</option>`;
+        })
         .join('');
+}
+
+function handleComplaintCategoryChange() {
+    const catSelect = document.getElementById('complaintCategory');
+    const techSelect = document.getElementById('complaintAssignedTo');
+    if (!catSelect || !techSelect || !technicians || !technicians.length) return;
+
+    const cat = (catSelect.value || '').toLowerCase();
+    if (!cat) return;
+
+    const matchingTech = technicians.find(t => {
+        const spec = (t.specialization || '').toLowerCase();
+        if (cat === 'electrical' && (spec.includes('electr') || spec.includes('light'))) return true;
+        if (cat === 'plumbing' && (spec.includes('plumb') || spec.includes('water'))) return true;
+        if (cat === 'furniture' && (spec.includes('furn') || spec.includes('carpent') || spec.includes('door'))) return true;
+        if (cat === 'door' && (spec.includes('door') || spec.includes('lock') || spec.includes('carpent'))) return true;
+        if (cat === 'ac' && (spec.includes('ac') || spec.includes('hvac'))) return true;
+        if (cat === 'lighting' && (spec.includes('light') || spec.includes('electr'))) return true;
+        return false;
+    });
+
+    if (matchingTech) {
+        techSelect.value = matchingTech.name;
+    }
 }
 
 function getVisibleTechnicianComplaints(complaints = [], includeCompleted = false) {
@@ -2927,10 +3207,10 @@ function renderAdminTechnicians(users = [], complaints = []) {
                         </div>
                     </div>
                     <div class="flex items-center gap-1.5">
-                        <button onclick="openEditTechnicianModal('${t.id || t.email}')" title="Edit Technician" class="w-8 h-8 rounded-xl bg-primary/10 text-primary hover:bg-primary hover:text-white flex items-center justify-center text-xs transition-all">
+                        <button type="button" data-technician-action="edit" data-technician-id="${escapeHtml(getTechnicianIdentifier(t))}" title="Edit Technician" aria-label="Edit ${escapeHtml(t.name || 'technician')}" class="w-8 h-8 rounded-xl bg-primary/10 text-primary hover:bg-primary hover:text-white flex items-center justify-center text-xs transition-all">
                             <i class="fa-solid fa-pen-to-square"></i>
                         </button>
-                        <button onclick="deleteTechnician('${t.id || t.email}')" title="Remove Technician" class="w-8 h-8 rounded-xl bg-danger/10 text-danger hover:bg-danger hover:text-white flex items-center justify-center text-xs transition-all">
+                        <button type="button" data-technician-action="delete" data-technician-id="${escapeHtml(getTechnicianIdentifier(t))}" title="Remove Technician" aria-label="Remove ${escapeHtml(t.name || 'technician')}" class="w-8 h-8 rounded-xl bg-danger/10 text-danger hover:bg-danger hover:text-white flex items-center justify-center text-xs transition-all">
                             <i class="fa-solid fa-trash"></i>
                         </button>
                     </div>
@@ -2948,6 +3228,36 @@ function renderAdminTechnicians(users = [], complaints = []) {
         `;
     }).join('');
 }
+
+function escapeHtml(value = '') {
+    return String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function getTechnicianIdentifier(technician = {}) {
+    return String(technician.id || technician.userId || technician.email || '');
+}
+
+function findTechnicianByIdentifier(identifier) {
+    const normalizedId = String(identifier || '').trim();
+    return (window.currentTechniciansList || []).find((technician) => (
+        getTechnicianIdentifier(technician) === normalizedId
+        || String(technician.email || '').trim().toLowerCase() === normalizedId.toLowerCase()
+    ));
+}
+
+document.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-technician-action]');
+    if (!button) return;
+
+    const technicianId = button.dataset.technicianId;
+    if (button.dataset.technicianAction === 'edit') openEditTechnicianModal(technicianId);
+    if (button.dataset.technicianAction === 'delete') deleteTechnician(technicianId);
+});
 
 let adminComplaintsState = {
     page: 1,
@@ -3422,10 +3732,16 @@ async function restockInventory(id) {
 
 function updateNavAfterLogin() {
     const navProfileBtn = document.getElementById('navProfileBtn');
-    if (!navProfileBtn) return;
-    navProfileBtn.classList.remove('hidden');
-    navProfileBtn.innerHTML = `<i class="fa-solid fa-user"></i><span>${currentUser?.name || 'Profile'}</span>`;
-    navProfileBtn.onclick = () => navigateTo('profile');
+    if (navProfileBtn) {
+        const activePage = getActivePageId();
+        if (!currentUser || activePage === 'login' || activePage === 'register') {
+            navProfileBtn.classList.add('hidden');
+        } else {
+            navProfileBtn.classList.remove('hidden');
+            navProfileBtn.innerHTML = `<i class="fa-solid fa-user"></i><span>${currentUser?.name || 'Profile'}</span>`;
+            navProfileBtn.onclick = () => navigateTo('profile');
+        }
+    }
     updateSidebarIdentity();
     requestAnimationFrame(updateSidebarIdentity);
     window.setTimeout(updateSidebarIdentity, 100);
@@ -3433,11 +3749,9 @@ function updateNavAfterLogin() {
 
 function resetNavAfterLogout() {
     const navProfileBtn = document.getElementById('navProfileBtn');
-    if (!navProfileBtn) return;
-
-    navProfileBtn.classList.add('hidden');
-    navProfileBtn.innerHTML = '<i class="fa-solid fa-user"></i><span>Profile</span>';
-    navProfileBtn.onclick = () => navigateTo('login');
+    if (navProfileBtn) {
+        navProfileBtn.classList.add('hidden');
+    }
 }
 
 function updateSidebarIdentity() {
@@ -3887,6 +4201,26 @@ function downloadGatePassForm() {
     }
 }
 
+function validateStudentIdentityFields(studentName, registrationNumber, roomNumber) {
+    const student = String(studentName || '').trim();
+    const regNo = String(registrationNumber || '').trim();
+    const room = String(roomNumber || '').trim();
+
+    if (!student || !/^[A-Za-z ]+$/.test(student)) {
+        showToast('Student name must contain letters and spaces only.', 'warning');
+        return false;
+    }
+    if (!regNo || !/^\d+$/.test(regNo)) {
+        showToast('Registration number must contain numbers only.', 'warning');
+        return false;
+    }
+    if (room && !/^\d+$/.test(room)) {
+        showToast('Room number must contain numbers only.', 'warning');
+        return false;
+    }
+    return true;
+}
+
 async function handleLaundrySubmit(e) {
     e.preventDefault();
     const form = e.target;
@@ -3895,13 +4229,13 @@ async function handleLaundrySubmit(e) {
     const hostelBlock = document.getElementById('laundryHostelBlock').value.trim();
     const roomNumber = document.getElementById('laundryRoomNumber').value.trim();
     const dressCount = parseInt(document.getElementById('laundryDressCount').value, 10);
-    const pickupDate = document.getElementById('laundryPickupDate').value || new Date().toISOString().split('T')[0];
     const details = document.getElementById('laundryDetails').value.trim();
 
     if (!studentName || !registrationNumber || !dressCount || !details) {
         showToast('Please complete the laundry request form before submitting.', 'warning');
         return;
     }
+    if (!validateStudentIdentityFields(studentName, registrationNumber, roomNumber)) return;
 
     showLoading();
     try {
@@ -3915,7 +4249,8 @@ async function handleLaundrySubmit(e) {
                 hostelBlock,
                 roomNumber,
                 dressCount,
-                pickupDate,
+                pickupDate: '',
+                photos: selectedLaundryPhotos,
                 details
             })
         });
@@ -3929,9 +4264,9 @@ async function handleLaundrySubmit(e) {
 
         showToast(`Laundry request submitted successfully! ID: ${data.id}`, 'success');
         form.reset();
-        if (currentUser) {
-            prepareLaundryForm();
-        }
+        selectedLaundryPhotos = [];
+        renderLaundryPhotoPreviews();
+        await loadDashboardData();
         navigateTo('student-dashboard');
     } catch (error) {
         hideLoading();
@@ -4171,6 +4506,7 @@ async function loadDashboardData() {
         renderAdminTechnicians(allUsers, complaints);
         renderAdminFullComplaintsTable(complaints);
         renderTechInventoryGrid(inventoryList);
+        loadSecurityAlertStats().catch((securityError) => console.warn('Security alert stats unavailable:', securityError));
         renderWardenDashboard();
         renderSecurityDashboard();
         renderAdminGatePassLogsPage();
@@ -6139,11 +6475,748 @@ function showToast(message, type = 'info') {
     }, 4000);
 }
 
+function securityRoleQuery() {
+    return encodeURIComponent(currentUser?.role || 'warden');
+}
+
+function securityEvidenceUrl(event) {
+    return `/api/security-events/${encodeURIComponent(event.event_id)}/evidence?role=${securityRoleQuery()}`;
+}
+
+async function loadSecurityAlertStats() {
+    if (!['admin', 'warden'].includes(currentUser?.role)) return;
+    const response = await apiRequest(`/api/security-events/stats?role=${securityRoleQuery()}`);
+    if (!response.ok) return;
+    const stats = await parseJsonResponse(response);
+    [['adminNightAlertsToday', stats.nightAlertsToday], ['adminUnknownPersons', stats.unknownPersons], ['adminUnauthorizedStudents', stats.unauthorizedStudents], ['adminUnacknowledgedAlerts', stats.unacknowledgedAlerts]].forEach(([id, value]) => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = value ?? 0;
+    });
+    const badge = document.getElementById('globalNotificationBadge');
+    if (badge) badge.textContent = stats.unacknowledgedAlerts ?? 0;
+}
+
+async function openSecurityAlertHistory() {
+    if (!['admin', 'warden'].includes(currentUser?.role)) return showToast('Security alerts are limited to wardens and administrators.', 'warning');
+    const response = await apiRequest(`/api/security-events?role=${securityRoleQuery()}`);
+    const events = response.ok ? await parseJsonResponse(response) : [];
+    showModal('Security Alert History', `<div class="space-y-4"><div class="flex items-center justify-between"><p class="text-sm text-text-secondary">Evidence-backed night restriction events.</p><button onclick="loadSecurityAlertHistoryIntoModal()" class="px-3 py-2 rounded-xl border border-border text-xs font-semibold"><i class="fa-solid fa-rotate mr-1"></i> Refresh</button></div><div id="securityAlertHistoryTable" class="overflow-x-auto">${renderSecurityAlertTable(Array.isArray(events) ? events : [])}</div></div>`);
+}
+
+async function loadSecurityAlertHistoryIntoModal() {
+    const response = await apiRequest(`/api/security-events?role=${securityRoleQuery()}`);
+    const events = response.ok ? await parseJsonResponse(response) : [];
+    const table = document.getElementById('securityAlertHistoryTable');
+    if (table) table.innerHTML = renderSecurityAlertTable(Array.isArray(events) ? events : []);
+}
+
+function renderSecurityAlertTable(events) {
+    if (!events.length) return '<div class="rounded-2xl border border-border p-8 text-center text-sm text-text-secondary">No security events recorded.</div>';
+    return `<table class="w-full text-left text-xs"><thead class="bg-surface-alt"><tr>${['Time','Camera','Student','Student ID','Event','Status','Evidence','Acknowledgement','Action'].map(label => `<th class="px-3 py-3 font-semibold text-text-secondary whitespace-nowrap">${label}</th>`).join('')}</tr></thead><tbody class="divide-y divide-border">${events.map(event => `<tr><td class="px-3 py-3 whitespace-nowrap">${escapeHtml(new Date(event.timestamp).toLocaleString())}</td><td class="px-3 py-3">${escapeHtml(event.camera_id)}</td><td class="px-3 py-3">${escapeHtml(event.student_name)}</td><td class="px-3 py-3">${escapeHtml(event.student_id || '—')}</td><td class="px-3 py-3">Night Restriction</td><td class="px-3 py-3"><span class="px-2 py-1 rounded-full bg-rose-500/10 text-rose-600 font-bold">${event.status}</span></td><td class="px-3 py-3">📸</td><td class="px-3 py-3"><span class="${event.acknowledged ? 'text-emerald' : 'text-rose-600'} font-semibold">${event.acknowledged ? 'ACKNOWLEDGED' : 'PENDING'}</span></td><td class="px-3 py-3 whitespace-nowrap"><button onclick='openSecurityEvidence(${JSON.stringify(event).replace(/'/g, '&#39;')})' class="px-2.5 py-1.5 rounded-lg bg-primary text-white font-semibold mr-1">View</button>${event.acknowledged ? '' : `<button onclick="acknowledgeSecurityEvent('${event.event_id}')" class="px-2.5 py-1.5 rounded-lg border border-border font-semibold">Acknowledge</button>`}</td></tr>`).join('')}</tbody></table>`;
+}
+
+function openSecurityEvidence(event) {
+    const evidenceUrl = securityEvidenceUrl(event);
+    showModal('Security Evidence', `<div class="grid lg:grid-cols-[1.35fr_1fr] gap-5"><div class="rounded-2xl overflow-hidden border border-border bg-black"><img src="${evidenceUrl}" alt="CCTV evidence for ${escapeHtml(event.student_name)}" class="w-full max-h-[58vh] object-contain"></div><div class="space-y-3 text-sm"><div><p class="text-xs text-text-secondary">Student</p><p class="font-semibold">${escapeHtml(event.student_name)}</p></div><div><p class="text-xs text-text-secondary">Student ID</p><p class="font-semibold">${escapeHtml(event.student_id || 'Unknown')}</p></div><div><p class="text-xs text-text-secondary">Camera</p><p class="font-semibold">${escapeHtml(event.camera_id)}</p></div><div><p class="text-xs text-text-secondary">Detected</p><p class="font-semibold">${escapeHtml(new Date(event.timestamp).toLocaleString())}</p></div><div><p class="text-xs text-text-secondary">Event / Status</p><p class="font-semibold">Night Restriction · <span class="text-rose-600">${event.status}</span></p></div><div><p class="text-xs text-text-secondary">Reason</p><p class="font-semibold">${escapeHtml(event.reason)}</p></div>${event.acknowledged ? `<div class="rounded-xl bg-emerald/10 p-3 text-emerald text-xs font-semibold">Acknowledged by ${escapeHtml(event.acknowledged_by || 'warden')}</div>` : `<button onclick="acknowledgeSecurityEvent('${event.event_id}')" class="w-full px-4 py-3 rounded-xl bg-emerald text-white font-semibold">Acknowledge</button>`}</div></div>`);
+}
+
+async function acknowledgeSecurityEvent(eventId) {
+    const response = await apiRequest(`/api/security-events/${encodeURIComponent(eventId)}/acknowledge`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ role: currentUser?.role, actorName: currentUser?.name || 'Authorized warden' }) });
+    if (!response.ok) return showToast('Unable to acknowledge this security event.', 'error');
+    showToast('Security alert acknowledged.', 'success');
+    closeModal();
+    await loadSecurityAlertStats();
+    if (getActivePageId() === 'admin-dashboard') openSecurityAlertHistory();
+}
+
+async function openNightRestrictionManager() {
+    const response = await apiRequest(`/api/surveillance/config?role=${securityRoleQuery()}`);
+    const rawConfig = response.ok ? await parseJsonResponse(response) : {};
+    const config = { enabled: rawConfig.night_restriction_enabled !== false, startTime: rawConfig.start_time || '22:00', endTime: rawConfig.end_time || '06:00', confirmationFrames: rawConfig.confirmation_frames || 5, cooldownSeconds: rawConfig.cooldown_seconds || 30 };
+    const statusResponse = await apiRequest(`/api/surveillance/status?role=${securityRoleQuery()}`);
+    const status = statusResponse.ok ? await parseJsonResponse(statusResponse) : { backend: 'DISCONNECTED', surveillance: 'UNKNOWN', camera: 'UNKNOWN', socket: 'UNKNOWN', test_mode: false };
+    
+    const content = `
+        <div class="space-y-5 cctv-modal">
+            <!-- Top Header Card (Exact Match to Image 2) -->
+            <div class="modal-card rounded-[2rem] border border-border bg-surface-alt shadow-xl overflow-hidden">
+                <div class="modal-card-header flex flex-col gap-4 p-6 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                        <h4 class="font-semibold text-2xl">Hostel CCTV Live Monitoring</h4>
+                        <p class="text-sm text-text-secondary mt-2 max-w-xl">Use your webcam for live room and hostel night surveillance with real-time biometric and YOLO person detection.</p>
+                    </div>
+                    <div class="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
+                        <button id="btnStartWebsiteSurveillance" type="button" onclick="startWebsiteSurveillance()" class="btn btn-primary px-5 py-3 rounded-2xl text-sm font-semibold min-w-[10.5rem] flex items-center justify-center gap-2">
+                            <i class="fa-solid fa-play"></i> Start Live Camera
+                        </button>
+                        <button type="button" onclick="openLiveFaceEnrollmentModal()" class="btn btn-secondary px-4 py-3 rounded-2xl text-sm font-semibold text-center cursor-pointer flex items-center gap-2 hover:border-indigo-400 transition-all select-none">
+                            <i class="fa-solid fa-id-card-clip text-indigo-500"></i>
+                            <span>Scan My Face</span>
+                        </button>
+                        <label class="btn btn-secondary px-4 py-3 rounded-2xl text-sm font-semibold text-center cursor-pointer flex items-center gap-2 select-none">
+                            <input id="websiteSurveillanceTestMode" type="checkbox" class="w-4 h-4 text-primary rounded">
+                            <span>Test Hours (override)</span>
+                        </label>
+                        <button id="btnStopWebsiteSurveillance" type="button" onclick="stopWebsiteSurveillance()" class="btn btn-secondary px-5 py-3 rounded-2xl text-sm font-semibold min-w-[10rem] flex items-center justify-center gap-2">
+                            <i class="fa-solid fa-stop"></i> Stop Monitoring
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Main 2-Column Grid (Exact Match to Image 2) -->
+            <div class="grid grid-cols-1 gap-4 lg:grid-cols-[1.5fr_1fr]">
+                <!-- Left: Video Feed Card -->
+                <div class="cctv-card rounded-[1.75rem] border border-border bg-surface-alt shadow-lg overflow-hidden flex flex-col">
+                    <div class="px-6 py-5 border-b border-border bg-white/90 flex items-center justify-between">
+                        <h5 class="font-semibold text-lg">Camera or Uploaded Video Feed</h5>
+                        <span id="websiteSurveillanceFeedStatus" class="cctv-hud-badge bg-slate-800 text-slate-400">OFFLINE</span>
+                    </div>
+                    <div class="relative bg-black aspect-video flex-1 overflow-hidden flex items-center justify-center">
+                        <img id="websiteSurveillanceFeed" alt="Real surveillance camera feed" class="w-full h-full object-cover hidden">
+                        <div id="websiteSurveillanceFeedEmpty" class="absolute inset-0 flex flex-col items-center justify-center text-white text-center px-6 bg-black/80">
+                            <i id="websiteSurveillanceFeedIcon" class="fa-solid fa-video-slash text-3xl text-slate-500 mb-3"></i>
+                            <p id="websiteSurveillanceFeedMsg" class="text-sm text-slate-300 max-w-md">Live camera ready. Click <strong>Start Live Camera</strong> to begin real-time surveillance.</p>
+                        </div>
+                    </div>
+                    <!-- Camera Source Quick Bar -->
+                    <div class="px-5 py-3 border-t border-border bg-surface/80 flex items-center gap-3 text-xs">
+                        <span class="text-text-secondary font-medium"><i class="fa-solid fa-video mr-1"></i>Camera ID:</span>
+                        <input id="websiteSurveillanceCameraId" value="HOSTEL-CCTV-01" class="px-3 py-1.5 rounded-lg border border-border bg-surface-alt text-xs font-semibold text-slate-800 flex-1 min-w-[8rem]" placeholder="Camera ID">
+                        <span class="text-text-secondary font-medium ml-2">Source:</span>
+                        <input id="websiteSurveillanceSource" value="0" class="w-16 px-2.5 py-1.5 rounded-lg border border-border bg-surface-alt text-xs font-semibold text-slate-800" placeholder="0">
+                    </div>
+                </div>
+
+                <!-- Right: 4 Stat Widgets (Exact Match to Image 2) -->
+                <div class="space-y-4">
+                    <div class="stat-widget rounded-[1.5rem] p-5 bg-white/95 border border-border shadow-sm">
+                        <h5 class="font-semibold mb-2">Status</h5>
+                        <p class="text-sm text-text-secondary" id="nightSurveillanceStatusText">Live camera ready. Click Start Live Camera to begin biometric surveillance.</p>
+                    </div>
+                    <div class="stat-widget rounded-[1.5rem] p-5 bg-white/95 border border-border shadow-sm">
+                        <h5 class="font-semibold mb-2">Biometric Authorization</h5>
+                        <p class="text-xl font-semibold text-slate-900 cctv-stat-value" id="nightBiometricMatch">No person detected</p>
+                    </div>
+                    <div class="stat-widget rounded-[1.5rem] p-5 bg-white/95 border border-border shadow-sm">
+                        <h5 class="font-semibold mb-2">Detection Confidence</h5>
+                        <p class="text-xl font-semibold text-slate-900 cctv-stat-value" id="nightDetectionConfidence">N/A</p>
+                    </div>
+                    <div class="stat-widget rounded-[1.5rem] p-5 bg-white/95 border border-border shadow-sm">
+                        <h5 class="font-semibold mb-2">Speed</h5>
+                        <p class="text-xl font-semibold text-slate-900 cctv-stat-value" id="nightCurfewSpeed">N/A</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Bottom: Policy Configuration Card -->
+            <div class="cctv-card rounded-[1.75rem] border border-border bg-surface-alt shadow-lg p-6">
+                <form onsubmit="saveNightRestriction(event)" class="space-y-4">
+                    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-3 border-b border-border">
+                        <div>
+                            <h5 class="font-semibold text-base">Night Curfew Restriction Settings</h5>
+                            <p class="text-xs text-text-secondary">Configure automatic verification thresholds and active curfew schedule.</p>
+                        </div>
+                        <label class="flex items-center gap-2 text-sm font-semibold cursor-pointer">
+                            <input id="nightRestrictionEnabled" type="checkbox" ${config.enabled !== false ? 'checked' : ''} class="w-4 h-4 text-primary rounded">
+                            <span>Restriction Active</span>
+                        </label>
+                    </div>
+
+                    <div class="grid grid-cols-1 sm:grid-cols-4 gap-3 text-xs">
+                        <div>
+                            <label class="block font-semibold text-text-secondary mb-1">Curfew Start</label>
+                            <input id="nightRestrictionStart" type="time" value="${escapeHtml(config.startTime || '22:00')}" class="w-full px-3 py-2 rounded-xl border border-border bg-surface text-sm font-medium">
+                        </div>
+                        <div>
+                            <label class="block font-semibold text-text-secondary mb-1">Curfew End</label>
+                            <input id="nightRestrictionEnd" type="time" value="${escapeHtml(config.endTime || '06:00')}" class="w-full px-3 py-2 rounded-xl border border-border bg-surface text-sm font-medium">
+                        </div>
+                        <div>
+                            <label class="block font-semibold text-text-secondary mb-1">Confirmation Frames</label>
+                            <input id="nightRestrictionFrames" type="number" min="1" max="30" value="${config.confirmationFrames || 5}" class="w-full px-3 py-2 rounded-xl border border-border bg-surface text-sm font-medium">
+                        </div>
+                        <div>
+                            <label class="block font-semibold text-text-secondary mb-1">Cooldown (sec)</label>
+                            <input id="nightRestrictionCooldown" type="number" min="5" max="300" value="${config.cooldownSeconds || 30}" class="w-full px-3 py-2 rounded-xl border border-border bg-surface text-sm font-medium">
+                        </div>
+                    </div>
+
+                    <div class="flex items-center justify-end gap-3 pt-2">
+                        <button type="button" onclick="openSecurityAlertHistory()" class="btn btn-secondary px-5 py-2.5 rounded-xl text-sm font-semibold">
+                            <i class="fa-solid fa-clock-rotate-left mr-2"></i>View Incident Log
+                        </button>
+                        <button type="submit" class="btn btn-primary px-6 py-2.5 rounded-xl text-sm font-semibold">
+                            <i class="fa-solid fa-check mr-2"></i>Save Policy Settings
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    `;
+
+    showModal('🌙 Night Restriction & AI Surveillance Monitor', content);
+    refreshWebsiteSurveillanceStatus();
+}
+
+async function saveNightRestriction(event) {
+    event.preventDefault();
+    const response = await apiRequest('/api/surveillance/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ role: currentUser?.role, night_restriction_enabled: document.getElementById('nightRestrictionEnabled')?.checked, start_time: document.getElementById('nightRestrictionStart')?.value, end_time: document.getElementById('nightRestrictionEnd')?.value, confirmation_frames: Number(document.getElementById('nightRestrictionFrames')?.value || 5), cooldown_seconds: Number(document.getElementById('nightRestrictionCooldown')?.value || 30) }) });
+    if (!response.ok) return showToast('Unable to save night restriction settings.', 'error');
+    closeModal();
+    showToast('Night restriction settings saved.', 'success');
+}
+
 function showModal(title, content) {
     const overlay = document.getElementById('modalOverlay');
     const modalContent = document.getElementById('modalContent');
     modalContent.innerHTML = '<div class="p-6 border-b border-border flex items-center justify-between"><h3 class="font-semibold text-lg">' + title + '</h3><button onclick="closeModal()" class="w-8 h-8 rounded-lg hover:bg-surface-alt flex items-center justify-center transition-all"><i class="fa-solid fa-xmark text-text-secondary"></i></button></div><div class="p-6">' + content + '</div>';
+    modalContent.classList.toggle('night-restriction-modal', title.includes('Night Restriction') || title.includes('Hostel CCTV Live Monitoring'));
     overlay.classList.add('active');
+}
+
+const surveillanceStreamController = {
+    pollingInterval: null,
+    isStreaming: false,
+    usePollingFallback: false,
+    activeCameraId: 'HOSTEL-CCTV-01',
+
+    start(cameraId) {
+        this.activeCameraId = cameraId || 'HOSTEL-CCTV-01';
+        const feed = document.getElementById('websiteSurveillanceFeed');
+        const empty = document.getElementById('websiteSurveillanceFeedEmpty');
+        if (!feed) return;
+
+        const role = securityRoleQuery();
+        const safeCameraId = encodeURIComponent(this.activeCameraId);
+
+        if (!this.usePollingFallback) {
+            // Attempt standard MJPEG stream
+            const streamUrl = `/api/surveillance/live?camera_id=${safeCameraId}&role=${role}&t=${Date.now()}`;
+            feed.onerror = () => {
+                console.warn('MJPEG stream interrupted or unsupported, falling back to rapid frame polling.');
+                this.usePollingFallback = true;
+                this.start(this.activeCameraId);
+            };
+            feed.onload = () => {
+                this.isStreaming = true;
+                if (empty) empty.classList.add('hidden');
+                feed.classList.remove('hidden');
+            };
+            feed.src = streamUrl;
+            feed.classList.remove('hidden');
+            if (empty) empty.classList.add('hidden');
+            this.isStreaming = true;
+        } else {
+            // High-compatibility rapid frame polling
+            if (this.pollingInterval) clearInterval(this.pollingInterval);
+            if (empty) empty.classList.add('hidden');
+            feed.classList.remove('hidden');
+            const pollFrame = () => {
+                if (!this.pollingInterval) return;
+                const nextImg = new Image();
+                nextImg.onload = () => {
+                    if (feed) feed.src = nextImg.src;
+                };
+                nextImg.src = `/api/surveillance/frame?camera_id=${safeCameraId}&role=${role}&t=${Date.now()}`;
+            };
+            pollFrame();
+            this.pollingInterval = setInterval(pollFrame, 150);
+            this.isStreaming = true;
+        }
+    },
+
+    stop() {
+        if (this.pollingInterval) {
+            clearInterval(this.pollingInterval);
+            this.pollingInterval = null;
+        }
+        this.isStreaming = false;
+        const feed = document.getElementById('websiteSurveillanceFeed');
+        const empty = document.getElementById('websiteSurveillanceFeedEmpty');
+        const icon = document.getElementById('websiteSurveillanceFeedIcon');
+        const msg = document.getElementById('websiteSurveillanceFeedMsg');
+        if (feed) {
+            feed.onerror = null;
+            feed.onload = null;
+            feed.removeAttribute('src');
+            feed.classList.add('hidden');
+        }
+        if (empty) {
+            empty.classList.remove('hidden');
+            if (icon) icon.className = 'fa-solid fa-video-slash text-3xl text-slate-500 mb-3';
+            if (msg) msg.textContent = 'Live camera ready. Click Start Live Camera to begin real-time surveillance.';
+        }
+    },
+
+    setStarting() {
+        const feed = document.getElementById('websiteSurveillanceFeed');
+        const empty = document.getElementById('websiteSurveillanceFeedEmpty');
+        const icon = document.getElementById('websiteSurveillanceFeedIcon');
+        const msg = document.getElementById('websiteSurveillanceFeedMsg');
+        if (feed) {
+            feed.classList.add('hidden');
+            feed.removeAttribute('src');
+        }
+        if (empty) {
+            empty.classList.remove('hidden');
+            if (icon) icon.className = 'fa-solid fa-circle-notch fa-spin text-3xl text-amber-400 mb-3';
+            if (msg) msg.textContent = 'Camera initializing and loading AI models... (Please wait a moment)';
+        }
+    }
+};
+
+async function refreshWebsiteSurveillanceStatus() {
+    const response = await apiRequest(`/api/surveillance/status?role=${securityRoleQuery()}`).catch(() => null);
+    if (!response?.ok) return null;
+    const status = await parseJsonResponse(response);
+    const label = document.getElementById('websiteSurveillanceFeedStatus');
+    const cameraId = document.getElementById('websiteSurveillanceCameraId')?.value || 'HOSTEL-CCTV-01';
+
+    // Widget elements matching Image 2
+    const statusTextEl = document.getElementById('nightSurveillanceStatusText');
+    const biometricEl = document.getElementById('nightBiometricMatch');
+    const confidenceEl = document.getElementById('nightDetectionConfidence');
+    const speedEl = document.getElementById('nightCurfewSpeed');
+
+    // Update status badge
+    if (label) {
+        const cam = status.camera || 'OFFLINE';
+        label.textContent = cam;
+        label.className = `cctv-hud-badge ${
+            cam === 'ONLINE' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' :
+            cam === 'STARTING' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' :
+            'bg-slate-800 text-slate-400 border border-slate-700'
+        }`;
+    }
+
+    // Update video stream controller state & widgets
+    if (status.surveillance === 'RUNNING') {
+        if (status.camera === 'ONLINE') {
+            if (statusTextEl) statusTextEl.innerHTML = '<span class="text-emerald-600 font-semibold">🟢 Camera Live.</span> AI person detection & biometric facial verification running.';
+            if (biometricEl) biometricEl.innerHTML = '<span class="text-slate-700 font-semibold">🛡️ Face verification active</span>';
+            if (confidenceEl) confidenceEl.textContent = 'Analyzing live frames...';
+            if (speedEl) speedEl.textContent = `${status.target_fps || 10} FPS target • 22:00 – 06:00 (Active)`;
+
+            const feed = document.getElementById('websiteSurveillanceFeed');
+            if (feed && (feed.classList.contains('hidden') || !surveillanceStreamController.isStreaming && !surveillanceStreamController.pollingInterval)) {
+                surveillanceStreamController.start(cameraId);
+            }
+        } else {
+            if (statusTextEl) statusTextEl.textContent = 'Initializing camera and loading AI models... (Please wait a moment)';
+            if (biometricEl) biometricEl.textContent = 'Initializing...';
+            if (confidenceEl) confidenceEl.textContent = 'Loading...';
+            if (speedEl) speedEl.textContent = 'Starting...';
+            surveillanceStreamController.setStarting();
+        }
+    } else {
+        if (statusTextEl) statusTextEl.textContent = 'Live camera ready. Click Start Live Camera to begin fire, smoke, and biometric surveillance.';
+        if (biometricEl) biometricEl.textContent = 'No person detected';
+        if (confidenceEl) confidenceEl.textContent = 'N/A';
+        if (speedEl) speedEl.textContent = 'N/A';
+        surveillanceStreamController.stop();
+    }
+    return status;
+}
+
+async function startWebsiteSurveillance() {
+    const startBtn = document.getElementById('btnStartWebsiteSurveillance');
+    if (startBtn) startBtn.disabled = true;
+    showToast('Starting surveillance camera...', 'info');
+    surveillanceStreamController.setStarting();
+
+    const response = await apiRequest('/api/surveillance/control/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            role: currentUser?.role,
+            camera_id: document.getElementById('websiteSurveillanceCameraId')?.value || 'HOSTEL-CCTV-01',
+            source: document.getElementById('websiteSurveillanceSource')?.value || '0',
+            test_restricted_hours: Boolean(document.getElementById('websiteSurveillanceTestMode')?.checked),
+            confirmation_frames: Number(document.getElementById('nightRestrictionFrames')?.value || 5),
+            cooldown_seconds: Number(document.getElementById('nightRestrictionCooldown')?.value || 30),
+            minimum_presence_seconds: 60
+        })
+    });
+    if (startBtn) startBtn.disabled = false;
+
+    if (!response.ok) {
+        const error = await parseJsonResponse(response).catch(() => ({}));
+        surveillanceStreamController.stop();
+        return showToast(error.error || 'Unable to start surveillance.', 'error');
+    }
+
+    showToast('Real surveillance camera is initializing...', 'success');
+
+    if (websiteSurveillanceStatusTimer) clearInterval(websiteSurveillanceStatusTimer);
+    let attempts = 0;
+    websiteSurveillanceStatusTimer = setInterval(async () => {
+        const status = await refreshWebsiteSurveillanceStatus();
+        attempts += 1;
+        if (status?.camera === 'ONLINE' || attempts >= 30 || status?.surveillance === 'STOPPED') {
+            clearInterval(websiteSurveillanceStatusTimer);
+            websiteSurveillanceStatusTimer = null;
+        }
+    }, 1200);
+}
+
+async function stopWebsiteSurveillance() {
+    if (websiteSurveillanceStatusTimer) {
+        clearInterval(websiteSurveillanceStatusTimer);
+        websiteSurveillanceStatusTimer = null;
+    }
+    surveillanceStreamController.stop();
+    const response = await apiRequest('/api/surveillance/control/stop', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ role: currentUser?.role })
+    });
+    if (!response.ok) return showToast('Unable to stop surveillance.', 'error');
+
+    const label = document.getElementById('websiteSurveillanceFeedStatus');
+    if (label) {
+        label.textContent = 'OFFLINE';
+        label.className = 'cctv-hud-badge bg-slate-800 text-slate-400 border border-slate-700';
+    }
+    const statusTextEl = document.getElementById('nightSurveillanceStatusText');
+    const biometricEl = document.getElementById('nightBiometricMatch');
+    const confidenceEl = document.getElementById('nightDetectionConfidence');
+    const speedEl = document.getElementById('nightCurfewSpeed');
+    if (statusTextEl) statusTextEl.textContent = 'Live camera ready. Click Start Live Camera to begin surveillance.';
+    if (biometricEl) biometricEl.textContent = 'No person detected';
+    if (confidenceEl) confidenceEl.textContent = 'N/A';
+    if (speedEl) speedEl.textContent = 'N/A';
+
+    showToast('Surveillance stopped.', 'info');
+}
+
+let activeFaceEnrollStream = null;
+
+async function openLiveFaceEnrollmentModal() {
+    if (surveillanceStreamController && surveillanceStreamController.isStreaming) {
+        stopWebsiteSurveillance();
+    }
+
+    const defaultStudentId = currentUser?.id || currentUser?.studentId || 'STU-001';
+    const defaultName = currentUser?.name || currentUser?.username || 'Balamurugan';
+
+    const content = `
+        <div class="space-y-5">
+            <!-- Header banner -->
+            <div class="rounded-2xl border border-indigo-500/20 bg-indigo-500/5 p-4 flex items-center gap-3">
+                <div class="w-10 h-10 rounded-xl bg-indigo-600 text-white flex items-center justify-center text-lg font-bold shadow-md shadow-indigo-500/20">
+                    <i class="fa-solid fa-id-badge"></i>
+                </div>
+                <div>
+                    <h4 class="font-bold text-sm text-slate-800">Biometric Facial Scan & Authorization</h4>
+                    <p class="text-xs text-text-secondary">Scan your face directly from your camera to enroll or authorize yourself in the AI surveillance database.</p>
+                </div>
+            </div>
+
+            <!-- Face Scanner Camera Box -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+                <!-- Left: Live Camera Viewport -->
+                <div class="space-y-2">
+                    <div class="relative aspect-video rounded-2xl overflow-hidden bg-slate-950 border border-slate-800 shadow-lg flex items-center justify-center">
+                        <video id="faceEnrollLiveVideo" autoplay playsinline muted class="w-full h-full object-cover"></video>
+                        <canvas id="faceEnrollCanvas" class="hidden"></canvas>
+                        
+                        <!-- Biometric Scanning Reticle HUD Overlay -->
+                        <div class="pointer-events-none absolute inset-0 flex flex-col items-center justify-center p-4">
+                            <div class="w-40 h-48 border-2 border-dashed border-emerald-400/80 rounded-[50%] flex items-center justify-center relative shadow-[0_0_20px_rgba(16,185,129,0.3)]">
+                                <div class="absolute inset-x-0 h-0.5 bg-emerald-400 shadow-[0_0_12px_#10B981] animate-pulse"></div>
+                                <span class="text-[10px] uppercase tracking-wider font-mono text-emerald-300 bg-slate-950/80 px-2 py-0.5 rounded-full border border-emerald-500/40">Align Face Here</span>
+                            </div>
+                        </div>
+
+                        <div id="faceEnrollPlaceholder" class="absolute inset-0 flex flex-col items-center justify-center bg-slate-950 text-slate-400 p-4 text-center">
+                            <i class="fa-solid fa-camera text-3xl text-indigo-400 mb-2"></i>
+                            <p class="text-xs font-semibold text-white">Starting Webcam Scanner...</p>
+                            <p class="text-[11px] text-slate-500">Please grant camera permissions if prompted.</p>
+                        </div>
+                    </div>
+
+                    <div class="flex items-center justify-between text-xs text-text-secondary px-1">
+                        <span><i class="fa-solid fa-lightbulb text-amber-500 mr-1"></i> Look directly at the camera in good lighting.</span>
+                        <span class="text-emerald-600 font-bold font-mono">128-D ENCODING</span>
+                    </div>
+                </div>
+
+                <!-- Right: Profile Info Form -->
+                <form onsubmit="submitLiveFaceScan(event)" class="space-y-3.5">
+                    <div>
+                        <label class="block text-xs font-semibold text-text-secondary mb-1">Student / Member ID</label>
+                        <div class="relative">
+                            <i class="fa-solid fa-hashtag absolute left-3 top-3 text-slate-400 text-xs"></i>
+                            <input id="enrollStudentId" required value="${escapeHtml(defaultStudentId)}" class="w-full pl-8 pr-3 py-2 rounded-xl border border-border bg-surface text-sm font-semibold text-slate-800" placeholder="e.g. STU-001">
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="block text-xs font-semibold text-text-secondary mb-1">Full Name</label>
+                        <div class="relative">
+                            <i class="fa-solid fa-user absolute left-3 top-3 text-slate-400 text-xs"></i>
+                            <input id="enrollStudentName" required value="${escapeHtml(defaultName)}" class="w-full pl-8 pr-3 py-2 rounded-xl border border-border bg-surface text-sm font-semibold text-slate-800" placeholder="e.g. Balamurugan">
+                        </div>
+                    </div>
+
+                    <div class="p-3.5 rounded-xl border border-border bg-surface-alt space-y-2">
+                        <label class="flex items-center justify-between cursor-pointer">
+                            <div>
+                                <span class="text-xs font-bold text-slate-800">Authorize for Night Entry</span>
+                                <p class="text-[11px] text-text-secondary">Shows green AUTHORIZED badge during restricted hours.</p>
+                            </div>
+                            <input id="enrollAuthorizedCheck" type="checkbox" checked class="w-4 h-4 text-emerald-600 rounded cursor-pointer">
+                        </label>
+                    </div>
+
+                    <div class="flex items-center gap-2 pt-2">
+                        <button id="btnCaptureFaceScan" type="submit" class="flex-1 py-3 px-4 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-bold text-sm shadow-md shadow-emerald-500/20 transition-all flex items-center justify-center gap-2">
+                            <i class="fa-solid fa-camera-retro"></i> Capture Face Scan
+                        </button>
+                        <label class="btn btn-secondary px-3 py-3 rounded-xl text-xs font-bold text-center cursor-pointer flex items-center gap-1.5" title="Or upload a face photo file">
+                            <i class="fa-solid fa-upload"></i>
+                            <span>Upload Photo</span>
+                            <input id="enrollPhotoFileInput" type="file" accept="image/*" class="hidden" onchange="handleFacePhotoUpload(event)">
+                        </label>
+                    </div>
+                </form>
+            </div>
+
+            <!-- Enrolled Students Directory -->
+            <div class="rounded-2xl border border-border bg-surface-alt p-4 space-y-3">
+                <div class="flex items-center justify-between">
+                    <h5 class="text-xs font-bold text-slate-700 uppercase tracking-wider">Currently Enrolled Faces in Biometric DB</h5>
+                    <button type="button" onclick="loadEnrolledStudentsList()" class="text-xs text-primary font-semibold hover:underline">Refresh List</button>
+                </div>
+                <div id="enrolledStudentsListContainer" class="max-h-36 overflow-y-auto space-y-2">
+                    <p class="text-xs text-slate-400">Loading enrolled records...</p>
+                </div>
+            </div>
+        </div>
+    `;
+
+    showModal('📸 Biometric Face Enrollment Scanner', content);
+    startFaceEnrollWebcam();
+    loadEnrolledStudentsList();
+}
+
+async function startFaceEnrollWebcam() {
+    const video = document.getElementById('faceEnrollLiveVideo');
+    const placeholder = document.getElementById('faceEnrollPlaceholder');
+    if (!video) return;
+
+    try {
+        if (activeFaceEnrollStream) {
+            activeFaceEnrollStream.getTracks().forEach(track => track.stop());
+            activeFaceEnrollStream = null;
+        }
+
+        const stream = await navigator.mediaDevices.getUserMedia({
+            video: {
+                facingMode: 'user',
+                width: { ideal: 1280 },
+                height: { ideal: 720 }
+            },
+            audio: false
+        });
+
+        activeFaceEnrollStream = stream;
+        video.srcObject = stream;
+        video.onloadedmetadata = () => {
+            video.play().catch(() => {});
+            if (placeholder) placeholder.classList.add('hidden');
+        };
+    } catch (err) {
+        console.warn('Unable to open enrollment webcam:', err);
+        if (placeholder) {
+            placeholder.innerHTML = `
+                <i class="fa-solid fa-triangle-exclamation text-3xl text-amber-400 mb-2"></i>
+                <p class="text-xs font-bold text-white">Camera Access Error</p>
+                <p class="text-[11px] text-slate-400 mt-1 max-w-xs">${escapeHtml(err.message || 'Please check camera permissions in your browser.')}</p>
+            `;
+        }
+    }
+}
+
+function stopFaceEnrollWebcam() {
+    if (activeFaceEnrollStream) {
+        activeFaceEnrollStream.getTracks().forEach(track => track.stop());
+        activeFaceEnrollStream = null;
+    }
+}
+
+async function handleFacePhotoUpload(event) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const studentId = document.getElementById('enrollStudentId')?.value?.trim();
+    const name = document.getElementById('enrollStudentName')?.value?.trim();
+    const authorized = Boolean(document.getElementById('enrollAuthorizedCheck')?.checked);
+    const btn = document.getElementById('btnCaptureFaceScan');
+
+    if (!studentId || !name) {
+        showToast('Please enter both Student ID and Full Name before uploading photo.', 'warning');
+        return;
+    }
+
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin mr-1.5"></i> Extracting Biometrics...';
+    }
+
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+        const dataUrl = e.target.result;
+        try {
+            const response = await apiRequest('/api/surveillance/enroll', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    role: securityRoleQuery(),
+                    student_id: studentId,
+                    name: name,
+                    image: dataUrl,
+                    authorized: authorized,
+                    access_level: 'standard'
+                })
+            });
+
+            const resData = await parseJsonResponse(response).catch(() => ({}));
+            if (!response.ok) {
+                throw new Error(resData.error || 'Failed to detect or enroll face. Please ensure your face is clearly visible.');
+            }
+
+            showToast(`🎉 Success! Face enrolled & authorized for ${name} (${studentId})!`, 'success');
+            stopFaceEnrollWebcam();
+            closeModal();
+
+        } catch (err) {
+            showToast(err.message || 'Face enrollment failed.', 'error');
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fa-solid fa-camera-retro mr-1.5"></i> Capture Face Scan';
+            }
+        }
+    };
+    reader.readAsDataURL(file);
+}
+
+async function submitLiveFaceScan(event) {
+    if (event) event.preventDefault();
+    const video = document.getElementById('faceEnrollLiveVideo');
+    const canvas = document.getElementById('faceEnrollCanvas');
+    const btn = document.getElementById('btnCaptureFaceScan');
+    const studentId = document.getElementById('enrollStudentId')?.value?.trim();
+    const name = document.getElementById('enrollStudentName')?.value?.trim();
+    const authorized = Boolean(document.getElementById('enrollAuthorizedCheck')?.checked);
+
+    if (!studentId || !name) {
+        showToast('Please enter both Student ID and Full Name.', 'warning');
+        return;
+    }
+
+    if (!video || !canvas) return;
+
+    if (!video.videoWidth || !video.videoHeight || video.readyState < 2) {
+        showToast('Camera is initializing. Please wait a second and click capture again.', 'warning');
+        return;
+    }
+
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin mr-1.5"></i> Scanning & Extracting Biometrics...';
+    }
+
+    try {
+        canvas.width = video.videoWidth || 640;
+        canvas.height = video.videoHeight || 480;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
+
+        const response = await apiRequest('/api/surveillance/enroll', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                role: securityRoleQuery(),
+                student_id: studentId,
+                name: name,
+                image: dataUrl,
+                authorized: authorized,
+                access_level: 'standard'
+            })
+        });
+
+        const resData = await parseJsonResponse(response).catch(() => ({}));
+        if (!response.ok) {
+            throw new Error(resData.error || 'Failed to detect or enroll face. Please ensure your face is clearly visible.');
+        }
+
+        showToast(`🎉 Success! Face enrolled & authorized for ${name} (${studentId})!`, 'success');
+        stopFaceEnrollWebcam();
+        closeModal();
+
+    } catch (err) {
+        showToast(err.message || 'Face scanning failed.', 'error');
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fa-solid fa-camera-retro mr-1.5"></i> Capture Face Scan';
+        }
+    }
+}
+
+async function loadEnrolledStudentsList() {
+    const container = document.getElementById('enrolledStudentsListContainer');
+    if (!container) return;
+
+    const response = await apiRequest(`/api/surveillance/students?role=${securityRoleQuery()}`).catch(() => null);
+    if (!response?.ok) {
+        container.innerHTML = '<p class="text-xs text-slate-400">Unable to load enrolled faces.</p>';
+        return;
+    }
+
+    const { students = [] } = await parseJsonResponse(response);
+    if (!students.length) {
+        container.innerHTML = '<p class="text-xs text-slate-400">No faces enrolled yet. Use the camera above to scan your face.</p>';
+        return;
+    }
+
+    container.innerHTML = students.map(s => `
+        <div class="flex items-center justify-between p-2.5 rounded-xl border border-border bg-surface text-xs">
+            <div class="flex items-center gap-2.5">
+                <div class="w-7 h-7 rounded-lg ${s.authorized ? 'bg-emerald-500/10 text-emerald-600' : 'bg-rose-500/10 text-rose-600'} flex items-center justify-center font-bold">
+                    <i class="fa-solid ${s.authorized ? 'fa-shield-check' : 'fa-shield-xmark'}"></i>
+                </div>
+                <div>
+                    <span class="font-bold text-slate-800">${escapeHtml(s.name)}</span>
+                    <span class="text-slate-400 ml-1 font-mono">(${escapeHtml(s.student_id)})</span>
+                </div>
+            </div>
+            <div class="flex items-center gap-2">
+                <span class="px-2 py-0.5 rounded text-[10px] font-bold ${s.authorized ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}">
+                    ${s.authorized ? 'AUTHORIZED' : 'UNAUTHORIZED'}
+                </span>
+                <button type="button" onclick="toggleStudentAuthorization('${escapeHtml(s.student_id)}', ${!s.authorized})" class="px-2 py-1 rounded-lg border border-border hover:bg-surface-alt text-[10px] font-semibold text-slate-600">
+                    ${s.authorized ? 'Revoke' : 'Authorize'}
+                </button>
+            </div>
+        </div>
+    `).join('');
+}
+
+async function toggleStudentAuthorization(studentId, newAuthStatus) {
+    const res = await apiRequest(`/api/surveillance/students/${encodeURIComponent(studentId)}/authorize`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ role: currentUser?.role, authorized: newAuthStatus })
+    });
+    if (res.ok) {
+        showToast(`Authorization status updated for ${studentId}.`, 'success');
+        loadEnrolledStudentsList();
+    } else {
+        showToast('Unable to update authorization.', 'error');
+    }
 }
 
 function openHostelEmergencyModal() {
@@ -6467,6 +7540,32 @@ function setupCustomDatePickers() {
     });
 }
 
+function updateCustomDatePickerPosition() {
+    if (!activeDatePickerPopover || !activeDatePickerInput) return;
+    const rect = activeDatePickerInput.getBoundingClientRect();
+    if (rect.width === 0 && rect.height === 0) {
+        closeCustomDatePicker();
+        return;
+    }
+
+    const popoverHeight = activeDatePickerPopover.offsetHeight || 330;
+    const spaceBelow = window.innerHeight - rect.bottom;
+
+    if (spaceBelow < popoverHeight && rect.top > popoverHeight) {
+        activeDatePickerPopover.style.top = `${Math.max(8, rect.top - popoverHeight - 8)}px`;
+    } else {
+        activeDatePickerPopover.style.top = `${rect.bottom + 8}px`;
+    }
+
+    let left = rect.left;
+    const popoverWidth = activeDatePickerPopover.offsetWidth || 288;
+    if (left + popoverWidth > window.innerWidth - 16) {
+        left = window.innerWidth - popoverWidth - 16;
+    }
+    if (left < 16) left = 16;
+    activeDatePickerPopover.style.left = `${left}px`;
+}
+
 function openCustomDatePicker(input) {
     if (activeDatePickerPopover) {
         closeCustomDatePicker();
@@ -6478,19 +7577,18 @@ function openCustomDatePicker(input) {
 
     const popover = document.createElement('div');
     popover.id = 'customDatePickerPopover';
-    popover.className = 'absolute left-0 top-full z-50 mt-2 w-72 rounded-2xl border border-border bg-surface p-4 shadow-2xl backdrop-blur-xl animate-in fade-in zoom-in-95 duration-150';
+    popover.className = 'fixed z-[99999] w-72 rounded-2xl border border-border bg-surface p-4 shadow-2xl backdrop-blur-xl animate-in fade-in zoom-in-95 duration-150';
     
-    const parent = input.closest('.date-pill-wrapper') || input.parentElement;
-    if (parent && getComputedStyle(parent).position === 'static') {
-        parent.style.position = 'relative';
-    }
-    (parent || document.body).appendChild(popover);
+    document.body.appendChild(popover);
     activeDatePickerPopover = popover;
 
     renderCustomDatePickerContent();
+    updateCustomDatePickerPosition();
 
     setTimeout(() => {
         document.addEventListener('click', handleOutsideDatePickerClick);
+        window.addEventListener('scroll', updateCustomDatePickerPosition, true);
+        window.addEventListener('resize', updateCustomDatePickerPosition);
     }, 10);
 }
 
@@ -6508,6 +7606,8 @@ function closeCustomDatePicker() {
     }
     activeDatePickerInput = null;
     document.removeEventListener('click', handleOutsideDatePickerClick);
+    window.removeEventListener('scroll', updateCustomDatePickerPosition, true);
+    window.removeEventListener('resize', updateCustomDatePickerPosition);
 }
 
 function renderCustomDatePickerContent() {
@@ -7603,8 +8703,15 @@ function formatInferenceResult(result) {
 }
 
 function closeModal() {
+    if (websiteSurveillanceStatusTimer) {
+        clearInterval(websiteSurveillanceStatusTimer);
+        websiteSurveillanceStatusTimer = null;
+    }
+    const feed = document.getElementById('websiteSurveillanceFeed');
+    if (feed) feed.removeAttribute('src');
     stopCameraScanner();
     stopCCTVInference();
+    stopFaceEnrollWebcam();
     const video = document.getElementById('cctvVideoPlayer');
     if (video) {
         video.pause();
@@ -7804,6 +8911,12 @@ function openAddTechnicianModal() {
     if (modal) {
         modal.classList.remove('hidden');
         modal.style.display = 'flex';
+        const form = modal.querySelector('form');
+        if (form) {
+            form.reset();
+            const pwd = document.getElementById('techPassword');
+            if (pwd) pwd.value = 'tech123';
+        }
         setTimeout(() => document.getElementById('techName')?.focus(), 50);
     }
 }
@@ -7915,10 +9028,12 @@ async function handleEditWarden(event) {
 }
 
 function openEditTechnicianModal(id) {
-    const techs = window.currentTechniciansList || [];
-    const tech = techs.find(t => t.id === id || t.email === id);
-    if (!tech) return;
-    document.getElementById('editTechId').value = tech.id || tech.email;
+    const tech = findTechnicianByIdentifier(id);
+    if (!tech) {
+        showToast('Technician details are unavailable. Please refresh the list and try again.', 'error');
+        return;
+    }
+    document.getElementById('editTechId').value = getTechnicianIdentifier(tech);
     document.getElementById('editTechName').value = tech.name || '';
     document.getElementById('editTechEmail').value = tech.email || '';
     document.getElementById('editTechSpecialization').value = tech.specialization || 'General Maintenance';
@@ -7947,7 +9062,10 @@ async function handleEditTechnician(event) {
     const specialization = document.getElementById('editTechSpecialization')?.value;
     const phone = document.getElementById('editTechPhone')?.value.trim();
 
-    if (!id || !name || !email) return;
+    if (!id || !name || !email) {
+        showToast('Please complete the technician name and email.', 'warning');
+        return;
+    }
 
     try {
         const response = await apiRequest(`/api/technicians/${encodeURIComponent(id)}`, {
@@ -7963,6 +9081,173 @@ async function handleEditTechnician(event) {
         await loadTechniciansList();
     } catch (error) {
         showToast(error.message || 'Error updating technician.', 'error');
+    }
+}
+
+function renderAdminLaundryRequests() {
+    const list = document.getElementById('adminLaundryRequestList');
+    const badges = document.querySelectorAll('.adminSidebarLaundryBadge, #adminSidebarLaundryBadge');
+    badges.forEach(badge => badge.textContent = String(latestLaundryRequests.length || 0));
+    if (!list) return;
+    if (!latestLaundryRequests.length) {
+        list.innerHTML = '<div class="rounded-2xl border border-dashed border-border bg-surface-alt p-10 text-center text-text-secondary">No student laundry requests yet.</div>';
+        return;
+    }
+
+    const pendingCount = latestLaundryRequests.filter(r => !r.pickupDate).length;
+    const scheduledCount = latestLaundryRequests.filter(r => r.status === 'Pickup Scheduled' || r.status === 'Picked Up').length;
+    const completedCount = latestLaundryRequests.filter(r => r.status === 'Completed').length;
+
+    list.innerHTML = `
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+            <div class="glass p-4 rounded-2xl border border-border flex items-center justify-between">
+                <div><p class="text-xs text-text-secondary">Total Requests</p><p class="text-xl font-bold text-text">${latestLaundryRequests.length}</p></div>
+                <div class="w-10 h-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center"><i class="fa-solid fa-shirt text-lg"></i></div>
+            </div>
+            <div class="glass p-4 rounded-2xl border border-border flex items-center justify-between">
+                <div><p class="text-xs text-text-secondary">Pending Pickup Date</p><p class="text-xl font-bold text-amber-600">${pendingCount}</p></div>
+                <div class="w-10 h-10 rounded-xl bg-amber-500/10 text-amber-600 flex items-center justify-center" role="img" aria-label="Pickup date pending">
+                    <svg viewBox="0 0 24 24" class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <rect x="3" y="4" width="14" height="15" rx="2"></rect>
+                        <path d="M7 2v4M13 2v4M3 9h14"></path>
+                        <circle cx="18" cy="17" r="4"></circle>
+                        <path d="M18 15v2l1.4 1"></path>
+                    </svg>
+                </div>
+            </div>
+            <div class="glass p-4 rounded-2xl border border-border flex items-center justify-between">
+                <div><p class="text-xs text-text-secondary">Completed</p><p class="text-xl font-bold text-emerald">${completedCount}</p></div>
+                <div class="w-10 h-10 rounded-xl bg-emerald/10 text-emerald flex items-center justify-center"><i class="fa-solid fa-circle-check text-lg"></i></div>
+            </div>
+        </div>
+
+        <div class="space-y-4">
+            ${latestLaundryRequests.map((request) => {
+                const photos = Array.isArray(request.photos) ? request.photos : (request.photo ? [request.photo] : []);
+                return `
+                    <div class="glass rounded-2xl border border-border p-5 space-y-4 bg-surface hover:shadow-md transition-all">
+                        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-border/70 pb-3">
+                            <div class="flex items-center gap-3">
+                                <div class="w-10 h-10 rounded-xl bg-emerald/10 text-emerald flex items-center justify-center font-bold text-base">
+                                    <i class="fa-solid fa-shirt"></i>
+                                </div>
+                                <div>
+                                    <div class="flex items-center gap-2">
+                                        <span class="text-sm font-bold text-text">${request.student || 'Unknown Student'}</span>
+                                        <span class="text-xs font-mono px-2 py-0.5 rounded-md bg-surface-alt font-bold text-primary">${request.id || ''}</span>
+                                    </div>
+                                    <p class="text-xs text-text-secondary">Reg No: <strong>${request.registrationNumber || 'N/A'}</strong> • ${request.hostelBlock || ''} Room ${request.roomNumber || ''}</p>
+                                </div>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <span class="text-xs text-text-secondary">Status:</span>
+                                <select onchange="updateLaundryStatus('${request.id}', this.value)" class="text-xs font-bold px-3 py-1.5 rounded-xl border border-border bg-surface-alt text-text focus:outline-none">
+                                    <option value="Pending" ${request.status === 'Pending' ? 'selected' : ''}>Pending</option>
+                                    <option value="Pickup Scheduled" ${request.status === 'Pickup Scheduled' ? 'selected' : ''}>Pickup Scheduled</option>
+                                    <option value="Picked Up" ${request.status === 'Picked Up' ? 'selected' : ''}>Picked Up</option>
+                                    <option value="Processing" ${request.status === 'Processing' ? 'selected' : ''}>Processing</option>
+                                    <option value="Completed" ${request.status === 'Completed' ? 'selected' : ''}>Completed</option>
+                                    <option value="Cancelled" ${request.status === 'Cancelled' ? 'selected' : ''}>Cancelled</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+                            <div>
+                                <p class="text-text-secondary font-semibold mb-1">Laundry Details:</p>
+                                <p class="text-text bg-surface-alt/60 p-2.5 rounded-xl border border-border/60">${request.details || 'No special details.'}</p>
+                                <p class="text-text-secondary mt-2">Dresses Count: <strong class="text-text font-bold text-sm">${request.dressCount || 0}</strong></p>
+                            </div>
+
+                            <div>
+                                <p class="text-text-secondary font-semibold mb-1">Dress Photos (${photos.length}):</p>
+                                ${photos.length ? `
+                                    <div class="flex flex-wrap gap-2">
+                                        ${photos.map((src, idx) => `
+                                            <div class="relative group cursor-pointer" onclick="showLaundryImageModal('${src}')">
+                                                <img src="${src}" alt="Dress photo ${idx+1}" class="w-16 h-16 object-cover rounded-xl border border-border hover:scale-105 transition-transform shadow-xs">
+                                                <span class="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 flex items-center justify-center text-white text-xs rounded-xl transition-opacity"><i class="fa-solid fa-expand"></i></span>
+                                            </div>
+                                        `).join('')}
+                                    </div>
+                                ` : '<p class="text-text-secondary italic bg-surface-alt/40 p-2.5 rounded-xl">No photos uploaded by student.</p>'}
+                            </div>
+
+                            <div class="bg-emerald/5 border border-emerald/20 p-3.5 rounded-2xl flex flex-col justify-between space-y-2">
+                                <div>
+                                    <label class="block text-xs font-bold text-emerald mb-1">
+                                        <i class="fa-solid fa-calendar-check mr-1"></i> Admin Assign Pickup Date:
+                                    </label>
+                                    <input type="date" id="adminPickupDate_${request.id}" value="${request.pickupDate || ''}" class="w-full px-3 py-2 text-xs rounded-xl border border-border bg-surface text-text font-semibold">
+                                </div>
+                                <button onclick="saveAdminLaundryPickupDate('${request.id}')" class="w-full py-2 bg-emerald hover:bg-emerald-dark text-white rounded-xl text-xs font-bold transition-all shadow-sm flex items-center justify-center gap-1.5">
+                                    <i class="fa-solid fa-floppy-disk"></i> Save / Assign Pickup Date
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('')}
+        </div>
+    `;
+    setTimeout(setupCustomDatePickers, 50);
+}
+
+async function saveAdminLaundryPickupDate(requestId) {
+    const dateInput = document.getElementById('adminPickupDate_' + requestId);
+    if (!dateInput) return;
+    const newDate = dateInput.value;
+    if (!newDate) {
+        showToast('Please select a valid pickup date first.', 'warning');
+        return;
+    }
+
+    showLoading();
+    try {
+        const res = await apiRequest('/api/laundry-requests/' + requestId, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ pickupDate: newDate, status: 'Pickup Scheduled' })
+        });
+        hideLoading();
+
+        if (res.ok) {
+            const updated = await parseJsonResponse(res);
+            const idx = latestLaundryRequests.findIndex(r => r.id === requestId);
+            if (idx !== -1) {
+                latestLaundryRequests[idx] = updated;
+            }
+            showToast(`Pickup date assigned (${newDate}) for request ${requestId}!`, 'success');
+            renderAdminLaundryRequests();
+        } else {
+            showToast('Failed to update pickup date.', 'error');
+        }
+    } catch (err) {
+        hideLoading();
+        console.error(err);
+        showToast('Error updating pickup date.', 'error');
+    }
+}
+
+async function updateLaundryStatus(requestId, newStatus) {
+    try {
+        const res = await apiRequest('/api/laundry-requests/' + requestId, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: newStatus })
+        });
+        if (res.ok) {
+            const updated = await parseJsonResponse(res);
+            const idx = latestLaundryRequests.findIndex(r => r.id === requestId);
+            if (idx !== -1) {
+                latestLaundryRequests[idx] = updated;
+            }
+            showToast(`Request ${requestId} status updated to ${newStatus}.`, 'success');
+            renderAdminLaundryRequests();
+        }
+    } catch (err) {
+        console.error(err);
+        showToast('Error updating request status.', 'error');
     }
 }
 

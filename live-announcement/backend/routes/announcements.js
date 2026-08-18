@@ -1,28 +1,29 @@
 const express = require('express');
-const Announcement = require('../models/Announcement');
+const supabase = require('../supabase');
 
 const router = express.Router();
 
 // List latest announcements with optional filtering and search
 router.get('/', async (req, res) => {
   const { search = '', priority, audience } = req.query;
-  const filters = {};
+  let query = supabase
+    .from('announcements')
+    .select('id,title,message,priority,audience,adminName:admin_name,createdAt:created_at')
+    .order('created_at', { ascending: false })
+    .limit(200);
 
-  if (priority) {
-    filters.priority = priority;
-  }
-  if (audience) {
-    filters.audience = audience;
-  }
+  if (priority) query = query.eq('priority', priority);
+  if (audience) query = query.eq('audience', audience);
   if (search) {
-    filters.$or = [
-      { title: new RegExp(search, 'i') },
-      { message: new RegExp(search, 'i') },
-      { adminName: new RegExp(search, 'i') }
-    ];
+    const term = String(search).replace(/[,.()]/g, ' ').trim();
+    if (term) {
+      const pattern = `%${term}%`;
+      query = query.or(`title.ilike.${pattern},message.ilike.${pattern},admin_name.ilike.${pattern}`);
+    }
   }
 
-  const announcements = await Announcement.find(filters).sort({ createdAt: -1 }).limit(200);
+  const { data: announcements, error } = await query;
+  if (error) return res.status(500).json({ error: error.message });
   res.json(announcements);
 });
 
@@ -33,15 +34,21 @@ router.post('/', async (req, res) => {
     return res.status(400).json({ error: 'Title, message, audience and admin name are required.' });
   }
 
-  const announcement = new Announcement({
+  const announcementInput = {
     title,
     message,
     priority: ['Normal', 'Important', 'Emergency'].includes(priority) ? priority : 'Normal',
     audience,
-    adminName
-  });
+    admin_name: adminName
+  };
 
-  await announcement.save();
+  const { data: announcement, error } = await supabase
+    .from('announcements')
+    .insert(announcementInput)
+    .select('id,title,message,priority,audience,adminName:admin_name,createdAt:created_at')
+    .single();
+
+  if (error) return res.status(500).json({ error: error.message });
 
   if (req.io) {
     req.io.emit('announcement.created', announcement);
@@ -52,7 +59,14 @@ router.post('/', async (req, res) => {
 
 // Delete announcement by id
 router.delete('/:id', async (req, res) => {
-  const announcement = await Announcement.findByIdAndDelete(req.params.id);
+  const { data: announcement, error } = await supabase
+    .from('announcements')
+    .delete()
+    .eq('id', req.params.id)
+    .select('id')
+    .maybeSingle();
+
+  if (error) return res.status(500).json({ error: error.message });
   if (!announcement) {
     return res.status(404).json({ error: 'Announcement not found.' });
   }
