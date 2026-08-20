@@ -4987,12 +4987,12 @@ function renderWardenReturnSchedule(passes) {
                 <div class="flex flex-wrap items-center gap-2 shrink-0 self-end lg:self-center">
                     ${isPending ? `
                         <button onclick="updateGatePassStatus('${pass.id}', 'Approved')" class="px-3.5 py-2 rounded-xl bg-emerald hover:bg-emerald/90 text-white text-xs font-semibold shadow-xs transition-all flex items-center gap-1.5">
-                            <i class="fa-solid fa-check"></i> Approve
+                            <i class="fa-solid fa-check"></i> Approve Departure
                         </button>
                     ` : ''}
-                    ${isReturned ? `
-                        <button onclick="updateGatePassStatus('${pass.id}', 'COMPLETED')" class="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-semibold shadow-xs transition-all flex items-center gap-1.5">
-                            <i class="fa-solid fa-clipboard-check"></i> Verify Return
+                    ${(rawStatus === 'OUTSIDE' || rawStatus === 'OUT' || rawStatus === 'RETURNED' || rawStatus === 'OUTSIDE_NOT_RETURNED') && !pass.wardenVerified ? `
+                        <button onclick="submitWardenVerificationAction('${pass.id}', 'APPROVE')" class="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold shadow-xs transition-all flex items-center gap-1.5">
+                            <i class="fa-solid fa-hotel"></i> Confirm Hostel Arrival
                         </button>
                     ` : ''}
                     <button onclick="viewGatePassDetailsModal('${pass.id}')" class="px-3.5 py-2 rounded-xl border border-border bg-surface-alt hover:bg-surface text-xs font-semibold text-text hover:text-primary transition-all flex items-center gap-1.5">
@@ -5052,10 +5052,15 @@ function viewGatePassDetailsModal(passId) {
         badgeText = rawStatus === 'SECURITY_REJECTED' ? '❌ Security Exit Rejected' : '❌ Pass Rejected';
     }
 
+    const isSecurityExitDone = Boolean(pass.securityVerified || pass.exitTime || isOutside || rawStatus === 'RETURNED' || isCompleted);
+    const isSecurityEntryDone = Boolean(pass.securityReturnVerified || pass.returnTime || rawStatus === 'RETURNED' || isCompleted);
+    const isWardenHostelDone = Boolean(pass.wardenVerified || isCompleted);
+
     const timelineEvents = [
         {
+            phase: 'OUT FROM COLLEGE',
             stage: 'Applied',
-            title: 'Gate Pass Applied',
+            title: '1. Gate Pass Applied (Out Request)',
             time: pass.createdAt ? new Date(pass.createdAt).toLocaleString('en-IN') : '—',
             actor: pass.student || 'Student',
             done: true,
@@ -5063,8 +5068,9 @@ function viewGatePassDetailsModal(passId) {
             bg: 'bg-indigo-500'
         },
         {
-            stage: 'Warden',
-            title: pass.wardenApproval?.status === 'APPROVED' || isApproved ? 'Warden Approved' : isRejected ? 'Warden Rejected' : 'Warden Approval Pending',
+            phase: 'OUT FROM COLLEGE',
+            stage: 'Warden Departure',
+            title: pass.wardenApproval?.status === 'APPROVED' || isApproved ? '2. Warden Approved Departure' : isRejected ? '2. Warden Rejected Departure' : '2. Warden Departure Approval Pending',
             time: pass.approvedAt || pass.wardenApproval?.approvedAt || pass.adminApproval?.approvedAt ? new Date(pass.approvedAt || pass.wardenApproval?.approvedAt || pass.adminApproval?.approvedAt).toLocaleString('en-IN') : 'Pending',
             actor: pass.approvedBy || pass.wardenApproval?.approvedBy || pass.adminApproval?.approvedBy || 'Hostel Warden',
             done: Boolean(pass.approvedAt || pass.wardenApproval?.approvedAt || pass.adminApproval?.approvedAt || isApproved),
@@ -5073,24 +5079,37 @@ function viewGatePassDetailsModal(passId) {
             bg: isApproved ? 'bg-emerald' : 'bg-amber-400'
         },
         {
+            phase: 'OUT FROM COLLEGE',
             stage: 'Security Exit',
-            title: pass.securityVerified ? 'Security Exit Verified' : pass.securityStatus === 'REJECTED' ? 'Security Exit Rejected' : 'Security Gate Scan Pending',
+            title: isSecurityExitDone ? '3. Security Gate Exit Confirmed' : pass.securityStatus === 'REJECTED' ? '3. Security Gate Exit Rejected' : '3. Security Gate Exit Pending',
             time: pass.exitTime || pass.securityVerifiedAt ? new Date(pass.exitTime || pass.securityVerifiedAt).toLocaleString('en-IN') : 'Pending',
             actor: pass.securityName || 'Gate Security',
-            done: Boolean(pass.securityVerified || pass.exitTime),
-            note: pass.securityRejectionReason ? ('Reason: "' + pass.securityRejectionReason + '"') : (pass.exitTime ? 'Student crossed the campus gate' : ''),
-            icon: pass.securityVerified ? 'fa-solid fa-person-walking-arrow-right text-blue-500' : 'fa-solid fa-shield-halved text-slate-400',
-            bg: pass.securityVerified ? 'bg-blue-500' : 'bg-slate-300'
+            done: isSecurityExitDone,
+            note: pass.securityRejectionReason ? ('Reason: "' + pass.securityRejectionReason + '"') : (isSecurityExitDone ? 'Student crossed campus gate to exit' : ''),
+            icon: isSecurityExitDone ? 'fa-solid fa-door-open text-blue-500' : 'fa-solid fa-shield-halved text-slate-400',
+            bg: isSecurityExitDone ? 'bg-blue-500' : 'bg-slate-300'
         },
         {
-            stage: 'Warden Arrival',
-            title: pass.wardenVerified ? 'Hostel Arrival Confirmed' : pass.status === 'OUTSIDE_NOT_RETURNED' ? 'Hostel Arrival Not Verified (OUTSIDE_NOT_RETURNED)' : 'Hostel Arrival Verification Pending',
+            phase: 'RETURN TO COLLEGE',
+            stage: 'Security Entry',
+            title: isSecurityEntryDone ? '4. Security Gate Entry Verified' : isOutsideNotReturned ? '4. Security Gate Entry Overdue' : '4. Security Gate Entry Pending',
+            time: pass.returnTime || pass.securityReturnVerifiedAt ? new Date(pass.returnTime || pass.securityReturnVerifiedAt).toLocaleString('en-IN') : 'Pending',
+            actor: pass.returnVerifiedBy || pass.securityName || 'Gate Security',
+            done: isSecurityEntryDone,
+            note: isSecurityEntryDone ? 'Student entered campus gate and verified by security' : 'Step 4: Gate Security approves campus gate entry first',
+            icon: isSecurityEntryDone ? 'fa-solid fa-shield-check text-emerald' : isOutsideNotReturned ? 'fa-solid fa-triangle-exclamation text-rose-500' : 'fa-solid fa-shield text-slate-400',
+            bg: isSecurityEntryDone ? 'bg-emerald' : isOutsideNotReturned ? 'bg-rose-500' : 'bg-slate-300'
+        },
+        {
+            phase: 'RETURN TO COLLEGE',
+            stage: 'Warden Hostel Arrival',
+            title: isWardenHostelDone ? '5. Hostel Arrival Confirmed' : isOutsideNotReturned ? '5. Hostel Arrival Overdue (Not Returned)' : '5. Hostel Arrival Verification Pending',
             time: pass.hostelArrivalTime || pass.wardenVerifiedAt ? new Date(pass.hostelArrivalTime || pass.wardenVerifiedAt).toLocaleString('en-IN') : 'Pending',
             actor: pass.wardenName || 'Hostel Warden',
-            done: Boolean(pass.wardenVerified || pass.hostelArrivalTime || pass.status === 'OUTSIDE_NOT_RETURNED'),
-            note: pass.wardenRejectionReason ? ('Reason: "' + pass.wardenRejectionReason + '"') : (pass.hostelArrivalTime ? 'Student safely reached the hostel block' : ''),
-            icon: pass.wardenVerified ? 'fa-solid fa-hotel text-emerald' : pass.status === 'OUTSIDE_NOT_RETURNED' ? 'fa-solid fa-triangle-exclamation text-rose-500' : 'fa-solid fa-building-user text-slate-400',
-            bg: pass.wardenVerified ? 'bg-emerald' : pass.status === 'OUTSIDE_NOT_RETURNED' ? 'bg-rose-500' : 'bg-slate-300'
+            done: isWardenHostelDone,
+            note: pass.wardenRejectionReason ? ('Reason: "' + pass.wardenRejectionReason + '"') : (isWardenHostelDone ? 'Warden confirmed student safe arrival at hostel block' : 'Step 5: Hostel Warden confirms final arrival at hostel'),
+            icon: isWardenHostelDone ? 'fa-solid fa-hotel text-emerald' : isOutsideNotReturned ? 'fa-solid fa-triangle-exclamation text-rose-500' : 'fa-solid fa-building-user text-slate-400',
+            bg: isWardenHostelDone ? 'bg-emerald' : isOutsideNotReturned ? 'bg-rose-500' : 'bg-slate-300'
         }
     ];
 
@@ -5118,31 +5137,62 @@ function viewGatePassDetailsModal(passId) {
                 </div>
             </div>
 
+            <!-- Two-Phase Gate Pass Verification Cards -->
             <div class="p-4 rounded-2xl bg-surface-alt border border-border/80 space-y-3">
                 <p class="text-xs font-bold uppercase tracking-wider text-text-secondary flex items-center gap-2">
-                    <i class="fa-solid fa-shield-check text-indigo-600"></i> Two-Step Gate Pass Verification Status
+                    <i class="fa-solid fa-route text-indigo-600"></i> Gate Pass Movement Verification Workflow
                 </p>
-                <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
-                    <div class="p-3 rounded-xl bg-surface border border-border">
-                        <span class="text-[10px] text-text-muted uppercase font-bold block">1. Warden Approval</span>
-                        <p class="font-bold mt-1 ${isApproved ? 'text-emerald' : isRejected ? 'text-danger' : 'text-amber-600'}">
-                            ${isApproved ? '✅ Approved' : isRejected ? '❌ Rejected' : '⏳ Pending'}
-                        </p>
-                        <p class="text-[11px] text-text-muted mt-0.5">${pass.approvedBy ? `By: ${pass.approvedBy}` : 'Awaiting warden review'}</p>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                    <!-- Phase 1: Out From College -->
+                    <div class="p-3.5 rounded-xl bg-surface border border-indigo-500/30 space-y-2">
+                        <div class="flex items-center justify-between border-b border-border/60 pb-1.5">
+                            <span class="text-xs font-bold text-indigo-600 flex items-center gap-1.5">
+                                <i class="fa-solid fa-plane-departure"></i> PHASE 1: OUT FROM COLLEGE
+                            </span>
+                            <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-700">LEAVING PHASE</span>
+                        </div>
+                        <div class="grid grid-cols-2 gap-2 text-xs pt-1">
+                            <div>
+                                <span class="text-[10px] text-text-muted uppercase font-bold block">1. Warden Departure</span>
+                                <p class="font-bold mt-0.5 ${isApproved ? 'text-emerald' : isRejected ? 'text-danger' : 'text-amber-600'}">
+                                    ${isApproved ? '✅ Approved' : isRejected ? '❌ Rejected' : '⏳ Pending'}
+                                </p>
+                                <p class="text-[11px] text-text-muted mt-0.5">${pass.approvedBy ? `By: ${pass.approvedBy}` : 'Warden review'}</p>
+                            </div>
+                            <div>
+                                <span class="text-[10px] text-text-muted uppercase font-bold block">2. Security Gate Exit</span>
+                                <p class="font-bold mt-0.5 ${isSecurityExitDone ? 'text-blue-600' : pass.securityStatus === 'REJECTED' ? 'text-danger' : 'text-amber-600'}">
+                                    ${isSecurityExitDone ? '✅ Gate Exit Verified' : pass.securityStatus === 'REJECTED' ? '❌ Exit Rejected' : '⏳ Pending Exit'}
+                                </p>
+                                <p class="text-[11px] text-text-muted mt-0.5">${pass.exitTime ? `Exit: ${new Date(pass.exitTime).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}` : 'Not crossed yet'}</p>
+                            </div>
+                        </div>
                     </div>
-                    <div class="p-3 rounded-xl bg-surface border border-border">
-                        <span class="text-[10px] text-text-muted uppercase font-bold block">2. Security Gate Exit</span>
-                        <p class="font-bold mt-1 ${pass.securityVerified ? 'text-blue-600' : pass.securityStatus === 'REJECTED' ? 'text-danger' : 'text-amber-600'}">
-                            ${pass.securityVerified ? '✅ Exit Approved' : pass.securityStatus === 'REJECTED' ? '❌ Exit Rejected' : '⏳ Pending Exit'}
-                        </p>
-                        <p class="text-[11px] text-text-muted mt-0.5">${pass.exitTime ? `Exit: ${new Date(pass.exitTime).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}` : 'Not crossed yet'}</p>
-                    </div>
-                    <div class="p-3 rounded-xl bg-surface border border-border">
-                        <span class="text-[10px] text-text-muted uppercase font-bold block">3. Warden Arrival</span>
-                        <p class="font-bold mt-1 ${pass.wardenVerified ? 'text-emerald' : isOutsideNotReturned ? 'text-rose-600' : 'text-slate-500'}">
-                            ${pass.wardenVerified ? '✅ Arrival Confirmed' : isOutsideNotReturned ? '⚠️ Not Returned' : '⏳ Pending Arrival'}
-                        </p>
-                        <p class="text-[11px] text-text-muted mt-0.5">${pass.hostelArrivalTime ? `In: ${new Date(pass.hostelArrivalTime).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}` : isOutsideNotReturned ? pass.wardenRejectionReason || 'Rejected by warden' : 'Awaiting return'}</p>
+
+                    <!-- Phase 2: Return To College -->
+                    <div class="p-3.5 rounded-xl bg-surface border border-emerald/30 space-y-2">
+                        <div class="flex items-center justify-between border-b border-border/60 pb-1.5">
+                            <span class="text-xs font-bold text-emerald-600 flex items-center gap-1.5">
+                                <i class="fa-solid fa-plane-arrival"></i> PHASE 2: RETURN TO COLLEGE
+                            </span>
+                            <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald/10 text-emerald-700">RETURN PHASE</span>
+                        </div>
+                        <div class="grid grid-cols-2 gap-2 text-xs pt-1">
+                            <div>
+                                <span class="text-[10px] text-text-muted uppercase font-bold block">4. Security Gate Entry</span>
+                                <p class="font-bold mt-0.5 ${isSecurityEntryDone ? 'text-emerald' : isOutsideNotReturned ? 'text-rose-600' : 'text-slate-500'}">
+                                    ${isSecurityEntryDone ? '✅ Entry Verified' : isOutsideNotReturned ? '⚠️ Overdue' : '⏳ Pending Entry'}
+                                </p>
+                                <p class="text-[11px] text-text-muted mt-0.5">${pass.returnTime ? `Entry: ${new Date(pass.returnTime).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}` : 'Gate security scan'}</p>
+                            </div>
+                            <div>
+                                <span class="text-[10px] text-text-muted uppercase font-bold block">5. Warden Hostel Arrival</span>
+                                <p class="font-bold mt-0.5 ${isWardenHostelDone ? 'text-emerald' : isOutsideNotReturned ? 'text-rose-600' : 'text-slate-500'}">
+                                    ${isWardenHostelDone ? '✅ Hostel Confirmed' : isOutsideNotReturned ? '⚠️ Overdue' : '⏳ Pending Arrival'}
+                                </p>
+                                <p class="text-[11px] text-text-muted mt-0.5">${pass.hostelArrivalTime ? `In: ${new Date(pass.hostelArrivalTime).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}` : 'Warden hostel check'}</p>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -5173,22 +5223,31 @@ function viewGatePassDetailsModal(passId) {
 
             <div class="p-5 rounded-2xl bg-surface border border-border space-y-4">
                 <h4 class="font-bold text-sm text-text flex items-center gap-2">
-                    <i class="fa-solid fa-timeline text-indigo-600"></i> Gate Pass Movement Timeline
+                    <i class="fa-solid fa-timeline text-indigo-600"></i> Gate Pass Movement Timeline (Out & Return Phases)
                 </h4>
                 <div class="relative pl-6 space-y-5 before:absolute before:left-2.5 before:top-2 before:bottom-2 before:w-0.5 before:bg-border">
-                    ${timelineEvents.map((t) => `
+                    ${timelineEvents.map((t, idx) => `
+                        ${idx === 0 ? `
+                            <div class="text-[11px] font-bold text-indigo-600 uppercase tracking-wider bg-indigo-500/10 px-3 py-1 rounded-lg border border-indigo-500/20 w-fit mb-2 flex items-center gap-1.5">
+                                <i class="fa-solid fa-plane-departure"></i> PHASE 1: OUT FROM COLLEGE
+                            </div>
+                        ` : idx === 3 ? `
+                            <div class="text-[11px] font-bold text-emerald-600 uppercase tracking-wider bg-emerald-500/10 px-3 py-1 rounded-lg border border-emerald-500/20 w-fit mt-4 mb-2 flex items-center gap-1.5">
+                                <i class="fa-solid fa-plane-arrival"></i> PHASE 2: RETURN TO COLLEGE
+                            </div>
+                        ` : ''}
                         <div class="relative flex items-start gap-3">
                             <div class="absolute -left-6 top-1 w-5 h-5 rounded-full ${t.bg} text-white flex items-center justify-center text-[9px] shadow-xs ring-4 ring-surface">
-                                <i class="${t.icon.includes('check') ? 'fa-solid fa-check' : 'fa-solid fa-circle'}"></i>
+                                <i class="${t.done ? 'fa-solid fa-check' : 'fa-solid fa-circle'}"></i>
                             </div>
                             <div class="space-y-0.5">
                                 <div class="flex flex-wrap items-center gap-2">
                                     <span class="font-bold text-xs text-text">${t.title}</span>
-                                    <span class="text-[10px] text-text-muted font-mono">${t.time}</span>
+                                    <span class="text-[10px] ${t.done ? 'text-emerald-600 font-bold' : 'text-text-muted font-mono'}">${t.time}</span>
                                 </div>
                                 <p class="text-xs text-text-secondary">Actor: <strong class="text-text">${t.actor}</strong></p>
                                 ${t.cert ? `<p class="text-[11px] font-mono text-emerald-600">Certificate: ${t.cert}</p>` : ''}
-                                ${t.note ? `<p class="text-[11px] text-rose-600 font-medium">${t.note}</p>` : ''}
+                                ${t.note ? `<p class="text-[11px] ${t.done ? 'text-emerald-600 font-medium' : 'text-rose-600 font-medium'}">${t.note}</p>` : ''}
                             </div>
                         </div>
                     `).join('')}
@@ -5575,12 +5634,21 @@ function renderScanPreviewCard(pass, role, token) {
                 </div>
             ` : isSecurity ? `
                 <div class="space-y-2 pt-2 border-t border-border">
-                    <button onclick="submitSecurityVerificationAction('${token}', 'APPROVE')" class="w-full py-3.5 rounded-xl bg-emerald hover:bg-emerald/90 text-white font-bold text-sm shadow-md flex items-center justify-center gap-2 transition-all transform hover:-translate-y-0.5">
-                        <i class="fa-solid fa-door-open text-base"></i> APPROVE EXIT (Student Crossing Gate)
-                    </button>
-                    <button onclick="promptSecurityRejection('${token}')" class="w-full py-2.5 rounded-xl bg-rose-600/10 hover:bg-rose-600 hover:text-white text-rose-600 font-semibold text-xs transition-all flex items-center justify-center gap-2">
-                        <i class="fa-solid fa-ban"></i> REJECT EXIT
-                    </button>
+                    ${String(pass.status || '').toUpperCase() === 'OUTSIDE' || String(pass.status || '').toUpperCase() === 'OUT' || (pass.securityVerified && !pass.wardenVerified) ? `
+                        <button onclick="submitSecurityVerificationAction('${token}', 'APPROVE')" class="w-full py-3.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm shadow-md flex items-center justify-center gap-2 transition-all transform hover:-translate-y-0.5">
+                            <i class="fa-solid fa-plane-arrival text-base"></i> ACCEPT RETURN (Student Entering Gate)
+                        </button>
+                        <button onclick="promptSecurityRejection('${token}')" class="w-full py-2.5 rounded-xl bg-rose-600/10 hover:bg-rose-600 hover:text-white text-rose-600 font-semibold text-xs transition-all flex items-center justify-center gap-2">
+                            <i class="fa-solid fa-ban"></i> REJECT RETURN
+                        </button>
+                    ` : `
+                        <button onclick="submitSecurityVerificationAction('${token}', 'APPROVE')" class="w-full py-3.5 rounded-xl bg-emerald hover:bg-emerald/90 text-white font-bold text-sm shadow-md flex items-center justify-center gap-2 transition-all transform hover:-translate-y-0.5">
+                            <i class="fa-solid fa-door-open text-base"></i> APPROVE EXIT (Student Crossing Gate)
+                        </button>
+                        <button onclick="promptSecurityRejection('${token}')" class="w-full py-2.5 rounded-xl bg-rose-600/10 hover:bg-rose-600 hover:text-white text-rose-600 font-semibold text-xs transition-all flex items-center justify-center gap-2">
+                            <i class="fa-solid fa-ban"></i> REJECT EXIT
+                        </button>
+                    `}
                 </div>
             ` : ''}
         </div>
@@ -6052,6 +6120,13 @@ function renderSecurityDashboard() {
                     ${isReadyForExit ? `
                         <button onclick="submitSecurityVerificationAction('${pass.id}', 'APPROVE')" class="px-4 py-2 rounded-xl bg-emerald hover:bg-emerald/90 text-white text-xs font-bold shadow-xs transition-all flex items-center gap-1.5">
                             <i class="fa-solid fa-door-open"></i> Approve Exit
+                        </button>
+                        <button onclick="promptSecurityRejection('${pass.id}')" class="px-3 py-2 rounded-xl bg-rose-600/10 hover:bg-rose-600 hover:text-white text-rose-600 text-xs font-semibold transition-all">
+                            Reject
+                        </button>
+                    ` : isOut ? `
+                        <button onclick="submitSecurityVerificationAction('${pass.id}', 'APPROVE')" class="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-xs transition-all flex items-center gap-1.5">
+                            <i class="fa-solid fa-plane-arrival"></i> Accept Return
                         </button>
                         <button onclick="promptSecurityRejection('${pass.id}')" class="px-3 py-2 rounded-xl bg-rose-600/10 hover:bg-rose-600 hover:text-white text-rose-600 text-xs font-semibold transition-all">
                             Reject
@@ -7575,15 +7650,21 @@ function setupGatePassDateValidation() {
     const returnDateInput = document.getElementById('gatePassReturnDate');
     if (!gateDateInput || !returnDateInput) return;
 
+    const today = new Date();
+    const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+
+    gateDateInput.min = todayStr;
+
     const syncReturnDateMin = () => {
-        const selectedGateDate = gateDateInput.value;
-        returnDateInput.min = selectedGateDate || '';
-        if (selectedGateDate && returnDateInput.value && returnDateInput.value < selectedGateDate) {
+        const selectedGateDate = gateDateInput.value || todayStr;
+        returnDateInput.min = selectedGateDate;
+        if (returnDateInput.value && returnDateInput.value < selectedGateDate) {
             returnDateInput.value = selectedGateDate;
         }
     };
 
     gateDateInput.addEventListener('change', syncReturnDateMin);
+    gateDateInput.addEventListener('input', syncReturnDateMin);
     syncReturnDateMin();
 }
 
@@ -7699,6 +7780,8 @@ function renderCustomDatePickerContent() {
     
     const today = new Date();
     const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    const minDateStr = activeDatePickerInput.min || '';
+    const maxDateStr = activeDatePickerInput.max || '';
 
     let selectedStr = activeDatePickerInput.value || '';
     if (selectedStr && !selectedStr.match(/^\d{4}-\d{2}-\d{2}$/)) {
@@ -7722,17 +7805,21 @@ function renderCustomDatePickerContent() {
         const dayStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
         const isToday = dayStr === todayStr;
         const isSelected = dayStr === selectedStr;
+        const isDisabled = (minDateStr && dayStr < minDateStr) || (maxDateStr && dayStr > maxDateStr);
 
-        let dayClass = 'cursor-pointer py-1.5 text-xs font-medium text-text rounded-xl transition-all flex items-center justify-center ';
-        if (isSelected) {
-            dayClass += 'bg-primary text-white font-bold shadow-md scale-105';
-        } else if (isToday) {
-            dayClass += 'ring-1 ring-primary text-primary font-bold hover:bg-primary/10';
+        if (isDisabled) {
+            daysHtml += `<div class="py-1.5 text-xs text-text-secondary/30 font-normal cursor-not-allowed opacity-30 text-center select-none" title="Date unavailable">${day}</div>`;
         } else {
-            dayClass += 'hover:bg-primary/10 hover:text-primary';
+            let dayClass = 'cursor-pointer py-1.5 text-xs font-medium text-text rounded-xl transition-all flex items-center justify-center ';
+            if (isSelected) {
+                dayClass += 'bg-primary text-white font-bold shadow-md scale-105';
+            } else if (isToday) {
+                dayClass += 'ring-1 ring-primary text-primary font-bold hover:bg-primary/10';
+            } else {
+                dayClass += 'hover:bg-primary/10 hover:text-primary';
+            }
+            daysHtml += `<div onclick="selectCustomDate('${dayStr}')" class="${dayClass}">${day}</div>`;
         }
-
-        daysHtml += `<div onclick="selectCustomDate('${dayStr}')" class="${dayClass}">${day}</div>`;
     }
 
     activeDatePickerPopover.innerHTML = `

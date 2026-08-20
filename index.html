@@ -1326,11 +1326,11 @@
                     <div class="grid sm:grid-cols-2 gap-6">
                         <div>
                             <label class="block text-sm font-medium mb-2">Student Name</label>
-                            <input id="gatePassStudentName" type="text" placeholder="Enter student name" class="input-focus w-full pl-4 pr-4 py-3 rounded-xl border border-border bg-surface-alt text-sm">
+                            <input id="gatePassStudentName" type="text" placeholder="Enter student name (Letters only)" oninput="this.value = this.value.replace(/[^a-zA-Z\s]/g, '')" class="input-focus w-full pl-4 pr-4 py-3 rounded-xl border border-border bg-surface-alt text-sm">
                         </div>
                         <div>
                             <label class="block text-sm font-medium mb-2">Register Number</label>
-                            <input id="gatePassRegistrationNumber" type="text" placeholder="Enter register number" class="input-focus w-full pl-4 pr-4 py-3 rounded-xl border border-border bg-surface-alt text-sm">
+                            <input id="gatePassRegistrationNumber" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="Enter register number (Numbers only)" oninput="this.value = this.value.replace(/\D/g, '')" class="input-focus w-full pl-4 pr-4 py-3 rounded-xl border border-border bg-surface-alt text-sm">
                         </div>
                     </div>
                     <div class="grid sm:grid-cols-2 gap-6">
@@ -1343,7 +1343,7 @@
                         </div>
                         <div>
                             <label class="block text-sm font-medium mb-2">Room Number</label>
-                            <input id="gatePassRoomNumber" type="text" placeholder="Enter room number" class="input-focus w-full pl-4 pr-4 py-3 rounded-xl border border-border bg-surface-alt text-sm">
+                            <input id="gatePassRoomNumber" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="Enter room number (Numbers only)" oninput="this.value = this.value.replace(/\D/g, '')" class="input-focus w-full pl-4 pr-4 py-3 rounded-xl border border-border bg-surface-alt text-sm">
                         </div>
                     </div>
                     <!-- Dynamic Assigned Warden Info Banner -->

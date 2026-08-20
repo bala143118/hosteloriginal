@@ -1589,66 +1589,114 @@ app.post('/api/gatepass/security/verify', (req, res) => {
 
   if (action === 'APPROVE') {
     const timestamp = new Date().toISOString();
-    gatePass.securityVerified = true;
-    gatePass.securityStatus = 'APPROVED';
-    gatePass.securityName = guardName;
-    gatePass.securityVerifiedAt = timestamp;
-    gatePass.exitTime = timestamp;
-    gatePass.outTime = timestamp;
-    gatePass.gateCrossed = true;
-    gatePass.qrUsedForSecurity = true;
-    gatePass.status = 'OUTSIDE';
-    gatePass.workflowStatus = 'OUTSIDE';
-    gatePass.currentStatus = 'OUTSIDE';
-    gatePass.securityVerification = {
-      status: 'APPROVED',
-      verifiedBy: guardName,
-      verifiedAt: timestamp,
-      rejectionReason: ''
-    };
+    const isCurrentlyOut = String(gatePass.status || '').toUpperCase() === 'OUTSIDE' || String(gatePass.status || '').toUpperCase() === 'OUT';
 
-    addGatePassTimelineEvent(gatePass, 'SECURITY_APPROVED', 'Security Exit Approved', `Student confirmed as having crossed the gate at ${location}.`, guardName, 'security');
-    addGatePassAudit(data, gatePass, 'Security Approved Exit', { id: guardId, name: guardName, role: 'security', ip: req.ip }, location);
+    if (isCurrentlyOut) {
+      // 🛬 STEP 4: STUDENT IS RETURNING TO COLLEGE GATE (SECURITY RETURN APPROVAL)
+      gatePass.securityReturnVerified = true;
+      gatePass.securityReturnVerifiedBy = guardName;
+      gatePass.securityReturnVerifiedAt = timestamp;
+      gatePass.returnTime = timestamp;
+      gatePass.status = 'RETURNED';
+      gatePass.workflowStatus = 'RETURNED';
+      gatePass.currentStatus = 'RETURNED';
+      gatePass.securityReturnVerification = {
+        status: 'APPROVED',
+        verifiedBy: guardName,
+        verifiedAt: timestamp,
+        rejectionReason: ''
+      };
 
-    data.gatePassScanLogs = Array.isArray(data.gatePassScanLogs) ? data.gatePassScanLogs : [];
-    data.gatePassScanLogs.unshift({
-      id: `GPS-${Date.now()}-${crypto.randomBytes(2).toString('hex')}`,
-      gatePassId: gatePass.id,
-      guardId,
-      guardName,
-      scanTime: timestamp,
-      scanType: 'OUT',
-      location,
-      device: String(req.body.device || '').slice(0, 100),
-      remarks: 'Exit verified by security officer'
-    });
+      addGatePassTimelineEvent(gatePass, 'SECURITY_RETURN_APPROVED', 'Security Gate Entry Verified', `Student entered campus gate at ${location} and verified by security. Awaiting warden hostel arrival approval.`, guardName, 'security');
+      addGatePassAudit(data, gatePass, 'Security Approved Gate Entry', { id: guardId, name: guardName, role: 'security', ip: req.ip }, location);
 
-    createGatePassNotification(data, gatePass, 'gate-pass-out', 'Exit Verified by Security', `Your campus exit was verified at ${location}. Please return by ${gatePass.returnDate}.`);
-    createGatePassNotification(data, gatePass, 'student-outside', `Student Outside: ${gatePass.student}`, `Student ${gatePass.student} (Room ${gatePass.roomNumber}) has crossed the gate at ${new Date(timestamp).toLocaleTimeString('en-IN')}.`, 'Warden');
+      data.gatePassScanLogs = Array.isArray(data.gatePassScanLogs) ? data.gatePassScanLogs : [];
+      data.gatePassScanLogs.unshift({
+        id: `GPS-${Date.now()}-${crypto.randomBytes(2).toString('hex')}`,
+        gatePassId: gatePass.id,
+        guardId,
+        guardName,
+        scanTime: timestamp,
+        scanType: 'IN',
+        location,
+        device: String(req.body.device || '').slice(0, 100),
+        remarks: 'Campus gate entry verified by security officer'
+      });
 
-    // Telegram Notification
-    if (getTelegramConfig()) {
-      try {
-        const msg = formatTelegramSecurityExit({
-          student: gatePass.student,
-          registrationNumber: gatePass.registrationNumber,
-          exitTime: timestamp,
-          securityName: guardName
-        });
-        sendTelegramMessage(msg).catch((e) => console.warn('Telegram security exit send warning:', e.message));
-      } catch (err) {
-        console.warn('Telegram security format error:', err.message);
+      createGatePassNotification(data, gatePass, 'gate-pass-returned', 'Gate Entry Verified by Security', `Your return through the campus gate was verified at ${location}. Please report to hostel warden to complete pass.`);
+      createGatePassNotification(data, gatePass, 'student-returned-gate', `Student Returned to Campus: ${gatePass.student}`, `Student ${gatePass.student} (Room ${gatePass.roomNumber}) has entered through campus gate at ${new Date(timestamp).toLocaleTimeString('en-IN')}. Please verify hostel arrival.`, 'Warden');
+
+      writeData(data);
+      if (req.io) req.io.emit('gate-pass.updated', gatePass);
+
+      return res.json({
+        success: true,
+        message: 'GATE ENTRY VERIFIED BY SECURITY. Student has entered campus gate. Awaiting warden hostel approval.',
+        gatePass
+      });
+    } else {
+      // 🛫 STUDENT IS LEAVING COLLEGE GATE (SECURITY EXIT APPROVAL)
+      gatePass.securityVerified = true;
+      gatePass.securityStatus = 'APPROVED';
+      gatePass.securityName = guardName;
+      gatePass.securityVerifiedAt = timestamp;
+      gatePass.exitTime = timestamp;
+      gatePass.outTime = timestamp;
+      gatePass.gateCrossed = true;
+      gatePass.qrUsedForSecurity = true;
+      gatePass.status = 'OUTSIDE';
+      gatePass.workflowStatus = 'OUTSIDE';
+      gatePass.currentStatus = 'OUTSIDE';
+      gatePass.securityVerification = {
+        status: 'APPROVED',
+        verifiedBy: guardName,
+        verifiedAt: timestamp,
+        rejectionReason: ''
+      };
+
+      addGatePassTimelineEvent(gatePass, 'SECURITY_APPROVED', 'Security Exit Approved', `Student confirmed as having crossed gate to leave college at ${location}.`, guardName, 'security');
+      addGatePassAudit(data, gatePass, 'Security Approved Exit', { id: guardId, name: guardName, role: 'security', ip: req.ip }, location);
+
+      data.gatePassScanLogs = Array.isArray(data.gatePassScanLogs) ? data.gatePassScanLogs : [];
+      data.gatePassScanLogs.unshift({
+        id: `GPS-${Date.now()}-${crypto.randomBytes(2).toString('hex')}`,
+        gatePassId: gatePass.id,
+        guardId,
+        guardName,
+        scanTime: timestamp,
+        scanType: 'OUT',
+        location,
+        device: String(req.body.device || '').slice(0, 100),
+        remarks: 'Exit verified by security officer'
+      });
+
+      createGatePassNotification(data, gatePass, 'gate-pass-out', 'Exit Verified by Security', `Your campus exit was verified at ${location}. Please return by ${gatePass.returnDate}.`);
+      createGatePassNotification(data, gatePass, 'student-outside', `Student Outside: ${gatePass.student}`, `Student ${gatePass.student} (Room ${gatePass.roomNumber}) has crossed the gate at ${new Date(timestamp).toLocaleTimeString('en-IN')}.`, 'Warden');
+
+      // Telegram Notification
+      if (getTelegramConfig()) {
+        try {
+          const msg = formatTelegramSecurityExit({
+            student: gatePass.student,
+            registrationNumber: gatePass.registrationNumber,
+            exitTime: timestamp,
+            securityName: guardName
+          });
+          sendTelegramMessage(msg).catch((e) => console.warn('Telegram security exit send warning:', e.message));
+        } catch (err) {
+          console.warn('Telegram security format error:', err.message);
+        }
       }
+
+      writeData(data);
+      if (req.io) req.io.emit('gate-pass.updated', gatePass);
+
+      return res.json({
+        success: true,
+        message: 'GATE EXIT APPROVED. Student crossed gate and is now OUTSIDE campus.',
+        gatePass
+      });
     }
-
-    writeData(data);
-    if (req.io) req.io.emit('gate-pass.updated', gatePass);
-
-    return res.json({
-      success: true,
-      message: 'EXIT APPROVED. Student has successfully crossed the gate.',
-      gatePass
-    });
   } else {
     // REJECT EXIT
     const timestamp = new Date().toISOString();
