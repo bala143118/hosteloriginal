@@ -3953,6 +3953,10 @@ function toggleDarkMode() {
 
 function selectRole(role) {
     selectedLoginRole = role;
+    const roleSelect = document.getElementById('loginRole');
+    if (roleSelect && role) {
+        roleSelect.value = role;
+    }
     document.querySelectorAll('.role-btn').forEach(btn => {
         btn.classList.remove('active', 'border-primary', 'bg-primary/5', 'text-primary');
         btn.classList.add('border-border', 'text-text-secondary');
@@ -3982,7 +3986,14 @@ async function handleLogin(e) {
     e.preventDefault();
     const email = document.getElementById('loginEmail').value.trim();
     const password = document.getElementById('loginPassword').value;
-    const role = selectedLoginRole;
+    const roleSelect = document.getElementById('loginRole');
+    const role = (roleSelect && roleSelect.value) ? roleSelect.value : selectedLoginRole;
+    
+    if (!role) {
+        showToast('Please select your role.', 'warning');
+        return;
+    }
+    
     console.debug('Login attempt payload:', { email, role });
     if (!email || !password) {
         showToast('Please enter your user ID or email and password.', 'warning');
@@ -6825,8 +6836,11 @@ async function saveNightRestriction(event) {
 function showModal(title, content) {
     const overlay = document.getElementById('modalOverlay');
     const modalContent = document.getElementById('modalContent');
+    if (!overlay || !modalContent) return;
     modalContent.innerHTML = '<div class="p-6 border-b border-border flex items-center justify-between"><h3 class="font-semibold text-lg">' + title + '</h3><button onclick="closeModal()" class="w-8 h-8 rounded-lg hover:bg-surface-alt flex items-center justify-center transition-all"><i class="fa-solid fa-xmark text-text-secondary"></i></button></div><div class="p-6">' + content + '</div>';
     modalContent.classList.toggle('night-restriction-modal', title.includes('Night Restriction') || title.includes('Hostel CCTV Live Monitoring'));
+    overlay.classList.remove('hidden');
+    void overlay.offsetWidth;
     overlay.classList.add('active');
 }
 
@@ -8885,7 +8899,15 @@ function closeModal() {
     }
     releaseCCTVVideoUpload();
     cctvVideoElement = null;
-    document.getElementById('modalOverlay').classList.remove('active');
+    const overlay = document.getElementById('modalOverlay');
+    if (overlay) {
+        overlay.classList.remove('active');
+        setTimeout(() => {
+            if (overlay && !overlay.classList.contains('active')) {
+                overlay.classList.add('hidden');
+            }
+        }, 250);
+    }
 }
 
 function showLoading() {
