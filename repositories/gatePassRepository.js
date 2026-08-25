@@ -32,26 +32,32 @@ class GatePassRepository {
     async create(pass) {
         const client = getSupabaseClient();
         if (!client) return null;
+
+        const depDate = pass.departureDate || pass.date || (pass.fromDate ? pass.fromDate.slice(0, 10) : new Date().toISOString().slice(0, 10));
+        const depTime = pass.departureTime || pass.time || (pass.fromTime ? pass.fromTime.slice(0, 8) : '09:00:00');
+        const retDate = pass.expectedReturnDate || pass.returnDate || (pass.toDate ? pass.toDate.slice(0, 10) : depDate);
+        const retTime = pass.expectedReturnTime || pass.returnTime || (pass.toTime ? pass.toTime.slice(0, 8) : '18:00:00');
+
         const payload = {
-            id: pass.id,
-            student_id: pass.studentId || pass.userId,
-            student_name: pass.studentName || pass.name,
+            id: pass.id || 'GP-' + Date.now(),
+            student_id: pass.studentId || pass.userId || pass.registrationNumber || 'STU-001',
+            student_name: pass.studentName || pass.student || pass.name || 'Resident Student',
             registration_number: pass.registrationNumber || '',
-            email: pass.email || pass.studentEmail,
-            room_number: pass.roomNumber || pass.room,
-            block: pass.block,
-            reason: pass.reason,
-            destination: pass.destination,
+            email: pass.email || pass.studentEmail || 'student@hostelfix.edu',
+            room_number: pass.roomNumber || pass.room || '101',
+            block: pass.block || pass.hostelBlock || 'Block A',
+            reason: pass.reason || 'Personal Visit',
+            destination: pass.destination || 'Home',
             parent_phone: pass.parentPhone || '',
-            student_phone: pass.studentPhone || '',
-            departure_date: pass.departureDate || pass.date,
-            departure_time: pass.departureTime || pass.time,
-            expected_return_date: pass.expectedReturnDate || pass.returnDate,
-            expected_return_time: pass.expectedReturnTime || pass.returnTime,
-            status: pass.status || 'Pending',
-            signature: pass.signature || '',
-            qr_token: pass.qrToken || '',
-            student_photo: pass.studentPhoto || ''
+            student_phone: pass.studentPhone || pass.phone || '',
+            departure_date: depDate,
+            departure_time: depTime.length === 5 ? depTime + ':00' : depTime,
+            expected_return_date: retDate,
+            expected_return_time: retTime.length === 5 ? retTime + ':00' : retTime,
+            status: ['Pending', 'Approved', 'Rejected', 'Out', 'Returned', 'Overdue'].includes(pass.status) ? pass.status : 'Pending',
+            signature: pass.signature || pass.digitalSignature || '',
+            qr_token: pass.qrToken || pass.qrCode || ('QR-' + (pass.id || Date.now())),
+            student_photo: pass.studentPhoto || pass.photo || ''
         };
         const { data, error } = await client.from(this.tableName).insert([payload]).select().single();
         if (error) throw error;
@@ -81,10 +87,12 @@ class GatePassRepository {
             id: row.id,
             studentId: row.student_id,
             studentName: row.student_name,
+            student: row.student_name,
             registrationNumber: row.registration_number,
             email: row.email,
             roomNumber: row.room_number,
             block: row.block,
+            hostelBlock: row.block,
             reason: row.reason,
             destination: row.destination,
             parentPhone: row.parent_phone,
@@ -100,6 +108,7 @@ class GatePassRepository {
             actualExitAt: row.actual_exit_at,
             actualEntryAt: row.actual_entry_at,
             signature: row.signature,
+            digitalSignature: row.signature,
             qrToken: row.qr_token,
             studentPhoto: row.student_photo,
             createdAt: row.created_at,
