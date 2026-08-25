@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",
-    "test": "node tests/serverless.test.js"
+    "test": "node tests/serverless.test.js && node tests/repository.test.js",
+    "test:repo": "node tests/repository.test.js"
   },
   "keywords": [
     "hostel-management",
