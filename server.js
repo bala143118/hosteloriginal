@@ -1,3 +1,5 @@
+require('dotenv').config();
+
 const express = require('express');
 const path = require('path');
 const fs = require('fs');
@@ -3142,8 +3144,15 @@ io.on('connection', (socket) => {
 const port = process.env.PORT || 5000;
 
 if (require.main === module) {
-  server.listen(port, () => {
+  server.listen(port, async () => {
     console.log(`HostelFix Server is running at http://localhost:${port}`);
+    try {
+      const { isSupabaseHealthy } = require('./repositories/supabaseClient');
+      const connected = await isSupabaseHealthy();
+      console.log(connected ? '✅ Supabase connected' : 'ℹ️ Using local data storage');
+    } catch (e) {
+      // safe fallback
+    }
   });
 }
 
