@@ -644,7 +644,8 @@ function navigateTo(pageId, options = {}) {
         target.classList.add('active');
         window.scrollTo(0, 0);
     }
-    document.getElementById('mobileMenu').classList.add('hidden');
+    const mobileMenu = document.getElementById('mobileMenu');
+    if (mobileMenu) mobileMenu.classList.add('hidden');
     document.querySelectorAll('.sidebar-mobile').forEach(s => s.classList.remove('open'));
     document.querySelectorAll('[id^="sidebarOverlay"]').forEach(o => o.classList.add('hidden'));
 
@@ -3287,6 +3288,17 @@ function findTechnicianByIdentifier(identifier) {
 }
 
 document.addEventListener('click', (event) => {
+    const navBtn = event.target.closest('#heroSignInBtn, [data-navigate], [onclick*="navigateTo"]');
+    if (navBtn) {
+        const pageAttr = navBtn.dataset?.navigate;
+        const onclickAttr = navBtn.getAttribute('onclick') || '';
+        const match = onclickAttr.match(/navigateTo\(['"]([^'"]+)['"]\)/);
+        const pageId = pageAttr || (match ? match[1] : null) || (navBtn.id === 'heroSignInBtn' ? 'login' : null);
+        if (pageId && typeof navigateTo === 'function') {
+            navigateTo(pageId);
+        }
+    }
+
     const button = event.target.closest('[data-technician-action]');
     if (!button) return;
 
