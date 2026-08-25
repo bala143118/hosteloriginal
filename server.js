@@ -2714,6 +2714,118 @@ app.get('/api/telegram-status', (req, res) => {
   res.json({ configured: Boolean(getTelegramConfig(data.adminSettings)) });
 });
 
+// ==========================================
+// ANNOUNCEMENTS & STUDENT NOTIFICATIONS API (SUPABASE BACKED)
+// ==========================================
+app.get('/api/announcements', async (req, res) => {
+  try {
+    const { announcementRepository } = require('./repositories');
+    const announcements = await announcementRepository.getAll();
+    if (announcements && announcements.length > 0) {
+      return res.json(announcements);
+    }
+  } catch (err) {
+    console.warn('[Announcements] Supabase fetch fallback to local:', err.message);
+  }
+  const data = readData();
+  const list = Array.isArray(data.announcements) ? data.announcements : [];
+  res.json(list.slice().sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0)));
+});
+
+app.get('/api/student-notifications', async (req, res) => {
+  const { email, block, targetEmail } = req.query;
+  const filterEmail = String(email || targetEmail || '').trim().toLowerCase();
+  const filterBlock = String(block || '').trim().toLowerCase();
+
+  try {
+    const { announcementRepository } = require('./repositories');
+    const all = await announcementRepository.getAll();
+    if (all && all.length > 0) {
+      const filtered = all.filter(a => {
+        const aud = String(a.audience || '').toLowerCase();
+        if (aud === 'all students' || aud === 'all') return true;
+        if (filterBlock && aud.includes(filterBlock)) return true;
+        if (filterEmail && a.targetEmail && a.targetEmail.toLowerCase() === filterEmail) return true;
+        return false;
+      });
+      return res.json(filtered);
+    }
+  } catch (err) {
+    console.warn('[Student Notifications] Supabase fetch fallback to local:', err.message);
+  }
+
+  const data = readData();
+  const list = Array.isArray(data.announcements) ? data.announcements : [];
+  const filtered = list.filter(a => {
+    const aud = String(a.audience || '').toLowerCase();
+    if (aud === 'all students' || aud === 'all') return true;
+    if (filterBlock && aud.includes(filterBlock)) return true;
+    if (filterEmail && a.targetEmail && a.targetEmail.toLowerCase() === filterEmail) return true;
+    return false;
+  });
+  res.json(filtered.slice().sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0)));
+});
+
+app.post('/api/announcements', async (req, res) => {
+  const { title, message, priority, audience, adminName, targetEmail } = req.body;
+  if (!title || !message) {
+    return res.status(400).json({ error: 'Title and message are required.' });
+  }
+
+  const announcementPayload = {
+    id: `ANN-${Date.now()}`,
+    title: String(title).trim(),
+    message: String(message).trim(),
+    priority: ['Normal', 'Important', 'Emergency'].includes(priority) ? priority : 'Normal',
+    audience: audience || 'All Students',
+    adminName: adminName || 'Hostel Administration',
+    targetEmail: targetEmail || '',
+    createdAt: new Date().toISOString()
+  };
+
+  // 1. Persist to Supabase
+  let savedAnnouncement = null;
+  try {
+    const { announcementRepository } = require('./repositories');
+    savedAnnouncement = await announcementRepository.create(announcementPayload);
+  } catch (err) {
+    console.warn('[Announcements] Supabase insert fallback to local:', err.message);
+  }
+
+  // 2. Persist to local db.json for backup
+  const data = readData();
+  data.announcements = Array.isArray(data.announcements) ? data.announcements : [];
+  data.announcements.unshift(savedAnnouncement || announcementPayload);
+  writeData(data);
+
+  const finalAnnouncement = savedAnnouncement || announcementPayload;
+
+  // 3. Emit real-time Socket.IO event to all connected clients
+  io.emit('announcement.created', finalAnnouncement);
+
+  res.status(201).json(finalAnnouncement);
+});
+
+app.delete('/api/announcements/:id', async (req, res) => {
+  const data = readData();
+  const id = req.params.id;
+  const idx = (data.announcements || []).findIndex(a => a.id === id);
+  if (idx !== -1) {
+    data.announcements.splice(idx, 1);
+    writeData(data);
+  }
+  try {
+    const { getSupabaseClient } = require('./repositories/supabaseClient');
+    const client = getSupabaseClient();
+    if (client) {
+      await client.from('announcements').delete().eq('id', id);
+    }
+  } catch (e) {
+    // silent
+  }
+  res.json({ success: true, message: 'Announcement deleted successfully' });
+});
+
 app.get('/api/inventory', (req, res) => {
   const data = readData();
   const defaultInventory = [
