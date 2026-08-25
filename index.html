@@ -4,9 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Smart Hostel Maintenance Management System</title>
-    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/7.3.0/css/all.min.css">
-    <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+    <script src="public/vendor/tailwindcss.js" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4';"></script>
+    <link rel="stylesheet" href="public/vendor/fontawesome.css" onerror="this.onerror=null;this.href='https://cdnjs.cloudflare.com/ajax/libs/font-awesome/7.3.0/css/all.min.css';">
+    <script src="public/vendor/html5-qrcode.js" onerror="this.onerror=null;this.src='https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js';"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <style type="text/tailwindcss">
@@ -454,11 +454,11 @@
     <main class="pt-20 min-h-screen">
         <!-- ===== LANDING PAGE ===== -->
         <div id="page-landing" class="page active">
-            <section class="hero-gradient min-h-[90vh] flex items-center relative overflow-hidden">
-                <div class="absolute top-20 left-10 w-72 h-72 bg-primary/10 rounded-full blur-3xl"></div>
-                <div class="absolute bottom-20 right-10 w-96 h-96 bg-emerald/10 rounded-full blur-3xl"></div>
-                <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-primary/5 rounded-full blur-3xl"></div>
-                <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20 relative z-10">
+            <section class="hero-gradient min-h-[90vh] flex items-center relative overflow-hidden pt-6">
+                <div class="absolute top-20 left-10 w-72 h-72 bg-primary/10 rounded-full blur-3xl pointer-events-none"></div>
+                <div class="absolute bottom-20 right-10 w-96 h-96 bg-emerald/10 rounded-full blur-3xl pointer-events-none"></div>
+                <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-primary/5 rounded-full blur-3xl pointer-events-none"></div>
+                <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16 sm:py-20 relative z-10">
                     <div class="grid lg:grid-cols-2 gap-12 items-center">
                         <div class="animate-fade-in">
                             <div class="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary/10 text-primary text-sm font-medium mb-6">
@@ -471,7 +471,7 @@
                                 Report hostel maintenance issues instantly and track repairs in real time. A seamless experience for students, technicians, and administrators.
                             </p>
                             <div class="flex flex-wrap gap-4">
-                                <button onclick="navigateTo('login')" class="btn-primary px-8 py-4 rounded-2xl text-white font-semibold text-base flex items-center gap-2 shadow-lg shadow-primary/25 hover:-translate-y-0.5 transition-all">
+                                <button id="heroSignInBtn" onclick="navigateTo('login')" class="btn-primary px-8 py-4 rounded-2xl text-white font-semibold text-base flex items-center gap-2 shadow-lg shadow-primary/25 hover:-translate-y-0.5 transition-all cursor-pointer">
                                     <i class="fa-solid fa-right-to-bracket"></i> Sign In to Portal
                                 </button>
                             </div>

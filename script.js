@@ -8980,6 +8980,15 @@ document.addEventListener('DOMContentLoaded', function() {
     setupAnnouncementSocket();
     setupGatePassDateValidation();
     setupCustomDatePickers();
+
+    const heroBtn = document.getElementById('heroSignInBtn');
+    if (heroBtn) {
+        heroBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            navigateTo('login');
+        });
+    }
+
     if (window.location.protocol === 'file:') {
         setTimeout(() => {
             showToast('Open HostelFix from http://localhost:5000 instead of the local file so gate pass photos and downloads work correctly.', 'warning');
@@ -9439,4 +9448,59 @@ async function updateLaundryStatus(requestId, newStatus) {
         showToast('Error updating request status.', 'error');
     }
 }
+
+// Alias for complaint resolution
+function updateComplaintStatus(complaintId, newStatus) {
+    return quickUpdateComplaintStatus(complaintId, newStatus);
+}
+
+// Export reports function
+function exportReports(format = 'csv') {
+    if (!latestComplaints || !latestComplaints.length) {
+        showToast('No complaint data available to export.', 'warning');
+        return;
+    }
+    
+    if (format === 'csv') {
+        const headers = ['Complaint ID', 'Student Name', 'Room', 'Category', 'Priority', 'Status', 'Technician', 'Created At'];
+        const rows = latestComplaints.map(c => [
+            c.id,
+            `"${(c.studentName || c.name || '').replace(/"/g, '""')}"`,
+            `"${(c.roomNumber || c.room || '').replace(/"/g, '""')}"`,
+            `"${(c.category || '').replace(/"/g, '""')}"`,
+            `"${(c.priority || '').replace(/"/g, '""')}"`,
+            `"${(c.status || '').replace(/"/g, '""')}"`,
+            `"${(c.technicianName || c.technician || 'Unassigned').replace(/"/g, '""')}"`,
+            `"${new Date(c.createdAt || Date.now()).toLocaleString().replace(/"/g, '""')}"`
+        ]);
+        
+        const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `HostelFix-Maintenance-Report-${new Date().toISOString().slice(0, 10)}.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
+        showToast('Maintenance CSV report downloaded successfully.', 'success');
+    } else {
+        window.print();
+        showToast(`Exporting ${format.toUpperCase()} report...`, 'info');
+    }
+}
+
+function openAddStudentModal() {
+    navigateTo('register');
+}
+
+// Explicit global exports for inline event handlers across all browsers
+window.navigateTo = navigateTo;
+window.toggleDarkMode = toggleDarkMode;
+window.handleLogin = handleLogin;
+window.handleRegister = handleRegister;
+window.updateComplaintStatus = updateComplaintStatus;
+window.quickUpdateComplaintStatus = quickUpdateComplaintStatus;
+window.exportReports = exportReports;
+window.openAddStudentModal = openAddStudentModal;
+
 
