@@ -48,6 +48,15 @@ html { scroll-behavior: smooth; }
 .toast-info { background: #2563EB; }
 .toast-message { font-weight: 500; font-size: 0.95rem; }
 .hidden { display: none !important; }
+/* Use the app's single styled password toggle instead of the browser duplicate. */
+input[type="password"]::-ms-reveal,
+input[type="password"]::-ms-clear {
+    display: none;
+}
+.register-visual-panel { display: none; }
+@media (min-width: 1024px) {
+    .register-visual-panel { display: flex !important; }
+}
 .modal-overlay { opacity: 0; visibility: hidden; pointer-events: none !important; transition: opacity 0.3s ease, visibility 0.3s ease; }
 .modal-overlay.active { opacity: 1; visibility: visible; pointer-events: auto !important; }
 .modal-content { transform: scale(0.9) translateY(20px); transition: all 0.3s ease; }
@@ -492,4 +501,10 @@ input[type="date"] {
     .night-restriction-modal { max-width: calc(100vw - 20px) !important; padding: 0 !important; }
     #websiteSurveillancePanel { padding: 0.75rem; border-radius: 1.1rem; }
     .cctv-screen-bezel .aspect-video { height: 210px; min-height: 0; }
+}
+
+/* Student accounts are managed by wardens, not by the administrator. */
+#page-admin-students,
+[onclick*="navigateTo('admin-students')"] {
+    display: none !important;
 }

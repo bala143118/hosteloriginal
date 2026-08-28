@@ -8,10 +8,14 @@ function getSupabaseClient() {
     if (client) return client;
 
     const url = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+    const key = process.env.SUPABASE_SERVICE_ROLE_KEY || 
+                process.env.SUPABASE_ANON_KEY || 
+                process.env.SUPABASE_KEY || 
+                process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || 
+                process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
     if (!url || !key) {
-        console.warn('[Supabase] SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY missing in environment.');
+        console.warn('[Supabase] SUPABASE_URL or SUPABASE key missing in environment.');
         return null;
     }
 
@@ -35,7 +39,6 @@ async function isSupabaseHealthy() {
     try {
         const { error } = await sb.from('users').select('id').limit(1);
         if (error && error.code !== 'PGRST116') {
-            // Table might not exist yet or permission denied
             return false;
         }
         isConnected = true;

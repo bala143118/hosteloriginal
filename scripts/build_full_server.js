@@ -1,4 +1,7 @@
+const fs = require('fs');
 const path = require('path');
+
+const fullServerCode = `const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '.env') });
 
 const express = require('express');
@@ -123,7 +126,7 @@ function readData() {
   ensureDataStore();
   try {
     if (fs.existsSync(DATA_PATH)) {
-      const raw = fs.readFileSync(DATA_PATH, 'utf8').replace(/^\uFEFF/, '');
+      const raw = fs.readFileSync(DATA_PATH, 'utf8').replace(/^\\uFEFF/, '');
       return JSON.parse(raw);
     }
   } catch (err) {}
@@ -148,7 +151,7 @@ function sanitizeUser(user) {
 }
 
 function isValidEmail(email) {
-  return typeof email === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
+  return typeof email === 'string' && /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email.trim());
 }
 
 function isValidPassword(password) {
@@ -164,32 +167,32 @@ function generateUserId(existingUsers = []) {
     randomSuffix += chars.charAt(Math.floor(Math.random() * chars.length));
   }
   const timestamp = Date.now().toString(36).toUpperCase();
-  return `USR-${timestamp}-${randomSuffix}`;
+  return \`USR-\${timestamp}-\${randomSuffix}\`;
 }
 
 function generateGatePassId() {
   const date = new Date();
   const year = date.getFullYear();
   const random = Math.floor(10000000 + Math.random() * 90000000);
-  return `GP-${year}-${random}`;
+  return \`GP-\${year}-\${random}\`;
 }
 
 function generateCertificateId(gatePassId) {
   const random = Math.floor(1000 + Math.random() * 9000);
-  return `CERT-${gatePassId.replace(/^GP-/, '')}-${random}`;
+  return \`CERT-\${gatePassId.replace(/^GP-/, '')}-\${random}\`;
 }
 
 function generateAnnouncementId() {
-  return `ANN-${Date.now()}-${Math.floor(Math.random() * 900 + 100)}`;
+  return \`ANN-\${Date.now()}-\${Math.floor(Math.random() * 900 + 100)}\`;
 }
 
 function generateLaundryRequestId() {
-  return `LR-${Date.now()}-${Math.floor(Math.random() * 900 + 100)}`;
+  return \`LR-\${Date.now()}-\${Math.floor(Math.random() * 900 + 100)}\`;
 }
 
 async function provisionGatePassQr(gatePass, req) {
   if (!gatePass) return;
-  const baseUrl = process.env.BASE_URL || (req ? `${req.protocol}://${req.get('host')}` : 'http://localhost:5000');
+  const baseUrl = process.env.BASE_URL || (req ? \`\${req.protocol}://\${req.get('host')}\` : 'http://localhost:5000');
   const token = jwt.sign(
     { gp: gatePass.id, scope: 'gatepass-scan' },
     GATEPASS_TOKEN_SECRET,
@@ -197,7 +200,7 @@ async function provisionGatePassQr(gatePass, req) {
   );
   gatePass.token = token;
   gatePass.qrToken = token;
-  gatePass.secureUrl = `${baseUrl}/gatepass/verify/${encodeURIComponent(token)}`;
+  gatePass.secureUrl = \`\${baseUrl}/gatepass/verify/\${encodeURIComponent(token)}\`;
   gatePass.qrUrl = gatePass.secureUrl;
   try {
     gatePass.qrImage = await QRCode.toDataURL(gatePass.secureUrl, { margin: 1, width: 256 });
@@ -272,7 +275,7 @@ app.post('/api/login', async (req, res) => {
     const password = req.body.password || '';
     const role = (req.body.role || '').trim().toLowerCase();
 
-    console.info(`[LOGIN] attempt for=${identifier || '<missing>'} role=${role || '<missing>'}`);
+    console.info(\`[LOGIN] attempt for=\${identifier || '<missing>'} role=\${role || '<missing>'}\`);
 
     if (!identifier || !password) {
       return res.status(400).json({ error: 'User ID or email and password are required.' });
@@ -294,7 +297,7 @@ app.post('/api/login', async (req, res) => {
     }
 
     if (role && user.role !== role) {
-      return res.status(403).json({ error: `Account does not have the role '${role}'.` });
+      return res.status(403).json({ error: \`Account does not have the role '\${role}'.\` });
     }
 
     let scope = null;
@@ -485,7 +488,7 @@ app.post('/api/technicians', async (req, res) => {
     if (customId) {
       const existingId = await userRepository.findByUserId(customId);
       if (existingId) {
-        return res.status(409).json({ error: `A technician with ID '${customId}' already exists.` });
+        return res.status(409).json({ error: \`A technician with ID '\${customId}' already exists.\` });
       }
     }
 
@@ -901,19 +904,19 @@ app.post('/api/gatepass/warden/verify', async (req, res) => {
 });
 
 app.get(['/qr/:token', '/gatepass/verify/:token'], (req, res) => {
-  res.send(`<!DOCTYPE html><html><head><title>Gate Pass Verification</title></head><body><h1>Gate Pass Verification</h1><p>Token: ${req.params.token}</p><p>Status: Verified</p></body></html>`);
+  res.send(\`<!DOCTYPE html><html><head><title>Gate Pass Verification</title></head><body><h1>Gate Pass Verification</h1><p>Token: \${req.params.token}</p><p>Status: Verified</p></body></html>\`);
 });
 
 app.get('/api/gate-passes/:id/pdf', async (req, res) => {
   try {
     const doc = new PDFDocument({ margin: 40, size: 'A4' });
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `inline; filename="GatePass-${req.params.id}.pdf"`);
+    res.setHeader('Content-Disposition', \`inline; filename="GatePass-\${req.params.id}.pdf"\`);
     doc.pipe(res);
     doc.fontSize(18).text('HOSTELFIX GATE PASS CERTIFICATE', { align: 'center' });
     doc.moveDown();
-    doc.fontSize(12).text(`Gate Pass ID: ${req.params.id}`);
-    doc.text(`Generated Date: ${new Date().toLocaleDateString()}`);
+    doc.fontSize(12).text(\`Gate Pass ID: \${req.params.id}\`);
+    doc.text(\`Generated Date: \${new Date().toLocaleDateString()}\`);
     doc.text('Authorized by Hostel Administration');
     doc.end();
   } catch (err) {
@@ -929,7 +932,7 @@ app.post('/api/gate-passes/export-pdf', async (req, res) => {
     doc.pipe(res);
     doc.fontSize(18).text('HOSTELFIX GATE PASSES EXPORT', { align: 'center' });
     doc.moveDown();
-    doc.fontSize(12).text(`Total Passes: ${(req.body.gatePasses || []).length}`);
+    doc.fontSize(12).text(\`Total Passes: \${(req.body.gatePasses || []).length}\`);
     doc.end();
   } catch (err) {
     res.status(500).json({ error: 'Bulk PDF generation failed.' });
@@ -1090,7 +1093,7 @@ app.post('/api/send-telegram-alert', async (req, res) => {
     const { camera, cameraName, location, type, eventType, confidence, timestamp, frameBase64, image } = req.body;
     const cam = camera || cameraName || adminSettingsCache.alertCameraName;
     const now = Date.now();
-    const cooldownKey = `${cam}_${type || eventType || 'event'}`;
+    const cooldownKey = \`\${cam}_\${type || eventType || 'event'}\`;
     const lastAlert = alertCooldowns.get(cooldownKey);
 
     if (lastAlert && (now - lastAlert) < 2000) {
@@ -1099,7 +1102,7 @@ app.post('/api/send-telegram-alert', async (req, res) => {
     alertCooldowns.set(cooldownKey, now);
 
     const alertItem = {
-      id: `ALERT-${now}`,
+      id: \`ALERT-\${now}\`,
       camera: cam,
       cameraName: cam,
       location: location || adminSettingsCache.alertCameraLocation,
@@ -1213,7 +1216,7 @@ app.post('/api/cctv-log-pdf', (req, res) => {
     doc.pipe(res);
     doc.fontSize(18).text('HOSTELFIX CCTV SURVEILLANCE LOG', { align: 'center' });
     doc.moveDown();
-    doc.fontSize(12).text(`Exported Date: ${new Date().toLocaleString()}`);
+    doc.fontSize(12).text(\`Exported Date: \${new Date().toLocaleString()}\`);
     doc.end();
   } catch (err) {
     res.status(500).json({ error: 'CCTV PDF generation failed.' });
@@ -1288,7 +1291,7 @@ const port = process.env.PORT || 5000;
 
 if (require.main === module) {
   server.listen(port, async () => {
-    console.log(`HostelFix Server is running at http://localhost:${port}`);
+    console.log(\`HostelFix Server is running at http://localhost:\${port}\`);
     try {
       const connected = await isSupabaseHealthy();
       console.log(connected ? '✅ Supabase connected' : 'ℹ️ Using local data storage');
@@ -1301,3 +1304,8 @@ if (require.main === module) {
 module.exports = app;
 module.exports.server = server;
 module.exports.io = io;
+`;
+
+const serverJsPath = path.join(__dirname, '../server.js');
+fs.writeFileSync(serverJsPath, fullServerCode, 'utf8');
+console.log('✅ server.js completely rebuilt!');

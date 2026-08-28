@@ -719,9 +719,12 @@ function navigateTo(pageId, options = {}) {
         loadTechniciansList().catch((error) => console.error(error));
     }
 
-    if (pageId.startsWith('admin-') || pageId.startsWith('technician-') || pageId === 'warden-dashboard' || pageId === 'security-dashboard') {
+    if (pageId.startsWith('admin-') || pageId.startsWith('technician-') || pageId === 'warden-dashboard' || pageId === 'warden-students' || pageId === 'security-dashboard') {
         loadDashboardData().then(() => {
-            if (pageId === 'warden-dashboard') renderWardenDashboard();
+            if (pageId === 'warden-dashboard') {
+                renderWardenDashboard();
+            }
+            if (pageId === 'warden-students') loadWardenAssignedStudents();
             if (pageId === 'security-dashboard') renderSecurityDashboard();
             if (pageId === 'admin-gate-passes') renderAdminGatePassLogsPage();
             if (pageId === 'admin-laundry') renderAdminLaundryRequests();
@@ -781,6 +784,11 @@ function restoreCurrentUser() {
 
     try {
         currentUser = JSON.parse(saved);
+        if (currentUser?.role === 'admin' && String(currentUser.email || '').trim().toLowerCase() !== 'sabithacys@siet.ac') {
+            currentUser = null;
+            localStorage.removeItem(USER_SESSION_KEY);
+            return false;
+        }
         return Boolean(currentUser);
     } catch (error) {
         console.error('Unable to restore saved user session:', error);
@@ -878,6 +886,84 @@ function isGatePassForCurrentUser(entry) {
     );
 }
 
+function isComplaintForCurrentUser(entry) {
+    if (!currentUser || normalizeText(currentUser.role) !== 'student' || !entry || typeof entry !== 'object') return false;
+
+    const currentEmail = normalizeText(currentUser.email);
+    const currentName = normalizeText(currentUser.name);
+    const currentRegistrationNumber = normalizeText(currentUser.registrationNumber);
+    const currentUserId = normalizeText(currentUser.userId || currentUser.id);
+
+    const belongsToStudent = (
+        (currentEmail && (normalizeText(entry.email) === currentEmail || normalizeText(entry.userEmail) === currentEmail))
+        || (currentUserId && normalizeText(entry.userId) === currentUserId)
+    );
+
+    if (!belongsToStudent) return false;
+
+    // A new account must never inherit complaints created before that account existed.
+    const accountCreatedAt = Date.parse(currentUser.createdAt || '');
+    const complaintCreatedAt = Date.parse(entry.createdAt || '');
+    if (Number.isFinite(accountCreatedAt) && Number.isFinite(complaintCreatedAt)) {
+        return complaintCreatedAt >= accountCreatedAt;
+    }
+
+    return true;
+}
+
+function isGatePassForCurrentWarden(entry) {
+    if (!currentUser || normalizeText(currentUser.role) !== 'warden' || !entry || typeof entry !== 'object') return false;
+    const currentEmail = normalizeText(currentUser.email);
+    const currentId = normalizeText(currentUser.userId || currentUser.id);
+    return (currentEmail && normalizeText(entry.wardenEmail) === currentEmail)
+        || (currentId && normalizeText(entry.wardenId) === currentId);
+}
+
+function isWardenNotificationForCurrentUser(notification) {
+    if (!currentUser || normalizeText(currentUser.role) !== 'warden' || !notification) return false;
+    const currentEmail = normalizeText(currentUser.email);
+    const currentId = normalizeText(currentUser.userId || currentUser.id);
+    return (currentEmail && normalizeText(notification.targetEmail) === currentEmail)
+        || (currentId && normalizeText(notification.targetUserId) === currentId);
+}
+
+function isAnnouncementVisibleToCurrentStudent(announcement) {
+    if (!currentUser || currentUser.role !== 'student' || !announcement) return true;
+
+    const audience = normalizeText(announcement.audience);
+    const currentEmail = normalizeText(currentUser.email);
+    const currentBlock = normalizeText(currentUser.hostelBlock);
+    const targetEmail = normalizeText(announcement.targetEmail || announcement.email);
+    const isAllStudents = !audience || audience === 'all' || audience === 'all students';
+    const isTargetedToThisStudent = targetEmail && targetEmail === currentEmail;
+    const isForThisBlock = currentBlock && audience.includes(currentBlock);
+
+    if (!isAllStudents && !isTargetedToThisStudent && !isForThisBlock) return false;
+
+    // Do not show notices that were published before this account existed.
+    // This prevents a newly created student from inheriting the old demo/history feed.
+    const accountCreatedAt = Date.parse(currentUser.createdAt || '');
+    const announcementCreatedAt = Date.parse(announcement.createdAt || '');
+    if (Number.isFinite(accountCreatedAt) && Number.isFinite(announcementCreatedAt)) {
+        return announcementCreatedAt >= accountCreatedAt;
+    }
+
+    return true;
+}
+
+function getStudentDashboardSummary(complaints = []) {
+    const studentComplaints = Array.isArray(complaints) ? complaints.filter(isComplaintForCurrentUser) : [];
+    const statusCounts = studentComplaints.reduce((counts, complaint) => {
+        const status = normalizeText(complaint.status);
+        if (status === 'pending' || status === 'new' || status === 'requested') counts.pending += 1;
+        if (status === 'in progress' || status === 'in-progress' || status === 'assigned') counts.inProgress += 1;
+        if (status === 'completed' || status === 'resolved' || status === 'closed') counts.completed += 1;
+        return counts;
+    }, { pending: 0, inProgress: 0, completed: 0 });
+
+    return { total: studentComplaints.length, ...statusCounts, complaints: studentComplaints };
+}
+
 function getLatestSubmittedGatePass() {
     if (latestSubmittedGatePass && isGatePassForCurrentUser(latestSubmittedGatePass)) {
         return latestSubmittedGatePass;
@@ -910,21 +996,23 @@ async function prepareComplaintForm() {
     const roomInput = document.getElementById('complaintRoomNumber');
     const hostelBlockInput = document.getElementById('complaintHostelBlock');
 
+    // Complaint details must be entered for this report instead of being
+    // populated with the demo/current user's profile values.
     if (studentNameInput) {
         studentNameInput.readOnly = false;
-        studentNameInput.value = currentUser?.name || '';
+        studentNameInput.value = '';
     }
     if (regInput) {
         regInput.readOnly = false;
-        regInput.value = currentUser?.registrationNumber || '';
+        regInput.value = '';
     }
     if (roomInput) {
         roomInput.readOnly = false;
-        roomInput.value = currentUser?.roomNumber || '';
+        roomInput.value = '';
     }
     if (hostelBlockInput) {
         hostelBlockInput.disabled = false;
-        if (currentUser?.hostelBlock) hostelBlockInput.value = currentUser.hostelBlock;
+        hostelBlockInput.value = '';
     }
 
     try {
@@ -1108,10 +1196,11 @@ function fillStudentForm(user) {
     const gatePassHostelBlockInput = document.getElementById('gatePassHostelBlock');
     const studentWelcomeText = document.getElementById('studentWelcomeText');
 
-    if (studentNameInput) studentNameInput.value = user.name || '';
-    if (regInput) regInput.value = user.registrationNumber || '';
-    if (roomInput) roomInput.value = user.roomNumber || '';
-    if (hostelBlockInput) hostelBlockInput.value = user.hostelBlock || 'Block A';
+    // Keep complaint identity fields blank until the student fills them in.
+    if (studentNameInput) studentNameInput.value = '';
+    if (regInput) regInput.value = '';
+    if (roomInput) roomInput.value = '';
+    if (hostelBlockInput) hostelBlockInput.value = '';
     if (gatePassStudentNameInput) gatePassStudentNameInput.value = '';
     if (gatePassRegInput) gatePassRegInput.value = '';
     if (gatePassRoomInput) gatePassRoomInput.value = '';
@@ -1280,7 +1369,7 @@ function updateStudentDashboardStats(data) {
 function mergeAnnouncements(announcements) {
     if (!Array.isArray(announcements)) return;
     const existingById = Object.fromEntries(studentNotifications.map((item) => [item.id, item]));
-    announcements.forEach((announcement) => {
+    announcements.filter(isAnnouncementVisibleToCurrentStudent).forEach((announcement) => {
         if (!announcement || !announcement.id) return;
         const previous = existingById[announcement.id];
         existingById[announcement.id] = {
@@ -1503,7 +1592,10 @@ async function fetchAnnouncements() {
             console.warn('Failed to load announcements:', data.error || response.status);
             return;
         }
-        mergeAnnouncements(Array.isArray(data) ? data : []);
+        const visibleAnnouncements = Array.isArray(data)
+            ? data.filter(isAnnouncementVisibleToCurrentStudent)
+            : [];
+        mergeAnnouncements(visibleAnnouncements);
         updateNotificationBadge();
         renderDashboardAnnouncements();
         if (getActivePageId() === 'notifications') {
@@ -1580,6 +1672,7 @@ function setupAnnouncementSocket() {
         announcementSocket.on('security_alert.acknowledged', () => loadSecurityAlertStats().catch(console.error));
         announcementSocket.on('announcement.created', (announcement) => {
             if (!announcement || !announcement.id) return;
+            if (!isAnnouncementVisibleToCurrentStudent(announcement)) return;
             mergeAnnouncements([announcement]);
             updateNotificationBadge();
             renderDashboardAnnouncements();
@@ -1613,6 +1706,7 @@ function setupAnnouncementSocket() {
         announcementSocket.on('gate-pass.created', (payload) => {
             const gatePass = payload?.gatePass || payload;
             if (!gatePass || !gatePass.id) return;
+            if (normalizeText(currentUser?.role) === 'warden' && !isGatePassForCurrentWarden(gatePass)) return;
             latestGatePasses = [gatePass, ...latestGatePasses.filter((entry) => entry?.id !== gatePass.id)];
             renderGatePassTable(latestGatePasses);
             renderWardenDashboard();
@@ -1627,6 +1721,7 @@ function setupAnnouncementSocket() {
         });
         announcementSocket.on('warden-notification.created', (notification) => {
             if (!notification || (currentUser?.role !== 'warden' && currentUser?.role !== 'admin')) return;
+            if (currentUser?.role === 'warden' && !isWardenNotificationForCurrentUser(notification)) return;
             playNotificationTone();
             showToast(`📢 ${notification.title || 'Warden Alert'}: ${notification.message || ''}`, 'info');
             renderWardenDashboard();
@@ -2367,7 +2462,7 @@ function updateStudentRecentComplaints(complaints) {
     if (!tableBody) return;
 
     const visibleComplaints = complaints
-        .filter((complaint) => !currentUser || !currentUser.email || complaint.email === currentUser.email || complaint.student === currentUser.name)
+        .filter((complaint) => normalizeText(currentUser?.role) === 'student' ? isComplaintForCurrentUser(complaint) : true)
         .slice(0, 4);
 
     if (!visibleComplaints.length) {
@@ -2729,7 +2824,7 @@ function renderAdminSummary(summary, complaints = [], allUsers = []) {
     if (adminPending) adminPending.textContent = String(summary?.pending || pendingCount || 0).toLocaleString();
     if (adminCompleted) adminCompleted.textContent = String(summary?.completed || summary?.resolvedToday || resolvedCount || 0).toLocaleString();
     if (adminActiveTechnicians) adminActiveTechnicians.textContent = String(summary?.activeTechnicians || techCount || 3).toLocaleString();
-    if (adminTotalWardens) adminTotalWardens.textContent = String(wardenCount || 3).toLocaleString();
+    if (adminTotalWardens) adminTotalWardens.textContent = String(wardenCount).toLocaleString();
 
     // Dynamic Sidebar Badges
     document.querySelectorAll('.admin-gate-pass-badge, #adminSidebarGatePassBadge').forEach(el => el.textContent = String(latestGatePasses.length || 0));
@@ -3132,8 +3227,16 @@ function renderAdminStudents(users = [], complaints = []) {
     const tbody = document.getElementById('adminStudentsTableBody');
     if (!tbody) return;
     const students = users.filter((u) => u.role === 'student');
+    const wardens = users.filter((u) => u.role === 'warden');
+    window.currentAdminWardens = wardens;
+    const bulkWardenSelect = document.getElementById('bulkStudentWarden');
+    if (bulkWardenSelect) {
+        bulkWardenSelect.innerHTML = '<option value="">Assign selected to...</option>' + wardens
+            .map((warden) => `<option value="${escapeHtml(warden.email || '')}">${escapeHtml(warden.name || 'Warden')}</option>`)
+            .join('');
+    }
     if (!students.length) {
-        tbody.innerHTML = '<tr><td colspan="6" class="px-6 py-6 text-center text-sm text-text-secondary">No registered students found.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="8" class="px-6 py-6 text-center text-sm text-text-secondary">No registered students found.</td></tr>';
         return;
     }
     tbody.innerHTML = students.map((s) => {
@@ -3141,11 +3244,13 @@ function renderAdminStudents(users = [], complaints = []) {
         const initials = (s.name || 'ST').split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase();
         return `
             <tr class="table-row hover:bg-surface-alt/40 transition-colors">
+                <td class="px-6 py-4"><input type="checkbox" class="admin-student-checkbox" value="${escapeHtml(s.userId || s.id || s.email || '')}" aria-label="Select ${escapeHtml(s.name || 'student')}"></td>
                 <td class="px-6 py-4"><div class="flex items-center gap-3"><div class="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary text-xs font-bold">${initials}</div><span class="font-medium text-sm">${s.name || 'Student'}</span></div></td>
                 <td class="px-6 py-4 text-xs font-mono">${s.registrationNumber || 'REG-2024001'}</td>
                 <td class="px-6 py-4 text-xs">${s.hostelBlock || 'Block A'} • ${s.roomNumber || 'A-204'}</td>
                 <td class="px-6 py-4 text-xs font-mono text-text-secondary">${s.phone || '+91 98765 00000'}</td>
                 <td class="px-6 py-4 text-sm font-bold text-primary">${studentComplaints}</td>
+                <td class="px-6 py-4 text-xs"><select onchange="assignStudentToWarden('${s.userId || s.id || s.email}', this.value)" class="input-focus max-w-[180px] px-2 py-1.5 rounded-lg border border-border bg-surface-alt text-xs"><option value="">Unassigned</option>${wardens.map((warden) => `<option value="${escapeHtml(warden.email || '')}" ${String(s.wardenEmail || '').toLowerCase() === String(warden.email || '').toLowerCase() ? 'selected' : ''}>${escapeHtml(warden.name || 'Warden')}</option>`).join('')}</select></td>
                 <td class="px-6 py-4">
                     <button onclick="deleteStudent('${s.userId || s.id || s.email}')" class="px-2.5 py-1 rounded-lg bg-danger/10 text-danger hover:bg-danger hover:text-white text-xs font-semibold transition-all">Remove</button>
                 </td>
@@ -3175,7 +3280,7 @@ async function deleteStudent(studentId) {
 function renderAdminWardens(users = []) {
     const container = document.getElementById('adminWardensGrid');
     if (!container) return;
-    const wardens = Array.isArray(users) ? users.filter((u) => u.role === 'warden' || u.hostelBlock || u.id?.startsWith('W-')) : [];
+    const wardens = Array.isArray(users) ? users.filter((u) => normalizeText(u.role) === 'warden') : [];
     window.currentWardensList = wardens;
     if (!wardens.length) {
         container.innerHTML = '<div class="col-span-3 glass p-6 rounded-2xl text-sm text-text-secondary text-center">No registered wardens found. Click "Add New Warden" above to add one.</div>';
@@ -3191,6 +3296,7 @@ function renderAdminWardens(users = []) {
                         <div>
                             <h4 class="font-bold text-sm text-text">${w.name}</h4>
                             <p class="text-xs text-text-secondary">${w.email}</p>
+                            <p class="text-[10px] text-primary font-mono mt-1">Login ID: ${w.userId || w.id || 'Not available'}</p>
                         </div>
                     </div>
                     <div class="flex items-center gap-1.5">
@@ -3222,9 +3328,13 @@ function renderAdminWardens(users = []) {
 }
 
 function renderAdminTechnicians(users = [], complaints = []) {
+    if (typeof window.renderAdminTechnicians === 'function' && window.renderAdminTechnicians !== renderAdminTechnicians) {
+        const techList = Array.isArray(users) ? users.filter((u) => String(u.role || '').toLowerCase() === 'technician') : [];
+        return window.renderAdminTechnicians(techList, complaints);
+    }
     const container = document.getElementById('adminTechniciansGrid');
     if (!container) return;
-    const technicians = Array.isArray(users) ? users.filter((u) => u.role === 'technician' || u.specialization || u.id?.startsWith('T-')) : [];
+    const technicians = Array.isArray(users) ? users.filter((u) => String(u.role || '').toLowerCase() === 'technician') : [];
     window.currentTechniciansList = technicians;
     if (!technicians.length) {
         container.innerHTML = '<div class="col-span-3 glass p-6 rounded-2xl text-sm text-text-secondary text-center">No active technicians found. Click "Add New Technician" above to add one.</div>';
@@ -3232,7 +3342,7 @@ function renderAdminTechnicians(users = [], complaints = []) {
     }
     container.innerHTML = technicians.map((t) => {
         const initials = (t.name || 'TC').split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase();
-        const done = complaints.filter((c) => c.technician === t.name || c.assignedTo === t.name).filter((c) => String(c.status).toLowerCase() === 'completed').length;
+        const done = (complaints || []).filter((c) => (c.technician === t.name || c.assignedTo === t.name) && String(c.status).toLowerCase() === 'completed').length;
         return `
             <div class="glass rounded-2xl border border-border p-5 card-hover relative group shadow-xs">
                 <div class="flex items-center justify-between mb-4">
@@ -3244,10 +3354,10 @@ function renderAdminTechnicians(users = [], complaints = []) {
                         </div>
                     </div>
                     <div class="flex items-center gap-1.5">
-                        <button type="button" data-technician-action="edit" data-technician-id="${escapeHtml(getTechnicianIdentifier(t))}" title="Edit Technician" aria-label="Edit ${escapeHtml(t.name || 'technician')}" class="w-8 h-8 rounded-xl bg-primary/10 text-primary hover:bg-primary hover:text-white flex items-center justify-center text-xs transition-all">
+                        <button type="button" onclick="openEditTechnicianModal('${escapeHtml(getTechnicianIdentifier(t))}')" title="Edit Technician" class="w-8 h-8 rounded-xl bg-primary/10 text-primary hover:bg-primary hover:text-white flex items-center justify-center text-xs transition-all">
                             <i class="fa-solid fa-pen-to-square"></i>
                         </button>
-                        <button type="button" data-technician-action="delete" data-technician-id="${escapeHtml(getTechnicianIdentifier(t))}" title="Remove Technician" aria-label="Remove ${escapeHtml(t.name || 'technician')}" class="w-8 h-8 rounded-xl bg-danger/10 text-danger hover:bg-danger hover:text-white flex items-center justify-center text-xs transition-all">
+                        <button type="button" onclick="deleteTechnician('${escapeHtml(getTechnicianIdentifier(t))}')" title="Remove Technician" class="w-8 h-8 rounded-xl bg-danger/10 text-danger hover:bg-danger hover:text-white flex items-center justify-center text-xs transition-all">
                             <i class="fa-solid fa-trash"></i>
                         </button>
                     </div>
@@ -4078,6 +4188,11 @@ async function handleRegister(e) {
         return;
     }
 
+    if (role === 'admin' && email.toLowerCase() !== 'sabithacys@siet.ac') {
+        showToast('Only the authorized administrator email can create an admin account.', 'warning');
+        return;
+    }
+
     showLoading();
     try {
         const response = await apiRequest('/api/register', {
@@ -4341,7 +4456,13 @@ async function approveGatePass(gatePassId, status, actorRole = 'Admin') {
         const response = await apiRequest(`/api/gate-passes/${encodeURIComponent(gatePassId)}/status`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ status, approvedBy: currentUser?.name || actorRole })
+            body: JSON.stringify({
+                status,
+                role: currentUser?.role || actorRole.toLowerCase(),
+                approvedBy: currentUser?.name || actorRole,
+                wardenEmail: currentUser?.email || '',
+                wardenId: currentUser?.userId || currentUser?.id || ''
+            })
         });
         const data = await parseJsonResponse(response);
         hideLoading();
@@ -4530,7 +4651,9 @@ async function loadDashboardData() {
         const inventoryList = inventoryRes.status === 'fulfilled' && inventoryRes.value.ok ? await parseJsonResponse(inventoryRes.value) : [];
 
         latestComplaints = Array.isArray(complaints) ? complaints.slice() : [];
-        latestGatePasses = Array.isArray(gatePasses) ? gatePasses.slice() : [];
+        latestGatePasses = Array.isArray(gatePasses)
+            ? (normalizeText(currentUser?.role) === 'warden' ? gatePasses.filter(isGatePassForCurrentWarden) : gatePasses.slice())
+            : [];
         latestLaundryRequests = Array.isArray(laundryRequests) ? laundryRequests.slice() : [];
         
         syncCurrentUserStudentProfile();
@@ -4553,8 +4676,11 @@ async function loadDashboardData() {
             }
         });
 
-        updateStudentDashboardStats(summary);
-        updateStudentRecentComplaints(complaints);
+        const studentDashboard = normalizeText(currentUser?.role) === 'student'
+            ? getStudentDashboardSummary(complaints)
+            : null;
+        updateStudentDashboardStats(studentDashboard || summary);
+        updateStudentRecentComplaints(studentDashboard ? studentDashboard.complaints : complaints);
         renderTechAssignedComplaints(complaints);
         renderTechCompletedComplaints(complaints);
         renderTechSummary(complaints);
@@ -4562,7 +4688,7 @@ async function loadDashboardData() {
         renderGatePassTable(latestGatePasses);
         renderAdminStudents(allUsers, complaints);
         renderAdminWardens(allUsers);
-        renderAdminTechnicians(allUsers, complaints);
+        renderAdminTechnicians(technicianList, complaints);
         renderAdminFullComplaintsTable(complaints);
         renderTechInventoryGrid(inventoryList);
         loadSecurityAlertStats().catch((securityError) => console.warn('Security alert stats unavailable:', securityError));
@@ -5750,7 +5876,8 @@ async function submitWardenVerificationAction(token, action, reason = '') {
                 role: 'warden',
                 rejectionReason: reason,
                 wardenName: currentUser?.name || 'Hostel Warden',
-                wardenId: currentUser?.userId || 'WRD-001'
+                wardenId: currentUser?.userId || currentUser?.id || 'WRD-001',
+                wardenEmail: currentUser?.email || ''
             })
         });
         const data = await parseJsonResponse(res);
@@ -5952,6 +6079,7 @@ function renderWardenDashboard() {
         const isPending = rawStatus === 'REQUESTED' || rawStatus === 'PENDING' || rawStatus === 'PENDING_WARDEN' || rawStatus === 'PENDING_ADMIN';
         const isApproved = rawStatus === 'QR GENERATED' || rawStatus === 'APPROVED' || rawStatus === 'SECURITY_PENDING';
         const isOut = rawStatus === 'OUT' || rawStatus === 'OUTSIDE' || (pass.securityVerified && !pass.wardenVerified);
+        const isReturned = rawStatus === 'RETURNED';
         const isCompleted = rawStatus === 'COMPLETED';
         const isOutsideNotReturned = rawStatus === 'OUTSIDE_NOT_RETURNED';
         const isRejected = rawStatus.includes('REJECTED');
@@ -6014,7 +6142,7 @@ function renderWardenDashboard() {
                             Reject
                         </button>
                     ` : ''}
-                    ${isOut ? `
+                    ${isReturned ? `
                         <button onclick="submitWardenVerificationAction('${pass.id}', 'APPROVE')" class="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-xs transition-all flex items-center gap-1.5">
                             <i class="fa-solid fa-hotel"></i> Verify Arrival
                         </button>
@@ -6095,6 +6223,7 @@ function renderSecurityDashboard() {
         const isOut = rawStatus === 'OUTSIDE' || rawStatus === 'OUT' || (pass.securityVerified && !pass.wardenVerified);
         const isCompleted = rawStatus === 'COMPLETED';
         const isSecRejected = rawStatus === 'SECURITY_REJECTED';
+        const returnDue = !pass.returnDate || String(pass.returnDate).slice(0, 10) <= todayStr;
 
         let badgeClass = 'bg-amber-100 text-amber-800 border border-amber-200';
         let badgeLabel = pass.status || 'Pending';
@@ -6148,9 +6277,7 @@ function renderSecurityDashboard() {
                             Reject
                         </button>
                     ` : isOut ? `
-                        <button onclick="submitSecurityVerificationAction('${pass.id}', 'APPROVE')" class="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-xs transition-all flex items-center gap-1.5">
-                            <i class="fa-solid fa-plane-arrival"></i> Accept Return
-                        </button>
+                        ${returnDue ? `<button onclick="submitSecurityVerificationAction('${pass.id}', 'APPROVE')" class="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-xs transition-all flex items-center gap-1.5"><i class="fa-solid fa-plane-arrival"></i> Accept Return</button>` : `<span class="px-3 py-2 rounded-xl bg-surface-alt border border-border text-text-secondary text-xs font-semibold">Return on ${formatGatePassDate(pass.returnDate)}</span>`}
                         <button onclick="promptSecurityRejection('${pass.id}')" class="px-3 py-2 rounded-xl bg-rose-600/10 hover:bg-rose-600 hover:text-white text-rose-600 text-xs font-semibold transition-all">
                             Reject
                         </button>
@@ -8974,6 +9101,8 @@ const landingObserver = new MutationObserver((mutations) => {
 });
 
 document.addEventListener('DOMContentLoaded', function() {
+    const addWardenButton = document.getElementById('addWardenButton');
+    if (addWardenButton) addWardenButton.addEventListener('click', openAddWardenModal);
     const landing = document.getElementById('page-landing');
     if (landing) landingObserver.observe(landing, { attributes: true, attributeFilter: ['class'] });
 
@@ -9056,6 +9185,7 @@ async function loadTechniciansList() {
 function openAddWardenModal() {
     const modal = document.getElementById('addWardenModal');
     if (modal) {
+        modal.querySelector('form')?.reset();
         modal.classList.remove('hidden');
         modal.style.display = 'flex';
         setTimeout(() => document.getElementById('wardenName')?.focus(), 50);
@@ -9078,8 +9208,8 @@ async function handleAddWarden(event) {
     const phone = document.getElementById('wardenPhone')?.value.trim();
     const password = document.getElementById('wardenPassword')?.value;
 
-    if (!name || !email) {
-        showToast('Please enter both name and email.', 'warning');
+    if (!name || !email || !password) {
+        showToast('Please enter name, unique email, and password.', 'warning');
         return;
     }
 
@@ -9092,7 +9222,7 @@ async function handleAddWarden(event) {
         const data = await parseJsonResponse(response);
         if (!response.ok) throw new Error(data.error || 'Failed to create warden');
 
-        showToast(`Warden ${data.name} added successfully!`, 'success');
+        showToast(`Warden ${data.name} added. Login ID: ${data.userId || data.id}`, 'success');
         closeAddWardenModal();
         event.target.reset();
         await loadWardensList();
@@ -9501,8 +9631,229 @@ function exportReports(format = 'csv') {
     }
 }
 
-function openAddStudentModal() {
-    navigateTo('register');
+async function openAddStudentModal() {
+    const isWarden = currentUser?.role === 'warden';
+    if (!isWarden) {
+        showToast('Only a warden can add student accounts.', 'warning');
+        return;
+    }
+
+    showModal('Add Student', `
+        <form onsubmit="handleAdminStudentSubmit(event)" autocomplete="off" class="space-y-4">
+            <p class="text-sm text-text-secondary">Create a student account with a private login and password.</p>
+            <div class="grid sm:grid-cols-2 gap-4">
+                <input id="adminStudentName" name="student-full-name" autocomplete="off" required placeholder="Full name" class="input-focus w-full px-4 py-3 rounded-xl border border-border bg-surface-alt text-sm">
+                <input id="adminStudentEmail" name="student-account-email" autocomplete="new-password" required type="email" placeholder="Email address" class="input-focus w-full px-4 py-3 rounded-xl border border-border bg-surface-alt text-sm">
+                <input id="adminStudentPassword" name="student-account-password" autocomplete="new-password" required minlength="6" type="password" placeholder="Temporary password" class="input-focus w-full px-4 py-3 rounded-xl border border-border bg-surface-alt text-sm">
+                <input id="adminStudentRegistrationNumber" name="student-registration-number" autocomplete="off" required placeholder="Registration number" class="input-focus w-full px-4 py-3 rounded-xl border border-border bg-surface-alt text-sm">
+                <select id="adminStudentHostelBlock" required class="input-focus w-full px-4 py-3 rounded-xl border border-border bg-surface-alt text-sm">
+                    <option value="" selected disabled>Select hostel block</option>
+                    <option>Block A</option><option>Block B</option><option>Block C</option><option>Block D</option>
+                </select>
+                <input id="adminStudentRoomNumber" name="student-room-number" autocomplete="off" required placeholder="Room number" class="input-focus w-full px-4 py-3 rounded-xl border border-border bg-surface-alt text-sm">
+                <select id="adminStudentWarden" ${isWarden ? 'disabled' : 'required'} class="input-focus w-full px-4 py-3 rounded-xl border border-border bg-surface-alt text-sm sm:col-span-2 ${isWarden ? 'hidden' : ''}">
+                    <option value="" selected disabled>Assign controlling warden</option>
+                    
+                </select>
+                ${isWarden ? `<div class="sm:col-span-2 rounded-xl border border-indigo-200 bg-indigo-500/5 px-4 py-3 text-sm text-indigo-700">This student will be automatically assigned to you: <strong>${escapeHtml(currentUser.name || currentUser.email)}</strong></div>` : ''}
+            </div>
+            <div class="flex justify-end gap-3 pt-2">
+                <button type="button" onclick="closeModal()" class="px-4 py-2.5 rounded-xl border border-border text-sm font-semibold">Cancel</button>
+                <button type="submit" class="btn-primary px-5 py-2.5 rounded-xl text-white text-sm font-semibold">Create Student</button>
+            </div>
+        </form>
+    `);
+
+    // Some browsers/password managers ignore autocomplete hints and reuse the
+    // logged-in warden credentials. Always start a new student form blank.
+    setTimeout(() => {
+        ['adminStudentName', 'adminStudentEmail', 'adminStudentPassword', 'adminStudentRegistrationNumber', 'adminStudentRoomNumber']
+            .forEach((id) => {
+                const input = document.getElementById(id);
+                if (input) input.value = '';
+            });
+        const block = document.getElementById('adminStudentHostelBlock');
+        if (block) block.value = '';
+    }, 100);
+}
+
+function toggleAllAdminStudents(checked) {
+    document.querySelectorAll('.admin-student-checkbox').forEach((checkbox) => {
+        checkbox.checked = checked;
+    });
+}
+
+async function assignSelectedStudentsToWarden() {
+    const wardenEmail = document.getElementById('bulkStudentWarden')?.value || '';
+    const studentIds = Array.from(document.querySelectorAll('.admin-student-checkbox:checked')).map((checkbox) => checkbox.value).filter(Boolean);
+    if (!wardenEmail) {
+        showToast('Select a warden first.', 'warning');
+        return;
+    }
+    if (!studentIds.length) {
+        showToast('Select at least one student.', 'warning');
+        return;
+    }
+    if (currentUser?.role !== 'admin' || normalizeText(currentUser.email) !== 'sabithacys@siet.ac') {
+        showToast('Only the authorized administrator can assign students.', 'warning');
+        return;
+    }
+
+    showLoading();
+    try {
+        const results = await Promise.all(studentIds.map((studentId) => apiRequest(`/api/students/${encodeURIComponent(studentId)}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ adminEmail: currentUser.email, wardenEmail })
+        })));
+        const failed = results.filter((response) => !response.ok).length;
+        hideLoading();
+        if (failed) {
+            showToast(`${failed} student assignment(s) failed.`, 'error');
+        } else {
+            showToast(`${studentIds.length} student(s) assigned to the warden.`, 'success');
+        }
+        await loadDashboardData();
+    } catch (error) {
+        hideLoading();
+        showToast('Unable to assign selected students.', 'error');
+    }
+}
+
+async function assignStudentToWarden(studentId, wardenEmail) {
+    if (!wardenEmail) return;
+    if (currentUser?.role !== 'admin' || String(currentUser.email || '').toLowerCase() !== 'sabithacys@siet.ac') return;
+    try {
+        const response = await apiRequest(`/api/students/${encodeURIComponent(studentId)}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ adminEmail: currentUser.email, wardenEmail })
+        });
+        const data = await parseJsonResponse(response);
+        if (!response.ok) throw new Error(data.error || 'Unable to assign warden');
+        showToast(`Student assigned to ${data.wardenName || 'warden'}.`, 'success');
+        await loadDashboardData();
+    } catch (error) {
+        showToast(error.message || 'Unable to assign student.', 'error');
+    }
+}
+
+async function loadWardenAssignedStudents() {
+    const section = document.getElementById('wardenAssignedStudentsSection');
+    const list = document.getElementById('wardenAssignedStudentsList');
+    const select = document.getElementById('wardenAssignedStudentSelect');
+    if (!section || !list || !select || currentUser?.role !== 'warden') return;
+    try {
+        const response = await apiRequest(`/api/warden/students?wardenEmail=${encodeURIComponent(currentUser.email || '')}`);
+        const students = response.ok ? await parseJsonResponse(response) : [];
+        window.currentWardenStudents = Array.isArray(students) ? students : [];
+        select.innerHTML = `<option value="">Select a student to filter gate-pass requests</option>${students.map((student) => `<option value="${escapeHtml(student.name || '')}">${escapeHtml(student.name || 'Student')} · ${escapeHtml(student.registrationNumber || 'No reg. no.')}</option>`).join('')}`;
+        list.innerHTML = students.length
+            ? students.map((student) => `<div class="rounded-xl border border-border bg-surface-alt p-3"><div class="flex items-start justify-between gap-2"><div><p class="font-semibold text-sm">${escapeHtml(student.name || 'Student')}</p><p class="text-xs text-text-secondary mt-1">${escapeHtml(student.registrationNumber || 'No registration number')} · ${escapeHtml(student.hostelBlock || 'No block')} · Room ${escapeHtml(student.roomNumber || 'N/A')}</p></div><button onclick="openWardenStudentEditModal('${escapeHtml(student.userId || student.id || student.email)}')" class="px-2.5 py-1 rounded-lg bg-primary/10 text-primary text-xs font-semibold hover:bg-primary hover:text-white">Edit</button></div></div>`).join('')
+            : '<p class="text-sm text-text-secondary">No students have been assigned to you yet. Ask the administrator to assign students.</p>';
+        section.classList.remove('hidden');
+    } catch (error) {
+        list.innerHTML = '<p class="text-sm text-danger">Unable to load assigned students.</p>';
+        section.classList.remove('hidden');
+    }
+}
+
+function openWardenStudentEditModal(studentId) {
+    const student = (window.currentWardenStudents || []).find((item) => (item.userId || item.id || item.email) === studentId);
+    if (!student) return;
+    showModal('Update Student Account', `
+        <form onsubmit="handleWardenStudentUpdate(event, '${escapeHtml(student.userId || student.id || student.email)}')" class="space-y-4">
+            <p class="text-sm text-text-secondary">Update the student details and login credentials provided by the warden.</p>
+            <input id="editWardenStudentName" required value="${escapeHtml(student.name || '')}" placeholder="Full name" class="input-focus w-full px-4 py-3 rounded-xl border border-border bg-surface-alt text-sm">
+            <input id="editWardenStudentEmail" required type="email" value="${escapeHtml(student.email || '')}" placeholder="Email address" class="input-focus w-full px-4 py-3 rounded-xl border border-border bg-surface-alt text-sm">
+            <input id="editWardenStudentPassword" minlength="6" type="password" placeholder="New password (leave blank to keep current)" class="input-focus w-full px-4 py-3 rounded-xl border border-border bg-surface-alt text-sm">
+            <div class="grid sm:grid-cols-2 gap-4">
+                <input id="editWardenStudentRegistration" required value="${escapeHtml(student.registrationNumber || '')}" placeholder="Registration number" class="input-focus w-full px-4 py-3 rounded-xl border border-border bg-surface-alt text-sm">
+                <input id="editWardenStudentRoom" required value="${escapeHtml(student.roomNumber || '')}" placeholder="Room number" class="input-focus w-full px-4 py-3 rounded-xl border border-border bg-surface-alt text-sm">
+            </div>
+            <select id="editWardenStudentBlock" required class="input-focus w-full px-4 py-3 rounded-xl border border-border bg-surface-alt text-sm">
+                ${['Block A', 'Block B', 'Block C', 'Block D'].map((block) => `<option ${student.hostelBlock === block ? 'selected' : ''}>${block}</option>`).join('')}
+            </select>
+            <div class="flex justify-end gap-3 pt-2"><button type="button" onclick="closeModal()" class="px-4 py-2.5 rounded-xl border border-border text-sm font-semibold">Cancel</button><button type="submit" class="btn-primary px-5 py-2.5 rounded-xl text-white text-sm font-semibold">Save Changes</button></div>
+        </form>
+    `);
+}
+
+async function handleWardenStudentUpdate(event, studentId) {
+    event.preventDefault();
+    const payload = {
+        creatorRole: 'warden',
+        creatorEmail: currentUser?.email,
+        name: document.getElementById('editWardenStudentName')?.value.trim(),
+        email: document.getElementById('editWardenStudentEmail')?.value.trim(),
+        password: document.getElementById('editWardenStudentPassword')?.value || '',
+        registrationNumber: document.getElementById('editWardenStudentRegistration')?.value.trim(),
+        roomNumber: document.getElementById('editWardenStudentRoom')?.value.trim(),
+        hostelBlock: document.getElementById('editWardenStudentBlock')?.value
+    };
+    showLoading();
+    try {
+        const response = await apiRequest(`/api/students/${encodeURIComponent(studentId)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+        const data = await parseJsonResponse(response);
+        hideLoading();
+        if (!response.ok) { showToast(data.error || 'Unable to update student.', 'error'); return; }
+        closeModal();
+        showToast('Student account updated successfully.', 'success');
+        await loadWardenAssignedStudents();
+    } catch (error) {
+        hideLoading();
+        showToast('Unable to connect to server.', 'error');
+    }
+}
+
+function selectWardenAssignedStudent(name) {
+    const search = document.getElementById('wardenGatePassSearchInput');
+    if (!search) return;
+    search.value = name || '';
+    handleWardenGatePassSearch(name || '');
+}
+
+async function handleAdminStudentSubmit(event) {
+    event.preventDefault();
+    const isWarden = currentUser?.role === 'warden';
+    if (!isWarden) {
+        showToast('Only a warden can add student accounts.', 'warning');
+        return;
+    }
+
+    const payload = {
+        creatorRole: currentUser.role,
+        creatorEmail: currentUser.email,
+        name: document.getElementById('adminStudentName')?.value.trim(),
+        email: document.getElementById('adminStudentEmail')?.value.trim(),
+        password: document.getElementById('adminStudentPassword')?.value || '',
+        registrationNumber: document.getElementById('adminStudentRegistrationNumber')?.value.trim(),
+        hostelBlock: document.getElementById('adminStudentHostelBlock')?.value,
+        roomNumber: document.getElementById('adminStudentRoomNumber')?.value.trim()
+    };
+    payload.wardenEmail = currentUser.email;
+    payload.wardenId = currentUser.id || currentUser.userId || '';
+
+    showLoading();
+    try {
+        const response = await apiRequest('/api/students', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        const data = await parseJsonResponse(response);
+        hideLoading();
+        if (!response.ok) {
+            showToast(data.error || 'Unable to add student.', 'error');
+            return;
+        }
+        closeModal();
+        showToast('Student account created successfully.', 'success');
+        await loadDashboardData();
+    } catch (error) {
+        hideLoading();
+        showToast('Unable to connect to server.', 'error');
+    }
 }
 
 // Explicit global exports for inline event handlers across all browsers
@@ -9514,5 +9865,16 @@ window.updateComplaintStatus = updateComplaintStatus;
 window.quickUpdateComplaintStatus = quickUpdateComplaintStatus;
 window.exportReports = exportReports;
 window.openAddStudentModal = openAddStudentModal;
+window.handleAdminStudentSubmit = handleAdminStudentSubmit;
+window.openAddWardenModal = openAddWardenModal;
+window.closeAddWardenModal = closeAddWardenModal;
+window.handleAddWarden = handleAddWarden;
+window.openEditWardenModal = openEditWardenModal;
+window.closeEditWardenModal = closeEditWardenModal;
+window.handleEditWarden = handleEditWarden;
+window.toggleAllAdminStudents = toggleAllAdminStudents;
+window.assignSelectedStudentsToWarden = assignSelectedStudentsToWarden;
+window.openWardenStudentEditModal = openWardenStudentEditModal;
+window.handleWardenStudentUpdate = handleWardenStudentUpdate;
 
 
