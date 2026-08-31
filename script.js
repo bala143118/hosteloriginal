@@ -175,8 +175,29 @@ function apiUrl(path) {
 
 async function apiRequest(path, options = {}) {
     const url = apiUrl(path);
-    console.debug('[API]', options.method || 'GET', url);
-    return fetch(url, options);
+    const headers = {
+        'Accept': 'application/json',
+        ...(options.headers || {})
+    };
+    const token = currentUser?.token || localStorage.getItem('token') || '';
+    if (token && !headers['Authorization']) {
+        headers['Authorization'] = `Bearer ${token}`;
+    }
+    if (currentUser?.email && !headers['x-user-email']) {
+        headers['x-user-email'] = currentUser.email;
+    }
+    if (currentUser?.role && !headers['x-user-role']) {
+        headers['x-user-role'] = currentUser.role;
+    }
+    if ((currentUser?.userId || currentUser?.id) && !headers['x-user-id']) {
+        headers['x-user-id'] = currentUser.userId || currentUser.id;
+    }
+    const finalOptions = {
+        ...options,
+        headers
+    };
+    console.debug('[API]', finalOptions.method || 'GET', url);
+    return fetch(url, finalOptions);
 }
 
 async function parseJsonResponse(response) {
@@ -895,20 +916,20 @@ function isComplaintForCurrentUser(entry) {
     const currentUserId = normalizeText(currentUser.userId || currentUser.id);
 
     const belongsToStudent = (
-        (currentEmail && (normalizeText(entry.email) === currentEmail || normalizeText(entry.userEmail) === currentEmail))
-        || (currentUserId && normalizeText(entry.userId) === currentUserId)
+        (currentEmail && (
+            normalizeText(entry.studentEmail) === currentEmail ||
+            normalizeText(entry.email) === currentEmail ||
+            normalizeText(entry.userEmail) === currentEmail
+        ))
+        || (currentUserId && (
+            normalizeText(entry.studentId) === currentUserId ||
+            normalizeText(entry.userId) === currentUserId
+        ))
+        || (currentRegistrationNumber && normalizeText(entry.registrationNumber) === currentRegistrationNumber)
+        || (currentName && (normalizeText(entry.studentName) === currentName || normalizeText(entry.student) === currentName))
     );
 
-    if (!belongsToStudent) return false;
-
-    // A new account must never inherit complaints created before that account existed.
-    const accountCreatedAt = Date.parse(currentUser.createdAt || '');
-    const complaintCreatedAt = Date.parse(entry.createdAt || '');
-    if (Number.isFinite(accountCreatedAt) && Number.isFinite(complaintCreatedAt)) {
-        return complaintCreatedAt >= accountCreatedAt;
-    }
-
-    return true;
+    return Boolean(belongsToStudent);
 }
 
 function isGatePassForCurrentWarden(entry) {
@@ -4255,13 +4276,21 @@ async function handleComplaintSubmit(e) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 student: studentName,
+                studentName: studentName,
+                name: studentName,
+                studentEmail: currentUser?.email || '',
                 email: currentUser?.email || '',
+                studentId: currentUser?.userId || currentUser?.id || '',
+                userId: currentUser?.userId || currentUser?.id || '',
                 registrationNumber,
                 hostelBlock,
+                block: hostelBlock,
                 roomNumber,
+                room: roomNumber,
                 category,
                 priority: priority.charAt(0).toUpperCase() + priority.slice(1),
                 description,
+                title: `${category} Issue in ${hostelBlock} Room ${roomNumber}`,
                 assignedTo
             })
         });
@@ -4676,11 +4705,14 @@ async function loadDashboardData() {
             }
         });
 
-        const studentDashboard = normalizeText(currentUser?.role) === 'student'
-            ? getStudentDashboardSummary(complaints)
-            : null;
-        updateStudentDashboardStats(studentDashboard || summary);
-        updateStudentRecentComplaints(studentDashboard ? studentDashboard.complaints : complaints);
+        const isStudent = normalizeText(currentUser?.role) === 'student';
+        const studentDashboard = isStudent ? getStudentDashboardSummary(complaints) : null;
+        if (isStudent) {
+            updateStudentDashboardStats(studentDashboard || { total: 0, pending: 0, inProgress: 0, completed: 0 });
+            updateStudentRecentComplaints(studentDashboard ? studentDashboard.complaints : []);
+        } else {
+            updateStudentDashboardStats(summary);
+        }
         renderTechAssignedComplaints(complaints);
         renderTechCompletedComplaints(complaints);
         renderTechSummary(complaints);

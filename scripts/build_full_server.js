@@ -658,12 +658,26 @@ app.get('/api/complaints', async (req, res) => {
     let complaints = await complaintRepository.getAll();
     if (!complaints) complaints = [];
 
-    if (req.user && req.user.role === 'warden') {
-      const scope = await wardenScopeRepository.getScopeForWarden(req.user.userId || req.user.email);
+    const role = req.user?.role || req.headers['x-user-role'] || req.query.role;
+    const email = normalizeEmail(req.user?.email || req.headers['x-user-email'] || req.query.email || req.query.studentEmail);
+    const userId = String(req.user?.userId || req.user?.id || req.headers['x-user-id'] || req.query.userId || '').toLowerCase();
+
+    if (role === 'warden') {
+      const scope = await wardenScopeRepository.getScopeForWarden(userId || email);
       complaints = complaints.filter(c => isComplaintInScope(c, scope));
-    } else if (req.user && req.user.role === 'student') {
-      const studentEmail = (req.user.email || '').toLowerCase();
-      complaints = complaints.filter(c => (c.studentEmail || c.email || '').toLowerCase() === studentEmail);
+    } else if (role === 'student' || (!role && email && !email.includes('admin') && !email.includes('warden') && !email.includes('tech'))) {
+      complaints = complaints.filter(c => {
+        const cEmail = normalizeEmail(c.studentEmail || c.email || c.userEmail);
+        const cId = String(c.studentId || c.userId || '').toLowerCase();
+        return (email && cEmail === email) || (userId && cId === userId);
+      });
+    } else if (role === 'technician') {
+      const techName = String(req.user?.name || '').toLowerCase();
+      complaints = complaints.filter(c => {
+        const aName = String(c.assignedTo || c.technicianName || c.technician || '').toLowerCase();
+        const aId = String(c.technicianId || '').toLowerCase();
+        return (techName && aName.includes(techName)) || (userId && aId === userId);
+      });
     }
 
     res.json(complaints);
@@ -785,12 +799,19 @@ app.get('/api/gate-passes', async (req, res) => {
     let passes = await gatePassRepository.getAll();
     if (!passes) passes = [];
 
-    if (req.user && req.user.role === 'warden') {
-      const scope = await wardenScopeRepository.getScopeForWarden(req.user.userId || req.user.email);
+    const role = req.user?.role || req.headers['x-user-role'] || req.query.role;
+    const email = normalizeEmail(req.user?.email || req.headers['x-user-email'] || req.query.email);
+    const userId = String(req.user?.userId || req.user?.id || req.headers['x-user-id'] || req.query.userId || '').toLowerCase();
+
+    if (role === 'warden') {
+      const scope = await wardenScopeRepository.getScopeForWarden(userId || email);
       passes = passes.filter(p => isGatePassInScope(p, scope));
-    } else if (req.user && req.user.role === 'student') {
-      const studentEmail = (req.user.email || '').toLowerCase();
-      passes = passes.filter(p => (p.email || '').toLowerCase() === studentEmail);
+    } else if (role === 'student' || (!role && email && !email.includes('admin') && !email.includes('warden') && !email.includes('security') && !email.includes('tech'))) {
+      passes = passes.filter(p => {
+        const pEmail = normalizeEmail(p.studentEmail || p.email);
+        const pId = String(p.studentId || p.userId || '').toLowerCase();
+        return (email && pEmail === email) || (userId && pId === userId);
+      });
     }
 
     res.json(passes);
@@ -945,7 +966,16 @@ app.post('/api/gate-passes/export-pdf', async (req, res) => {
 
 app.get('/api/laundry-requests', async (req, res) => {
   try {
-    const requests = await laundryRepository.getAll();
+    let requests = await laundryRepository.getAll();
+    if (!requests) requests = [];
+
+    const role = req.user?.role || req.headers['x-user-role'] || req.query.role;
+    const email = normalizeEmail(req.user?.email || req.headers['x-user-email'] || req.query.email);
+
+    if (role === 'student' || (!role && email && !email.includes('admin') && !email.includes('warden') && !email.includes('security') && !email.includes('tech'))) {
+      requests = requests.filter(l => normalizeEmail(l.studentEmail || l.email) === email);
+    }
+
     res.json(requests);
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch laundry requests.' });
@@ -1180,6 +1210,75 @@ app.get(['/api/summary', '/api/stats'], async (req, res) => {
       userRepository.getByRole('technician')
     ]);
 
+    const role = req.user?.role || req.headers['x-user-role'] || req.query.role;
+    const email = normalizeEmail(req.user?.email || req.headers['x-user-email'] || req.query.email);
+    const userId = String(req.user?.userId || req.user?.id || req.headers['x-user-id'] || req.query.userId || '').toLowerCase();
+
+    // 1. Student-specific summary
+    if (role === 'student' || (!role && email && !email.includes('admin') && !email.includes('warden') && !email.includes('security') && !email.includes('tech'))) {
+      const studentComplaints = (allComplaints || []).filter(c => {
+        const cEmail = normalizeEmail(c.studentEmail || c.email || c.userEmail);
+        const cId = String(c.studentId || c.userId || '').toLowerCase();
+        return (email && cEmail === email) || (userId && cId === userId);
+      });
+      const studentGatePasses = (allGatePasses || []).filter(p => {
+        const pEmail = normalizeEmail(p.studentEmail || p.email);
+        const pId = String(p.studentId || p.userId || '').toLowerCase();
+        return (email && pEmail === email) || (userId && pId === userId);
+      });
+
+      return res.json({
+        total: studentComplaints.length,
+        pending: studentComplaints.filter(c => c.status === 'Pending' || c.status === 'Requested').length,
+        inProgress: studentComplaints.filter(c => c.status === 'In Progress' || c.status === 'Assigned').length,
+        completed: studentComplaints.filter(c => c.status === 'Completed' || c.status === 'Resolved').length,
+        resolvedToday: studentComplaints.filter(c => c.status === 'Completed').length,
+        activeGatePasses: studentGatePasses.filter(p => p.status === 'Approved' || p.status === 'Out').length,
+        activeTechnicians: 0,
+        totalStudents: 1,
+        totalWardens: 0
+      });
+    }
+
+    // 2. Warden-specific summary
+    if (role === 'warden') {
+      const scope = await wardenScopeRepository.getScopeForWarden(userId || email);
+      const scopedStudents = (allStudents || []).filter(s => filterStudentsForScope([s], scope).length > 0);
+      const scopedComplaints = (allComplaints || []).filter(c => isComplaintInScope(c, scope));
+      const scopedGatePasses = (allGatePasses || []).filter(p => isGatePassInScope(p, scope));
+
+      return res.json({
+        total: scopedComplaints.length,
+        pending: scopedComplaints.filter(c => c.status === 'Pending').length,
+        inProgress: scopedComplaints.filter(c => c.status === 'In Progress').length,
+        completed: scopedComplaints.filter(c => c.status === 'Completed').length,
+        resolvedToday: scopedComplaints.filter(c => c.status === 'Completed').length,
+        totalStudents: scopedStudents.length,
+        activeGatePasses: scopedGatePasses.filter(p => p.status === 'Approved' || p.status === 'Out' || p.status === 'SECURITY_PENDING').length,
+        activeTechnicians: (allTechs || []).length
+      });
+    }
+
+    // 3. Technician-specific summary
+    if (role === 'technician') {
+      const techName = String(req.user?.name || '').toLowerCase();
+      const techComplaints = (allComplaints || []).filter(c => {
+        const aName = String(c.assignedTo || c.technicianName || c.technician || '').toLowerCase();
+        const aId = String(c.technicianId || '').toLowerCase();
+        return (techName && aName.includes(techName)) || (userId && aId === userId);
+      });
+
+      return res.json({
+        total: techComplaints.length,
+        pending: techComplaints.filter(c => c.status === 'Pending' || c.status === 'Assigned').length,
+        inProgress: techComplaints.filter(c => c.status === 'In Progress').length,
+        completed: techComplaints.filter(c => c.status === 'Completed').length,
+        resolvedToday: techComplaints.filter(c => c.status === 'Completed').length,
+        activeTechnicians: (allTechs || []).length
+      });
+    }
+
+    // 4. Admin / Global summary
     const activeGatePasses = (allGatePasses || []).filter(p => p.status === 'Approved' || p.status === 'Out' || p.status === 'SECURITY_PENDING').length;
     const pendingComplaints = (allComplaints || []).filter(c => c.status === 'Pending').length;
     const inProgressComplaints = (allComplaints || []).filter(c => c.status === 'In Progress').length;
@@ -1187,12 +1286,12 @@ app.get(['/api/summary', '/api/stats'], async (req, res) => {
     const lowStockInventory = (allInventory || []).filter(i => i.status === 'Low Stock' || i.status === 'Out of Stock' || i.quantity <= i.minStock).length;
 
     res.json({
-      total: (allComplaints || []).length || 1,
+      total: (allComplaints || []).length,
       pending: pendingComplaints,
       inProgress: inProgressComplaints,
       completed: completedComplaints,
       resolvedToday: 0,
-      activeTechnicians: (allTechs || []).length || 2,
+      activeTechnicians: (allTechs || []).length || 1,
       totalStudents: (allStudents || []).length,
       totalWardens: (allWardens || []).length,
       activeGatePasses,
