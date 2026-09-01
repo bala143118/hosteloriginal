@@ -145,6 +145,7 @@ async function runAllTests() {
     const testWardenEmail = `test_warden_${timestamp}@hostelfix.edu`;
     let createdStudentId = null;
     let createdWardenId = null;
+    let createdWarden2Id = null;
 
     {
       // Register Student
@@ -208,13 +209,17 @@ async function runAllTests() {
     console.log('\n--- Process 3: User Role Management APIs ---');
     {
       // Add Warden via POST /api/wardens
+      let createdWarden2Id = '';
       const addWardenRes = await makeRequest('POST', '/api/wardens', {
-        name: 'Warden Smith',
-        email: `warden_smith_${timestamp}@hostelfix.edu`,
+        name: 'Test Workflow Warden',
+        email: `warden_workflow_${timestamp}@hostelfix.edu`,
         phone: '9123456789',
         hostelBlock: 'Block B',
         password: 'wardenpassword'
       });
+      if (addWardenRes.body && (addWardenRes.body.userId || addWardenRes.body.id)) {
+        createdWarden2Id = addWardenRes.body.userId || addWardenRes.body.id;
+      }
       recordResult('POST /api/wardens', addWardenRes.status === 201, `Status ${addWardenRes.status}`);
 
       // Get Wardens
@@ -534,6 +539,10 @@ async function runAllTests() {
     if (createdWardenId) {
       const delWardenRes = await makeRequest('DELETE', `/api/users/${createdWardenId}`);
       console.log(`Cleaned up warden user ${createdWardenId}: status ${delWardenRes.status}`);
+    }
+    if (createdWarden2Id) {
+      const delWarden2Res = await makeRequest('DELETE', `/api/wardens/${createdWarden2Id}`);
+      console.log(`Cleaned up warden user 2 ${createdWarden2Id}: status ${delWarden2Res.status}`);
     }
     if (createdComplaintId) {
       const delCmpRes = await makeRequest('DELETE', `/api/complaints/${createdComplaintId}`);

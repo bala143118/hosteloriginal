@@ -53,13 +53,13 @@ function isRoomInRange(room, roomRangePattern) {
 }
 
 function isFloorAllowed(studentFloor, studentRoom, allowedFloors) {
-    if (!allowedFloors || normalizeString(allowedFloors) === 'all') return true;
+    if (!allowedFloors || normalizeString(allowedFloors) === 'all' || normalizeString(allowedFloors) === 'all floors') return true;
 
-    const floorsList = String(allowedFloors).split(',').map(f => f.trim().toLowerCase());
-    const floor = studentFloor ? String(studentFloor).trim().toLowerCase() : extractFloorFromRoom(studentRoom);
+    const floorsList = String(allowedFloors).split(',').map(f => f.trim().toLowerCase().replace(/^floor\s*/i, '').replace(/^fl\s*/i, ''));
+    const floor = studentFloor ? String(studentFloor).trim().toLowerCase().replace(/^floor\s*/i, '').replace(/^fl\s*/i, '') : extractFloorFromRoom(studentRoom);
 
     if (!floor) return true; // If student has no floor info, allow based on block
-    return floorsList.includes(floor);
+    return floorsList.includes(floor) || floorsList.includes('all') || floorsList.includes('all floors');
 }
 
 function isStudentInScope(student, scope) {

@@ -58,11 +58,22 @@ class UserRepository {
     async findByUserId(userId) {
         const client = getSupabaseClient();
         if (!client || !userId) return null;
-        const { data, error } = await client
+        const cleanId = String(userId).trim();
+        let { data, error } = await client
             .from(this.tableName)
             .select('*')
-            .eq('user_id', userId.trim())
+            .eq('user_id', cleanId)
             .maybeSingle();
+        // Login identifiers are case-insensitive, including generated WRD-/STU- IDs.
+        if (!data && !error) {
+            const fallback = await client
+                .from(this.tableName)
+                .select('*')
+                .ilike('user_id', cleanId)
+                .maybeSingle();
+            data = fallback.data;
+            error = fallback.error;
+        }
         if (error) throw error;
         return data ? this._mapUser(data) : null;
     }
@@ -181,7 +192,18 @@ class UserRepository {
         return data ? this._mapUser(data) : null;
     }
 
+    setStatus(idOrEmail, status) {
+        if (!idOrEmail) return;
+        userStatusCache.set(String(idOrEmail).trim(), status);
+    }
+
+    deleteStatus(idOrEmail) {
+        if (!idOrEmail) return;
+        userStatusCache.delete(String(idOrEmail).trim());
+    }
+
     async updateStatus(userId, status) {
+        this.setStatus(userId, status);
         return this.update(userId, { status });
     }
 
@@ -211,6 +233,20 @@ class UserRepository {
         if (!row) return null;
         const cachedStatus = userStatusCache.get(row.user_id) || userStatusCache.get(row.email);
         const isTech = String(row.role || '').toLowerCase() === 'technician';
+        
+        let meta = {};
+        try {
+            if (row.specialization && row.specialization.startsWith('{')) {
+                meta = JSON.parse(row.specialization);
+            }
+        } catch (e) {}
+
+        const mustChangePassword = Boolean(
+            meta.must_change_password === true ||
+            meta.mustChangePassword === true ||
+            row.must_change_password === true
+        );
+
         return {
             id: row.user_id,
             userId: row.user_id,
@@ -228,6 +264,8 @@ class UserRepository {
             specialization: row.specialization || (isTech ? 'General Maintenance' : ''),
             department: row.specialization || (isTech ? 'Maintenance Department' : ''),
             status: row.status || cachedStatus || 'Active',
+            authUserId: meta.auth_user_id || row.auth_user_id || '',
+            mustChangePassword: mustChangePassword,
             createdAt: row.created_at,
             updatedAt: row.updated_at
         };

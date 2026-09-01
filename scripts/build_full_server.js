@@ -158,6 +158,20 @@ function isValidPassword(password) {
   return typeof password === 'string' && password.length >= 6;
 }
 
+function hashPassword(password) {
+  if (!password) return '';
+  if (/^[0-9a-f]{64}$/i.test(password) || password.startsWith('$2')) {
+    return password;
+  }
+  return crypto.createHash('sha256').update(String(password)).digest('hex');
+}
+
+function verifyPassword(plain, stored) {
+  if (!plain || !stored) return false;
+  if (plain === stored) return true;
+  return hashPassword(plain) === stored;
+}
+
 const AUTHORIZED_ADMIN_EMAIL = normalizeEmail(process.env.ADMIN_EMAIL || 'sabithacys@siet.ac');
 
 function generateUserId(existingUsers = []) {
@@ -292,12 +306,16 @@ app.post('/api/login', async (req, res) => {
       if (localUser) user = localUser;
     }
 
-    if (!user || user.password !== password) {
+    if (!user || !verifyPassword(password, user.password)) {
       return res.status(401).json({ error: 'Invalid user ID, email, or password.' });
     }
 
+    if (user.status === 'Inactive') {
+      return res.status(403).json({ error: 'This account has been deactivated. Please contact administrator.' });
+    }
+
     if (role && user.role !== role) {
-      return res.status(403).json({ error: \`Account does not have the role '\${role}'.\` });
+      return res.status(403).json({ error: "Account does not have the role '" + role + "'." });
     }
 
     let scope = null;
@@ -312,7 +330,8 @@ app.post('/api/login', async (req, res) => {
       ...sanitizeUser(user),
       token,
       scope,
-      permissions
+      permissions,
+      mustChangePassword: Boolean(user.mustChangePassword)
     });
   } catch (err) {
     console.error('[Login Error]', err);
@@ -321,19 +340,147 @@ app.post('/api/login', async (req, res) => {
 });
 
 // ============================================================================
+// 1.5 AUTHENTICATION & PASSWORD MANAGEMENT
+// ============================================================================
+
+app.post(['/api/change-password', '/api/warden/change-password', '/api/user/change-password'], async (req, res) => {
+  try {
+    const { currentPassword, newPassword, confirmPassword, email, userId } = req.body;
+    const identifier = req.user?.email || req.user?.userId || req.user?.id || email || userId;
+
+    if (!identifier) {
+      return res.status(401).json({ error: 'Authentication or user identifier is required.' });
+    }
+    if (!newPassword || newPassword.length < 6) {
+      return res.status(400).json({ error: 'New password must be at least 6 characters long.' });
+    }
+    if (confirmPassword && confirmPassword !== newPassword) {
+      return res.status(400).json({ error: 'New password and confirmation do not match.' });
+    }
+
+    const user = await userRepository.findUserByIdentifier(identifier);
+    if (!user) {
+      return res.status(404).json({ error: 'User account not found.' });
+    }
+
+    if (currentPassword && !verifyPassword(currentPassword, user.password)) {
+      return res.status(400).json({ error: 'Current / temporary password is incorrect.' });
+    }
+
+    if (user.role === 'warden') {
+      await wardenRepository.updatePassword(user.userId || user.email, newPassword);
+    } else {
+      await userRepository.update(user.userId, { password: hashPassword(newPassword) });
+    }
+
+    const updated = await userRepository.findUserByIdentifier(identifier);
+    return res.json({
+      success: true,
+      message: 'Password changed successfully! You may now access your dashboard.',
+      user: sanitizeUser(updated)
+    });
+  } catch (err) {
+    console.error('[Change Password Error]', err);
+    return res.status(500).json({ error: 'Failed to update password.' });
+  }
+});
+
+// ============================================================================
 // 2. WARDENS & TECHNICIANS (SUPABASE BACKED)
 // ============================================================================
 
-app.get('/api/wardens', async (req, res) => {
+app.get(['/api/hostel-structure', '/api/admin/hostel-structure'], async (req, res) => {
   try {
+    const students = await studentRepository.getAll();
+    const blocksMap = new Map();
+    
+    const standardBlocks = ['Block A', 'Block B', 'Block C', 'Block D'];
+    standardBlocks.forEach(b => {
+      blocksMap.set(b, {
+        name: b,
+        floors: ['Floor 1', 'Floor 2', 'Floor 3', 'All Floors'],
+        roomsByFloor: {
+          'Floor 1': ['101-130', '101', '102', '103', '104', '105', '106', '107', '108', '109', '110'],
+          'Floor 2': ['201-230', '201', '202', '203', '204', '205', '206', '207', '208', '209', '210'],
+          'Floor 3': ['301-330', '301', '302', '303', '304', '305', '306', '307', '308', '309', '310'],
+          'All Floors': ['All Rooms', '101-130', '201-230', '301-330']
+        }
+      });
+    });
+
+    (students || []).forEach(s => {
+      const blk = s.hostelBlock || s.block;
+      if (blk && !blocksMap.has(blk)) {
+        blocksMap.set(blk, {
+          name: blk,
+          floors: ['Floor 1', 'Floor 2', 'Floor 3', 'All Floors'],
+          roomsByFloor: {
+            'Floor 1': ['101-130'],
+            'Floor 2': ['201-230'],
+            'Floor 3': ['301-330'],
+            'All Floors': ['All Rooms']
+          }
+        });
+      }
+    });
+
+    res.json({
+      hostels: ['Main Hostel', 'Boys Hostel', 'Girls Hostel', 'PG Hostel', 'All Hostels'],
+      blocks: Array.from(blocksMap.values())
+    });
+  } catch (err) {
+    console.error('[Hostel Structure Error]', err);
+    res.status(500).json({ error: 'Failed to fetch hostel structure.' });
+  }
+});
+
+app.get(['/api/wardens', '/api/admin/wardens'], async (req, res) => {
+  try {
+    const adminIdOrEmail = req.user && req.user.role === 'admin' ? (req.user.userId || req.user.email) : null;
     const wardens = await wardenRepository.getAllWardens();
     res.json(wardens.map(sanitizeUser));
   } catch (err) {
+    console.error('[Get Wardens Error]', err);
     res.status(500).json({ error: 'Failed to fetch wardens.' });
   }
 });
 
-app.get('/api/wardens/:id', async (req, res) => {
+app.get(['/api/admin/wardens-stats', '/api/admin/wardens/stats', '/api/wardens-stats'], async (req, res) => {
+  try {
+    const [allWardens, allStudents, allComplaints, allGatePasses, allAlerts] = await Promise.all([
+      wardenRepository.getAllWardens(),
+      studentRepository.getAll(),
+      complaintRepository.getAll(),
+      gatePassRepository.getAll(),
+      securityEventRepository.getAll()
+    ]);
+
+    const activeWardens = allWardens.filter(w => w.status === 'Active').length;
+    const inactiveWardens = allWardens.filter(w => w.status === 'Inactive').length;
+    const pendingComplaints = (allComplaints || []).filter(c => c.status === 'Pending' || c.status === 'Requested').length;
+    const pendingGatePasses = (allGatePasses || []).filter(p => p.status === 'Pending' || p.status === 'PENDING_ADMIN').length;
+    const activeAlerts = (allAlerts || []).filter(a => !a.acknowledged).length;
+
+    res.json({
+      totalWardens: allWardens.length,
+      activeWardens,
+      inactiveWardens,
+      studentsManaged: allStudents.length,
+      pendingComplaints,
+      pendingGatePasses,
+      activeAlerts
+    });
+  } catch (err) {
+    console.error('[Warden Stats Error]', err);
+    res.status(500).json({ error: 'Failed to fetch warden statistics.' });
+  }
+});
+
+app.get(['/api/admin/permissions-catalog', '/api/permissions-catalog'], (req, res) => {
+  res.json(wardenPermissionRepository.getCatalog());
+});
+
+app.get(['/api/wardens/:id', '/api/admin/wardens/:id'], async (req, res) => {
   try {
     const warden = await wardenRepository.getWardenById(req.params.id);
     if (!warden) return res.status(404).json({ error: 'Warden not found' });
@@ -343,57 +490,157 @@ app.get('/api/wardens/:id', async (req, res) => {
   }
 });
 
-app.post('/api/wardens', async (req, res) => {
+app.post(['/api/wardens', '/api/admin/wardens'], async (req, res) => {
   try {
-    const { name, email, password, hostelBlock, phone, hostel, floors, rooms, permissions } = req.body;
-    if (!name || !email || !password) {
-      return res.status(400).json({ error: 'Name, email, and password are required.' });
+    const { name, fullName, email, password, confirmPassword, hostelBlock, block, phone, mobileNumber, hostel, floors, rooms, permissions, status, employeeId, wardenId, userId, gender, address, emergencyContact, profilePhoto } = req.body;
+    const finalName = name || fullName;
+    const finalPhone = phone || mobileNumber;
+    
+    if (!finalName || !String(finalName).trim()) {
+      return res.status(400).json({ error: 'Warden Name is required.' });
     }
+    if (!email || !isValidEmail(email)) {
+      return res.status(400).json({ error: 'A valid Gmail/Email address is required.' });
+    }
+    if (password && !isValidPassword(password)) {
+      return res.status(400).json({ error: 'Password must be at least 6 characters long.' });
+    }
+    if (confirmPassword && confirmPassword !== password) {
+      return res.status(400).json({ error: 'Password and Confirm Password do not match.' });
+    }
+
     const normEmail = normalizeEmail(email);
     const existing = await userRepository.findByEmail(normEmail);
     if (existing) {
-      return res.status(409).json({ error: 'User with this email already exists' });
+      return res.status(409).json({ error: 'A user with this Gmail/Email address already exists.' });
     }
 
+    const customUserId = wardenId || employeeId || userId;
+    if (customUserId) {
+      const existingId = await userRepository.findUserByIdentifier(customUserId);
+      if (existingId) {
+        return res.status(409).json({ error: "Warden ID '" + customUserId + "' is already assigned to another user." });
+      }
+    }
+
+    const adminId = req.user?.userId || req.user?.id || '';
+    const adminEmail = req.user?.email || '';
+
     const warden = await wardenRepository.createWarden({
-      name: name.trim(),
+      userId: customUserId,
+      wardenId: customUserId,
+      name: finalName.trim(),
       email: normEmail,
-      password: String(password),
-      hostelBlock: hostelBlock || 'Block A',
-      phone: phone || '+91 98765 43210',
-      hostel: hostel || 'All',
+      password: password || undefined,
+      hostelBlock: hostelBlock || block || 'Block A',
+      block: block || hostelBlock || 'Block A',
+      phone: finalPhone || '',
+      hostel: hostel || 'Main Hostel',
       floors: floors || 'All',
       rooms: rooms || 'All',
-      permissions
+      gender: gender || '',
+      address: address || '',
+      emergencyContact: emergencyContact || '',
+      profilePhoto: profilePhoto || '',
+      permissions: permissions || wardenPermissionRepository.DEFAULT_WARDEN_PERMISSIONS,
+      status: status || 'Active',
+      adminId,
+      adminEmail
     });
 
-    res.status(201).json(sanitizeUser(warden));
+    if (req.io) {
+      req.io.emit('warden-created', sanitizeUser(warden));
+      req.io.emit('warden-updated', sanitizeUser(warden));
+    }
+
+    res.status(201).json({
+      ...sanitizeUser(warden),
+      temporaryPassword: warden.temporaryPassword,
+      mustChangePassword: true
+    });
   } catch (err) {
+    console.error('[Create Warden Error]', err);
     res.status(500).json({ error: 'Failed to create warden.' });
   }
 });
 
-app.put('/api/wardens/:id', async (req, res) => {
+app.put(['/api/wardens/:id', '/api/admin/wardens/:id'], async (req, res) => {
   try {
-    const updated = await wardenRepository.updateWarden(req.params.id, req.body);
+    const { name, fullName, email, password, phone, mobileNumber, status, hostelBlock, block, hostel, floors, rooms, permissions, gender, address, emergencyContact, profilePhoto } = req.body;
+    const updates = {};
+    if (name || fullName) updates.name = (name || fullName).trim();
+    if (email) {
+      if (!isValidEmail(email)) return res.status(400).json({ error: 'Please provide a valid email.' });
+      updates.email = normalizeEmail(email);
+    }
+    if (password) {
+      if (!isValidPassword(password)) return res.status(400).json({ error: 'Password must be at least 6 characters.' });
+      updates.password = String(password);
+    }
+    if (phone !== undefined || mobileNumber !== undefined) updates.phone = phone || mobileNumber;
+    if (status !== undefined) updates.status = status;
+    if (hostelBlock !== undefined || block !== undefined) updates.hostelBlock = hostelBlock || block;
+    if (hostel !== undefined) updates.hostel = hostel;
+    if (floors !== undefined) updates.floors = floors;
+    if (rooms !== undefined) updates.rooms = rooms;
+    if (gender !== undefined) updates.gender = gender;
+    if (address !== undefined) updates.address = address;
+    if (emergencyContact !== undefined) updates.emergencyContact = emergencyContact;
+    if (profilePhoto !== undefined) updates.profilePhoto = profilePhoto;
+    if (permissions !== undefined) updates.permissions = permissions;
+
+    const updated = await wardenRepository.updateWarden(req.params.id, updates);
     if (!updated) return res.status(404).json({ error: 'Warden not found' });
+
+    if (req.io) {
+      req.io.emit('warden-updated', sanitizeUser(updated));
+    }
+
     res.json(sanitizeUser(updated));
   } catch (err) {
+    console.error('[Update Warden Error]', err);
     res.status(500).json({ error: 'Failed to update warden.' });
   }
 });
 
-app.delete('/api/wardens/:id', async (req, res) => {
+app.patch(['/api/wardens/:id/status', '/api/admin/wardens/:id/status'], async (req, res) => {
+  try {
+    const { status } = req.body;
+    if (!status || !['Active', 'Inactive', 'active', 'inactive'].includes(status)) {
+      return res.status(400).json({ error: "Status must be 'Active' or 'Inactive'." });
+    }
+    const normalizedStatus = status.charAt(0).toUpperCase() + status.slice(1).toLowerCase();
+    const updated = await wardenRepository.updateWarden(req.params.id, { status: normalizedStatus });
+    if (!updated) return res.status(404).json({ error: 'Warden not found' });
+
+    if (req.io) {
+      req.io.emit('warden-updated', sanitizeUser(updated));
+    }
+
+    res.json(sanitizeUser(updated));
+  } catch (err) {
+    console.error('[Patch Warden Status Error]', err);
+    res.status(500).json({ error: 'Failed to update warden status.' });
+  }
+});
+
+app.delete(['/api/wardens/:id', '/api/admin/wardens/:id'], async (req, res) => {
   try {
     const success = await wardenRepository.deleteWarden(req.params.id);
     if (!success) return res.status(404).json({ error: 'Warden not found' });
-    res.json({ message: 'Warden removed successfully' });
+
+    if (req.io) {
+      req.io.emit('warden-deleted', { id: req.params.id });
+    }
+
+    res.json({ success: true, message: 'Warden removed successfully' });
   } catch (err) {
+    console.error('[Delete Warden Error]', err);
     res.status(500).json({ error: 'Failed to remove warden.' });
   }
 });
 
-app.get('/api/wardens/:id/scope', async (req, res) => {
+app.get(['/api/wardens/:id/scope', '/api/admin/wardens/:id/scope'], async (req, res) => {
   try {
     const scope = await wardenScopeRepository.getScopeForWarden(req.params.id);
     res.json(scope);
@@ -402,16 +649,19 @@ app.get('/api/wardens/:id/scope', async (req, res) => {
   }
 });
 
-app.put('/api/wardens/:id/scope', async (req, res) => {
+app.put(['/api/wardens/:id/scope', '/api/admin/wardens/:id/scope'], async (req, res) => {
   try {
     const scope = await wardenScopeRepository.saveWardenScope(req.params.id, req.body);
+    if (req.io) {
+      req.io.emit('warden-scope-updated', { wardenId: req.params.id, scope });
+    }
     res.json(scope);
   } catch (err) {
     res.status(500).json({ error: 'Failed to save warden scope.' });
   }
 });
 
-app.get('/api/wardens/:id/permissions', async (req, res) => {
+app.get(['/api/wardens/:id/permissions', '/api/admin/wardens/:id/permissions'], async (req, res) => {
   try {
     const perms = await wardenPermissionRepository.getPermissions(req.params.id);
     res.json(perms);
@@ -420,22 +670,24 @@ app.get('/api/wardens/:id/permissions', async (req, res) => {
   }
 });
 
-app.put('/api/wardens/:id/permissions', async (req, res) => {
+app.put(['/api/wardens/:id/permissions', '/api/admin/wardens/:id/permissions'], async (req, res) => {
   try {
     const perms = await wardenPermissionRepository.setPermissions(req.params.id, req.body.permissions);
+    if (req.io) {
+      req.io.emit('warden-permissions-updated', { wardenId: req.params.id, permissions: perms });
+    }
     res.json(perms);
   } catch (err) {
     res.status(500).json({ error: 'Failed to save warden permissions.' });
   }
 });
 
-app.get(['/api/warden/students', '/api/wardens/:id/students'], async (req, res) => {
+app.get(['/api/warden/students', '/api/wardens/:id/students', '/api/admin/wardens/:id/students'], async (req, res) => {
   try {
     const wardenIdOrEmail = req.params.id || req.query.wardenEmail || req.query.wardenId || req.user?.userId || req.user?.email;
     if (!wardenIdOrEmail) return res.status(400).json({ error: 'Warden identifier is required.' });
 
-    const scope = await wardenScopeRepository.getScopeForWarden(wardenIdOrEmail);
-    const students = await studentRepository.getByScope(scope);
+    const students = await wardenRepository.getWardenStudents(wardenIdOrEmail);
     res.json(students.map(sanitizeUser));
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch students for warden scope.' });
@@ -653,6 +905,150 @@ app.delete('/api/users/:id', async (req, res) => {
 // 4. COMPLAINTS MANAGEMENT (SUPABASE BACKED)
 // ============================================================================
 
+function generateComplaintPdfDoc(complaint, res) {
+  const doc = new PDFDocument({ margin: 45, size: 'A4' });
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `inline; filename="Complaint-${complaint.id}.pdf"`);
+  doc.pipe(res);
+
+  // Header Banner
+  doc.rect(45, 45, 505, 55).fill('#4f46e5');
+  doc.fillColor('#ffffff').fontSize(16).font('Helvetica-Bold').text('HOSTELFIX MAINTENANCE COMPLAINT REPORT', 60, 58);
+  doc.fontSize(9).font('Helvetica').text('Official Hostel Administration & Maintenance Record', 60, 78);
+
+  doc.fillColor('#0f172a');
+  const startY = 115;
+  doc.rect(45, startY, 505, 110).fillAndStroke('#f8fafc', '#cbd5e1');
+  doc.fillColor('#0f172a').fontSize(9);
+
+  doc.font('Helvetica-Bold').text('Complaint ID:', 60, startY + 12);
+  doc.font('Helvetica').text(`${complaint.id}`, 150, startY + 12);
+
+  doc.font('Helvetica-Bold').text('Submitted Date:', 310, startY + 12);
+  doc.font('Helvetica').text(`${new Date(complaint.createdAt).toLocaleString('en-IN')}`, 410, startY + 12);
+
+  doc.font('Helvetica-Bold').text('Category:', 60, startY + 32);
+  doc.font('Helvetica').text(`${complaint.category || 'General'}`, 150, startY + 32);
+
+  doc.font('Helvetica-Bold').text('Priority Level:', 310, startY + 32);
+  doc.font('Helvetica').text(`${complaint.priority || 'Medium'}`, 410, startY + 32);
+
+  doc.font('Helvetica-Bold').text('Hostel Location:', 60, startY + 52);
+  doc.font('Helvetica').text(`${complaint.block || 'Block A'} - Room ${complaint.roomNumber || 'N/A'} (Floor ${complaint.floor || '1'})`, 150, startY + 52);
+
+  doc.font('Helvetica-Bold').text('Current Status:', 310, startY + 52);
+  const statusColor = complaint.status === 'Verified' ? '#16a34a' : complaint.status === 'Resolved' ? '#0284c7' : complaint.status === 'Reopened' ? '#dc2626' : '#ea580c';
+  doc.font('Helvetica-Bold').fillColor(statusColor).text(`${complaint.status || 'Submitted'}`, 410, startY + 52);
+
+  doc.fillColor('#0f172a').font('Helvetica-Bold').text('Assigned Warden:', 60, startY + 72);
+  doc.font('Helvetica').text(`${complaint.wardenName || 'Duty Warden'}`, 150, startY + 72);
+
+  doc.font('Helvetica-Bold').text('Assigned Staff:', 310, startY + 72);
+  doc.font('Helvetica').text(`${complaint.technicianName || 'Unassigned'}`, 410, startY + 72);
+
+  doc.font('Helvetica-Bold').text('Preferred Time:', 60, startY + 92);
+  doc.font('Helvetica').text(`${complaint.preferredTime || 'Anytime during working hours'}`, 150, startY + 92);
+
+  // Student Section
+  let currentY = startY + 130;
+  doc.fontSize(11).font('Helvetica-Bold').fillColor('#4f46e5').text('1. RESIDENT STUDENT INFORMATION', 45, currentY);
+  currentY += 18;
+  doc.rect(45, currentY, 505, 45).fillAndStroke('#f8fafc', '#e2e8f0');
+  doc.fillColor('#0f172a').fontSize(9).font('Helvetica-Bold');
+  doc.text('Student Name:', 60, currentY + 10);
+  doc.font('Helvetica').text(`${complaint.studentName || 'Student'}`, 145, currentY + 10);
+  doc.font('Helvetica-Bold').text('Student ID / Reg:', 310, currentY + 10);
+  doc.font('Helvetica').text(`${complaint.studentId || 'N/A'}`, 410, currentY + 10);
+  doc.font('Helvetica-Bold').text('Email Address:', 60, currentY + 26);
+  doc.font('Helvetica').text(`${complaint.studentEmail || 'N/A'}`, 145, currentY + 26);
+  doc.font('Helvetica-Bold').text('Phone / Mobile:', 310, currentY + 26);
+  doc.font('Helvetica').text(`${complaint.studentPhone || 'N/A'}`, 410, currentY + 26);
+
+  // Issue & Description
+  currentY += 58;
+  doc.fontSize(11).font('Helvetica-Bold').fillColor('#4f46e5').text('2. COMPLAINT ISSUE & DESCRIPTION', 45, currentY);
+  currentY += 18;
+  doc.rect(45, currentY, 505, 60).fillAndStroke('#ffffff', '#cbd5e1');
+  doc.fillColor('#0f172a').fontSize(9).font('Helvetica-Bold').text(`Title: ${complaint.title || 'Maintenance Request'}`, 55, currentY + 10);
+  doc.font('Helvetica').text(`${complaint.description || 'No detailed description provided.'}`, 55, currentY + 26, { width: 485 });
+
+  // Resolution & Verification Remarks
+  currentY += 75;
+  doc.fontSize(11).font('Helvetica-Bold').fillColor('#4f46e5').text('3. RESOLUTION & WARDEN VERIFICATION', 45, currentY);
+  currentY += 18;
+  doc.rect(45, currentY, 505, 80).fillAndStroke('#f8fafc', '#e2e8f0');
+  doc.fillColor('#0f172a').fontSize(9).font('Helvetica-Bold');
+  doc.text('Staff Remarks:', 60, currentY + 12);
+  doc.font('Helvetica').text(`${complaint.resolutionRemarks || 'Pending resolution remarks.'}`, 150, currentY + 12, { width: 380 });
+  doc.font('Helvetica-Bold').text('Resolved Date:', 60, currentY + 34);
+  doc.font('Helvetica').text(`${complaint.resolvedAt ? new Date(complaint.resolvedAt).toLocaleString('en-IN') : 'Work in progress'}`, 150, currentY + 34);
+  doc.font('Helvetica-Bold').text('Verified By:', 60, currentY + 54);
+  doc.font('Helvetica').text(`${complaint.verifiedBy ? `${complaint.verifiedBy} (at ${new Date(complaint.verifiedAt).toLocaleString('en-IN')})` : 'Pending warden verification approval'}`, 150, currentY + 54);
+
+  // Signature Block
+  currentY += 100;
+  doc.rect(45, currentY, 235, 55).stroke('#cbd5e1');
+  doc.fontSize(8).font('Helvetica-Bold').fillColor('#64748b').text('TECHNICIAN SIGNATURE & STAMP', 55, currentY + 8);
+  doc.text(`${complaint.technicianName || 'Technician'}`, 55, currentY + 38);
+
+  doc.rect(315, currentY, 235, 55).stroke('#cbd5e1');
+  doc.fontSize(8).font('Helvetica-Bold').fillColor('#64748b').text('WARDEN VERIFICATION SIGNATURE', 325, currentY + 8);
+  doc.text(`${complaint.wardenName || 'Hostel Warden'}`, 325, currentY + 38);
+
+  // Footer
+  doc.fontSize(8).font('Helvetica').fillColor('#94a3b8').text(`Document generated automatically by HostelFix System on ${new Date().toLocaleString('en-IN')}. Page 1 of 1`, 45, 780, { align: 'center', width: 505 });
+
+  doc.end();
+}
+
+app.get(['/api/complaints/stats', '/api/complaints-stats'], async (req, res) => {
+  try {
+    const complaints = (await complaintRepository.getAll()) || [];
+    const total = complaints.length;
+    const submitted = complaints.filter(c => c.status === 'Submitted' || c.status === 'Pending' || c.status === 'Requested').length;
+    const underReview = complaints.filter(c => c.status === 'Under Review').length;
+    const assigned = complaints.filter(c => c.status === 'Assigned' || c.status === 'Accepted').length;
+    const inProgress = complaints.filter(c => c.status === 'In Progress').length;
+    const resolved = complaints.filter(c => c.status === 'Resolved').length;
+    const verified = complaints.filter(c => c.status === 'Verified' || c.status === 'Completed').length;
+    const reopened = complaints.filter(c => c.status === 'Reopened' || c.status === 'Rejected').length;
+    const emergency = complaints.filter(c => String(c.priority).toLowerCase() === 'emergency' || String(c.priority).toLowerCase() === 'high').length;
+
+    // Block breakdown
+    const blockDistribution = {
+      'Block A': complaints.filter(c => String(c.block || c.hostelBlock).includes('A')).length,
+      'Block B': complaints.filter(c => String(c.block || c.hostelBlock).includes('B')).length,
+      'Block C': complaints.filter(c => String(c.block || c.hostelBlock).includes('C')).length,
+      'Block D': complaints.filter(c => String(c.block || c.hostelBlock).includes('D')).length
+    };
+
+    // Category breakdown
+    const categoryDistribution = {};
+    complaints.forEach(c => {
+      const cat = c.category || 'General';
+      categoryDistribution[cat] = (categoryDistribution[cat] || 0) + 1;
+    });
+
+    res.json({
+      total,
+      submitted,
+      pending: submitted,
+      underReview,
+      assigned,
+      inProgress,
+      resolved,
+      verified,
+      reopened,
+      emergency,
+      blockDistribution,
+      categoryDistribution
+    });
+  } catch (err) {
+    console.error('[Complaint Stats Error]', err);
+    res.status(500).json({ error: 'Failed to fetch complaint statistics.' });
+  }
+});
+
 app.get('/api/complaints', async (req, res) => {
   try {
     let complaints = await complaintRepository.getAll();
@@ -661,6 +1057,12 @@ app.get('/api/complaints', async (req, res) => {
     const role = req.user?.role || req.headers['x-user-role'] || req.query.role;
     const email = normalizeEmail(req.user?.email || req.headers['x-user-email'] || req.query.email || req.query.studentEmail);
     const userId = String(req.user?.userId || req.user?.id || req.headers['x-user-id'] || req.query.userId || '').toLowerCase();
+    const wardenId = req.query.wardenId;
+    const technicianId = req.query.technicianId;
+    const block = req.query.block;
+    const category = req.query.category;
+    const priority = req.query.priority;
+    const status = req.query.status;
 
     if (role === 'warden') {
       const scope = await wardenScopeRepository.getScopeForWarden(userId || email);
@@ -680,9 +1082,51 @@ app.get('/api/complaints', async (req, res) => {
       });
     }
 
+    if (block && block !== 'all') {
+      complaints = complaints.filter(c => String(c.block || c.hostelBlock).toLowerCase() === block.toLowerCase());
+    }
+    if (category && category !== 'all') {
+      complaints = complaints.filter(c => String(c.category).toLowerCase() === category.toLowerCase());
+    }
+    if (priority && priority !== 'all') {
+      complaints = complaints.filter(c => String(c.priority).toLowerCase() === priority.toLowerCase());
+    }
+    if (status && status !== 'all') {
+      complaints = complaints.filter(c => String(c.status).toLowerCase() === status.toLowerCase());
+    }
+    if (wardenId && wardenId !== 'all') {
+      complaints = complaints.filter(c => String(c.wardenId).toLowerCase() === wardenId.toLowerCase());
+    }
+    if (technicianId && technicianId !== 'all') {
+      complaints = complaints.filter(c => String(c.technicianId).toLowerCase() === technicianId.toLowerCase());
+    }
+
     res.json(complaints);
   } catch (err) {
+    console.error('[Get Complaints Error]', err);
     res.status(500).json({ error: 'Failed to fetch complaints.' });
+  }
+});
+
+app.get('/api/complaints/:id/pdf', async (req, res) => {
+  try {
+    const complaint = await complaintRepository.findById(req.params.id);
+    if (!complaint) return res.status(404).json({ error: 'Complaint not found' });
+    generateComplaintPdfDoc(complaint, res);
+  } catch (err) {
+    console.error('[Complaint PDF Error]', err);
+    res.status(500).json({ error: 'Failed to generate complaint PDF.' });
+  }
+});
+
+app.post('/api/complaints/:id/pdf', async (req, res) => {
+  try {
+    const complaint = await complaintRepository.findById(req.params.id);
+    if (!complaint) return res.status(404).json({ error: 'Complaint not found' });
+    generateComplaintPdfDoc(complaint, res);
+  } catch (err) {
+    console.error('[Complaint PDF Error]', err);
+    res.status(500).json({ error: 'Failed to generate complaint PDF.' });
   }
 });
 
@@ -705,34 +1149,90 @@ app.post('/api/complaints', async (req, res) => {
     }
     res.status(201).json(complaint);
   } catch (err) {
+    console.error('[Create Complaint Error]', err);
     res.status(500).json({ error: 'Failed to create complaint.' });
+  }
+});
+
+app.put('/api/complaints/:id/assign', async (req, res) => {
+  try {
+    const { technicianId, technicianName, assignedBy, assignedByRole } = req.body;
+    const complaint = await complaintRepository.assignStaff(
+      req.params.id,
+      technicianId,
+      technicianName,
+      assignedBy || req.user?.name || 'Warden',
+      assignedByRole || req.user?.role || 'warden'
+    );
+    if (req.io) {
+      req.io.emit('complaint-status-updated', complaint);
+      req.io.emit('complaint-assigned', complaint);
+    }
+    res.json(complaint);
+  } catch (err) {
+    console.error('[Assign Complaint Error]', err);
+    res.status(500).json({ error: err.message || 'Failed to assign complaint.' });
   }
 });
 
 app.put(['/api/complaints/:id', '/api/complaints/:id/status'], async (req, res) => {
   try {
-    const { status, notes, remarks, assignedTo, technicianId, technicianName, technician } = req.body;
+    const {
+      status,
+      actor,
+      role,
+      notes,
+      remarks,
+      beforePhoto,
+      afterPhoto,
+      rejectionReason,
+      assignedTo,
+      technicianId,
+      technicianName,
+      technician
+    } = req.body;
+
     let complaint;
     const techName = assignedTo || technicianName || technician;
-    if (techName) {
-      complaint = await complaintRepository.assignTechnician(req.params.id, technicianId || 'TECH-001', techName);
-      if (status) complaint = await complaintRepository.updateStatus(req.params.id, status, notes || remarks);
+
+    if (techName && (!status || status === 'Assigned')) {
+      complaint = await complaintRepository.assignStaff(
+        req.params.id,
+        technicianId || 'TECH-001',
+        techName,
+        actor || req.user?.name || 'Warden',
+        role || req.user?.role || 'warden'
+      );
     } else if (status) {
-      complaint = await complaintRepository.updateStatus(req.params.id, status, notes || remarks);
+      complaint = await complaintRepository.updateWorkflowStatus(req.params.id, {
+        status,
+        actor: actor || req.user?.name || (role === 'technician' ? 'Technician' : 'Warden'),
+        role: role || req.user?.role || 'technician',
+        remarks: remarks || notes || '',
+        beforePhoto,
+        afterPhoto,
+        rejectionReason
+      });
     } else {
       complaint = await complaintRepository.findById(req.params.id);
     }
 
-    if (complaint && techName) complaint.assignedTo = techName;
-    if (req.io && complaint) req.io.emit('complaint-status-updated', complaint);
-    res.json(complaint || { status: status || 'In Progress', assignedTo: techName });
+    if (req.io && complaint) {
+      req.io.emit('complaint-status-updated', complaint);
+    }
+    res.json(complaint);
   } catch (err) {
-    res.status(500).json({ error: 'Failed to update complaint.' });
+    console.error('[Update Complaint Error]', err);
+    res.status(500).json({ error: err.message || 'Failed to update complaint.' });
   }
 });
 
 app.delete('/api/complaints/:id', async (req, res) => {
   try {
+    await complaintRepository.delete(req.params.id);
+    if (req.io) {
+      req.io.emit('complaint-deleted', { id: req.params.id });
+    }
     res.json({ message: 'Complaint deleted successfully' });
   } catch (err) {
     res.status(200).json({ message: 'Complaint deleted successfully' });

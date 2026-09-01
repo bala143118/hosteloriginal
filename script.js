@@ -660,6 +660,8 @@ function navigateTo(pageId, options = {}) {
     const currentPageId = getActivePageId();
 
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+    document.body.classList.remove('overflow-hidden');
+    document.documentElement.classList.remove('overflow-hidden');
     const target = document.getElementById('page-' + pageId);
     if (target) {
         target.classList.add('active');
@@ -725,6 +727,17 @@ function navigateTo(pageId, options = {}) {
 
     if (pageId === 'profile') {
         renderCurrentUserProfile();
+        const wardensWrapper = document.getElementById('adminProfileMyWardensWrapper');
+        if (wardensWrapper) {
+            if (currentUser?.role === 'admin') {
+                wardensWrapper.classList.remove('hidden');
+                if (typeof renderAdminProfileWardens === 'function') {
+                    renderAdminProfileWardens();
+                }
+            } else {
+                wardensWrapper.classList.add('hidden');
+            }
+        }
     }
 
     if (pageId === 'admin-settings') {
@@ -733,7 +746,11 @@ function navigateTo(pageId, options = {}) {
     }
 
     if (pageId === 'admin-wardens') {
-        loadWardensList().catch((error) => console.error(error));
+        if (typeof renderAdminWardensPage === 'function') {
+            renderAdminWardensPage().catch((error) => console.error(error));
+        } else {
+            loadWardensList().catch((error) => console.error(error));
+        }
     }
 
     if (pageId === 'admin-technicians') {
@@ -936,8 +953,13 @@ function isGatePassForCurrentWarden(entry) {
     if (!currentUser || normalizeText(currentUser.role) !== 'warden' || !entry || typeof entry !== 'object') return false;
     const currentEmail = normalizeText(currentUser.email);
     const currentId = normalizeText(currentUser.userId || currentUser.id);
-    return (currentEmail && normalizeText(entry.wardenEmail) === currentEmail)
-        || (currentId && normalizeText(entry.wardenId) === currentId);
+    const wardenBlock = normalizeText(currentUser.block || currentUser.hostelBlock);
+    const entryBlock = normalizeText(entry.hostelBlock || entry.block || entry.studentHostelBlock);
+
+    if (currentEmail && normalizeText(entry.wardenEmail) === currentEmail) return true;
+    if (currentId && normalizeText(entry.wardenId) === currentId) return true;
+    if (wardenBlock && entryBlock && wardenBlock === entryBlock) return true;
+    return false;
 }
 
 function isWardenNotificationForCurrentUser(notification) {
@@ -1011,40 +1033,88 @@ function syncCurrentUserStudentProfile() {
     }
 }
 
-async function prepareComplaintForm() {
-    const studentNameInput = document.getElementById('complaintStudentName');
-    const regInput = document.getElementById('complaintRegistrationNumber');
-    const roomInput = document.getElementById('complaintRoomNumber');
-    const hostelBlockInput = document.getElementById('complaintHostelBlock');
+let currentComplaintPhotoDataUrl = '';
 
-    // Complaint details must be entered for this report instead of being
-    // populated with the demo/current user's profile values.
-    if (studentNameInput) {
-        studentNameInput.readOnly = false;
-        studentNameInput.value = '';
-    }
-    if (regInput) {
-        regInput.readOnly = false;
-        regInput.value = '';
-    }
-    if (roomInput) {
-        roomInput.readOnly = false;
-        roomInput.value = '';
-    }
-    if (hostelBlockInput) {
-        hostelBlockInput.disabled = false;
-        hostelBlockInput.value = '';
-    }
-
-    try {
-        const res = await apiRequest('/api/technicians');
-        if (res.ok) {
-            const techList = await parseJsonResponse(res);
-            populateTechnicianDropdown(techList);
+function handleComplaintPhotoSelect(input) {
+    const preview = document.getElementById('complaintUploadPreview');
+    if (input.files && input.files[0]) {
+        const file = input.files[0];
+        if (!file.type.startsWith('image/')) {
+            showToast('Please select a valid image file (JPG, PNG).', 'warning');
+            return;
         }
-    } catch (e) {
-        console.warn('Unable to load technician list in complaint form:', e);
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            currentComplaintPhotoDataUrl = e.target.result;
+            if (preview) {
+                preview.innerHTML = `
+                    <div class="relative inline-block mt-1">
+                        <img src="${currentComplaintPhotoDataUrl}" alt="Evidence Preview" class="max-h-36 mx-auto rounded-xl object-contain border border-border bg-black/5">
+                        <button type="button" onclick="clearComplaintPhotoSelection(event)" class="absolute -top-2 -right-2 w-6 h-6 rounded-full bg-danger text-white flex items-center justify-center text-xs shadow-md" title="Remove image">
+                            <i class="fa-solid fa-xmark"></i>
+                        </button>
+                    </div>
+                    <p class="text-[11px] text-emerald font-bold mt-2"><i class="fa-solid fa-check"></i> Photo attached (${file.name})</p>
+                `;
+            }
+        };
+        reader.readAsDataURL(file);
     }
+}
+
+function clearComplaintPhotoSelection(e) {
+    if (e) e.stopPropagation();
+    currentComplaintPhotoDataUrl = '';
+    const fileInput = document.getElementById('complaintPhotoInput');
+    if (fileInput) fileInput.value = '';
+    const preview = document.getElementById('complaintUploadPreview');
+    if (preview) {
+        preview.innerHTML = `
+            <i class="fa-solid fa-camera text-3xl text-text-muted mb-2"></i>
+            <p class="text-xs font-bold text-text-secondary">Click or tap to capture / upload photo evidence</p>
+            <p class="text-[11px] text-text-muted mt-0.5">JPG, PNG up to 10MB (Photos help technicians resolve faster)</p>
+        `;
+    }
+}
+
+async function prepareComplaintForm() {
+    clearComplaintPhotoSelection();
+
+    const studentName = currentUser?.name || 'Resident Student';
+    const regNo = currentUser?.registrationNumber || currentUser?.userId || currentUser?.id || 'STU-001';
+    const block = currentUser?.hostelBlock || currentUser?.block || 'Block A';
+    const room = currentUser?.roomNumber || currentUser?.room || '101';
+    const email = currentUser?.email || '';
+    const phone = currentUser?.phone || currentUser?.mobile || '';
+
+    // Update banner
+    const badgeName = document.getElementById('complaintStudentBadgeName');
+    const badgeDetails = document.getElementById('complaintStudentBadgeDetails');
+    if (badgeName) badgeName.textContent = studentName;
+    if (badgeDetails) badgeDetails.textContent = `ID: ${regNo} • ${block} • Room ${room}`;
+
+    // Fill hidden and form fields
+    const nameInput = document.getElementById('complaintStudentName');
+    const regInput = document.getElementById('complaintRegistrationNumber');
+    const emailInput = document.getElementById('complaintStudentEmail');
+    const phoneInput = document.getElementById('complaintStudentPhone');
+    const blockInput = document.getElementById('complaintHostelBlock');
+    const roomInput = document.getElementById('complaintRoomNumber');
+    const titleInput = document.getElementById('complaintTitle');
+    const descInput = document.getElementById('complaintDescription');
+    const prefTimeInput = document.getElementById('complaintPreferredTime');
+    const categorySelect = document.getElementById('complaintCategory');
+
+    if (nameInput) nameInput.value = studentName;
+    if (regInput) regInput.value = regNo;
+    if (emailInput) emailInput.value = email;
+    if (phoneInput) phoneInput.value = phone;
+    if (blockInput) blockInput.value = block;
+    if (roomInput) roomInput.value = room;
+    if (titleInput) titleInput.value = '';
+    if (descInput) descInput.value = '';
+    if (prefTimeInput) prefTimeInput.value = '';
+    if (categorySelect) categorySelect.value = '';
 }
 
 let selectedLaundryPhotos = [];
@@ -2632,34 +2702,178 @@ async function markComplaintComplete(complaintId) {
     if (!complaintId) return;
     const actorName = currentUser?.name || 'Technician';
     showLoading();
+let currentTechBeforePhotoUrl = '';
+let currentTechAfterPhotoUrl = '';
+
+function handleTechPhotoSelect(input, type) {
+    if (input.files && input.files[0]) {
+        const file = input.files[0];
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            if (type === 'before') {
+                currentTechBeforePhotoUrl = e.target.result;
+                const preview = document.getElementById('techBeforePhotoPreview');
+                if (preview) {
+                    preview.innerHTML = `
+                        <img src="${currentTechBeforePhotoUrl}" class="max-h-24 mx-auto rounded-lg object-contain">
+                        <p class="text-[10px] text-primary font-bold mt-1">Before photo attached</p>
+                    `;
+                }
+            } else {
+                currentTechAfterPhotoUrl = e.target.result;
+                const preview = document.getElementById('techAfterPhotoPreview');
+                if (preview) {
+                    preview.innerHTML = `
+                        <img src="${currentTechAfterPhotoUrl}" class="max-h-24 mx-auto rounded-lg object-contain">
+                        <p class="text-[10px] text-emerald font-bold mt-1">After photo attached</p>
+                    `;
+                }
+            }
+        };
+        reader.readAsDataURL(file);
+    }
+}
+
+function openTechResolveModal(complaintId) {
+    const complaint = (latestComplaints || []).find(c => c.id === complaintId) || { id: complaintId };
+    currentTechBeforePhotoUrl = '';
+    currentTechAfterPhotoUrl = '';
+    
+    const idInput = document.getElementById('techResolveModalComplaintId');
+    const ticketSpan = document.getElementById('techResolveTicketId');
+    const locSpan = document.getElementById('techResolveLocation');
+    const remarksInput = document.getElementById('techResolveRemarks');
+    const beforePreview = document.getElementById('techBeforePhotoPreview');
+    const afterPreview = document.getElementById('techAfterPhotoPreview');
+
+    if (idInput) idInput.value = complaintId;
+    if (ticketSpan) ticketSpan.textContent = complaintId;
+    if (locSpan) locSpan.textContent = `${complaint.hostelBlock || complaint.block || 'Block A'} - Room ${complaint.roomNumber || complaint.room || '101'}`;
+    if (remarksInput) remarksInput.value = '';
+
+    if (beforePreview) {
+        beforePreview.innerHTML = `
+            <i class="fa-solid fa-camera text-xl text-text-muted mb-1"></i>
+            <p class="text-[10px] text-text-secondary font-medium">Click to upload before photo</p>
+        `;
+    }
+    if (afterPreview) {
+        afterPreview.innerHTML = `
+            <i class="fa-solid fa-camera text-xl text-emerald mb-1"></i>
+            <p class="text-[10px] text-text-secondary font-medium">Click to upload after repair photo</p>
+        `;
+    }
+
+    const modal = document.getElementById('techResolveModal');
+    if (modal) modal.classList.remove('hidden');
+}
+
+function closeTechResolveModal() {
+    const modal = document.getElementById('techResolveModal');
+    if (modal) modal.classList.add('hidden');
+}
+
+async function handleTechResolveSubmit(e) {
+    e.preventDefault();
+    const complaintId = document.getElementById('techResolveModalComplaintId')?.value;
+    const remarks = document.getElementById('techResolveRemarks')?.value.trim();
+
+    if (!complaintId || !remarks) {
+        showToast('Please enter resolution remarks before submitting.', 'warning');
+        return;
+    }
+
+    showLoading();
     try {
         const response = await apiRequest(`/api/complaints/${encodeURIComponent(complaintId)}/status`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                status: 'Completed',
-                technician: actorName
+                status: 'Resolved',
+                actor: currentUser?.name || 'Technician',
+                role: 'technician',
+                remarks,
+                beforePhoto: currentTechBeforePhotoUrl,
+                afterPhoto: currentTechAfterPhotoUrl
             })
         });
+
+        const data = await parseJsonResponse(response);
         hideLoading();
 
         if (!response.ok) {
-            showToast('Unable to complete the job.', 'error');
+            showToast(data.error || 'Failed to submit resolution.', 'error');
             return;
         }
 
-        showToast('Complaint marked complete and student notified!', 'success');
+        showToast('Job marked resolved and submitted to Warden for verification!', 'success');
+        closeTechResolveModal();
         await loadDashboardData();
+        renderTechAssignedComplaints(latestComplaints);
     } catch (error) {
         hideLoading();
-        showToast('Unable to reach server. Please try again.', 'error');
+        showToast('Unable to reach server.', 'error');
         console.error(error);
+    }
+}
+
+async function handleTechAcceptComplaint(complaintId) {
+    if (!complaintId) return;
+    showLoading();
+    try {
+        const response = await apiRequest(`/api/complaints/${encodeURIComponent(complaintId)}/status`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                status: 'Accepted',
+                actor: currentUser?.name || 'Technician',
+                role: 'technician'
+            })
+        });
+        hideLoading();
+        if (!response.ok) {
+            showToast('Unable to accept job.', 'error');
+            return;
+        }
+        showToast('Job accepted! Warden notified.', 'success');
+        await loadDashboardData();
+        renderTechAssignedComplaints(latestComplaints);
+    } catch (err) {
+        hideLoading();
+        showToast('Error accepting job.', 'error');
+    }
+}
+
+async function handleTechStartWork(complaintId) {
+    if (!complaintId) return;
+    showLoading();
+    try {
+        const response = await apiRequest(`/api/complaints/${encodeURIComponent(complaintId)}/status`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                status: 'In Progress',
+                actor: currentUser?.name || 'Technician',
+                role: 'technician'
+            })
+        });
+        hideLoading();
+        if (!response.ok) {
+            showToast('Unable to start work.', 'error');
+            return;
+        }
+        showToast('Work started! Student and Warden notified.', 'success');
+        await loadDashboardData();
+        renderTechAssignedComplaints(latestComplaints);
+    } catch (err) {
+        hideLoading();
+        showToast('Error starting work.', 'error');
     }
 }
 
 async function deleteComplaint(complaintId) {
     if (!complaintId) return;
-    if (!confirm('Delete this assigned job? This action cannot be undone.')) return;
+    if (!confirm('Delete this complaint ticket? This action cannot be undone.')) return;
 
     showLoading();
     try {
@@ -2674,8 +2888,15 @@ async function deleteComplaint(complaintId) {
             return;
         }
 
-        showToast('Assigned job deleted successfully.', 'success');
+        showToast('Complaint ticket deleted successfully.', 'success');
         await loadDashboardData();
+        if (currentUser?.role === 'warden') {
+            loadWardenComplaints();
+        } else if (currentUser?.role === 'admin') {
+            renderAdminComplaintsTable(latestComplaints);
+        } else if (currentUser?.role === 'technician') {
+            renderTechAssignedComplaints(latestComplaints);
+        }
     } catch (error) {
         hideLoading();
         showToast('Unable to reach server. Please try again.', 'error');
@@ -2684,11 +2905,17 @@ async function deleteComplaint(complaintId) {
 }
 
 function renderTechComplaintCard(complaint) {
+    const status = String(complaint.status || 'Assigned').trim();
+    const statusLower = status.toLowerCase();
     const isAssignedToMe = normalizeText(complaint.assignedTo) === normalizeText(currentUser?.name) || normalizeText(complaint.technician) === normalizeText(currentUser?.name);
-    const isInProgress = String(complaint.status).toLowerCase() === 'in progress';
+    const isInProgress = statusLower === 'in progress';
+    const isAccepted = statusLower === 'accepted';
+    const isResolved = statusLower === 'resolved';
+    const isVerified = statusLower === 'verified' || statusLower === 'completed';
+    const isReopened = statusLower === 'reopened';
 
     return `
-        <div class="glass rounded-2xl border border-border overflow-hidden card-hover shadow-xs">
+        <div class="glass rounded-2xl border border-border overflow-hidden card-hover shadow-xs ${isReopened ? 'border-rose-400 bg-rose-50/10' : ''}">
             <div class="p-6">
                 <div class="flex items-start justify-between mb-4">
                     <div class="flex items-center gap-3">
@@ -2702,32 +2929,65 @@ function renderTechComplaintCard(complaint) {
                                     ${isAssignedToMe ? 'Assigned to You' : 'Queue Job'}
                                 </span>
                             </div>
-                            <p class="text-xs text-text-secondary mt-0.5">${complaint.hostelBlock || 'Block A'} • ${complaint.roomNumber || 'Room N/A'} | <strong class="text-text">${complaint.student || 'Student'}</strong></p>
+                            <p class="text-xs text-text-secondary mt-0.5">${complaint.hostelBlock || complaint.block || 'Block A'} • Room ${complaint.roomNumber || complaint.room || 'N/A'} | <strong class="text-text">${complaint.studentName || complaint.student || 'Student'}</strong></p>
                         </div>
                     </div>
                     <div class="flex items-center gap-2">
                         <span class="${getPriorityBadgeClass(complaint.priority)} px-2.5 py-1 rounded-full text-xs font-semibold">${complaint.priority || 'Medium'}</span>
-                        <button onclick="deleteComplaint('${complaint.id}')" class="w-8 h-8 rounded-xl bg-surface-alt border border-border text-text-secondary hover:bg-danger hover:text-white transition-all flex items-center justify-center text-xs" title="Delete job">
-                            <i class="fa-solid fa-trash"></i>
-                        </button>
+                        <span class="${getStatusBadgeClass(complaint.status)} px-2.5 py-1 rounded-full text-xs font-bold">${complaint.status || 'Assigned'}</span>
                     </div>
                 </div>
+
+                ${isReopened ? `
+                    <div class="p-3 mb-4 rounded-xl bg-rose-500/10 border border-rose-500/30 text-xs text-rose-700 dark:text-rose-400">
+                        <p class="font-bold flex items-center gap-1.5"><i class="fa-solid fa-triangle-exclamation"></i> Warden Requested Rework:</p>
+                        <p class="mt-0.5">${complaint.rejectionReason || 'Resolution was not approved. Please inspect and fix.'}</p>
+                    </div>
+                ` : ''}
+
                 <div class="p-3.5 rounded-xl bg-surface-alt/70 border border-border/60 mb-4 text-xs">
-                    <p class="text-text font-medium leading-relaxed">${complaint.title || complaint.description || 'No description provided yet.'}</p>
-                    <div class="mt-2 pt-2 border-t border-border/50 flex items-center justify-between text-[11px] text-text-muted">
-                        <span>Ticket ID: <strong class="font-mono text-text">${complaint.id}</strong></span>
-                        <span>Registered: ${formatComplaintDate(complaint.createdAt)}</span>
+                    <p class="text-text font-bold leading-tight">${complaint.title || 'Maintenance Request'}</p>
+                    <p class="text-text-secondary mt-1 leading-relaxed">${complaint.description || 'No additional description provided.'}</p>
+                    <div class="mt-2 pt-2 border-t border-border/50 flex flex-wrap items-center justify-between text-[11px] text-text-muted gap-2">
+                        <span>Ticket: <strong class="font-mono text-primary font-bold">${complaint.id}</strong></span>
+                        <span>Preferred: <strong class="text-text">${complaint.preferredTime || 'Anytime'}</strong></span>
+                        <span>Warden: <strong class="text-text">${complaint.wardenName || 'Duty Warden'}</strong></span>
                     </div>
                 </div>
+
                 <div class="flex flex-wrap items-center gap-2">
-                    <button onclick="claimTechJob('${complaint.id}')" class="flex-1 py-2 px-3 rounded-xl bg-emerald hover:bg-emerald-dark text-white text-xs font-bold transition-all shadow-sm flex items-center justify-center gap-1.5">
-                        <i class="fa-solid fa-check"></i> ${isAssignedToMe ? 'Re-Claim' : 'Accept Job'}
-                    </button>
-                    <button onclick="startTechJob('${complaint.id}')" class="flex-1 py-2 px-3 rounded-xl bg-primary hover:bg-primary-dark text-white text-xs font-bold transition-all shadow-sm flex items-center justify-center gap-1.5">
-                        <i class="fa-solid fa-play"></i> ${isInProgress ? 'Working...' : 'Start Work'}
-                    </button>
-                    <button onclick="markComplaintComplete('${complaint.id}')" class="flex-1 py-2 px-3 rounded-xl border border-border bg-surface hover:bg-surface-alt text-text text-xs font-bold transition-all flex items-center justify-center gap-1.5">
-                        <i class="fa-solid fa-flag-checkered text-emerald"></i> Complete
+                    ${statusLower === 'assigned' ? `
+                        <button onclick="handleTechAcceptComplaint('${complaint.id}')" class="flex-1 py-2.5 px-3 rounded-xl bg-emerald hover:bg-emerald-dark text-white text-xs font-bold transition-all shadow-sm flex items-center justify-center gap-1.5">
+                            <i class="fa-solid fa-check"></i> Accept Job
+                        </button>
+                    ` : ''}
+
+                    ${(statusLower === 'accepted' || isReopened) ? `
+                        <button onclick="handleTechStartWork('${complaint.id}')" class="flex-1 py-2.5 px-3 rounded-xl bg-primary hover:bg-primary-dark text-white text-xs font-bold transition-all shadow-sm flex items-center justify-center gap-1.5">
+                            <i class="fa-solid fa-play"></i> Start Work
+                        </button>
+                    ` : ''}
+
+                    ${isInProgress ? `
+                        <button onclick="openTechResolveModal('${complaint.id}')" class="flex-1 py-2.5 px-3 rounded-xl bg-emerald hover:bg-emerald-dark text-white text-xs font-bold transition-all shadow-sm flex items-center justify-center gap-1.5">
+                            <i class="fa-solid fa-camera"></i> Complete & Upload Photos
+                        </button>
+                    ` : ''}
+
+                    ${isResolved ? `
+                        <div class="flex-1 py-2 px-3 rounded-xl bg-teal-500/10 text-teal-600 border border-teal-500/20 text-xs font-bold text-center flex items-center justify-center gap-1.5">
+                            <i class="fa-solid fa-hourglass-half"></i> Pending Warden Verification
+                        </div>
+                    ` : ''}
+
+                    ${isVerified ? `
+                        <div class="flex-1 py-2 px-3 rounded-xl bg-emerald/10 text-emerald border border-emerald/20 text-xs font-bold text-center flex items-center justify-center gap-1.5">
+                            <i class="fa-solid fa-badge-check"></i> Verified & Closed
+                        </div>
+                    ` : ''}
+
+                    <button onclick="openComplaintDetailsModal('${complaint.id}')" class="py-2.5 px-3 rounded-xl border border-border bg-surface hover:bg-surface-alt text-text text-xs font-bold transition-all flex items-center justify-center gap-1.5" title="View Full Details">
+                        <i class="fa-solid fa-eye"></i> Details
                     </button>
                 </div>
             </div>
@@ -2741,6 +3001,17 @@ function renderTechAssignedComplaints(complaints) {
     const visibleComplaints = getVisibleTechnicianComplaints(complaints, false);
 
     const noDataMarkup = '<div class="glass rounded-2xl border border-border p-6 text-sm text-text-secondary text-center">No active jobs in your queue right now.</div>';
+
+    const markup = visibleComplaints.map(renderTechComplaintCard).join('');
+
+    if (dashboardContainer) {
+        dashboardContainer.innerHTML = visibleComplaints.length ? markup : noDataMarkup;
+    }
+
+    if (pageContainer) {
+        pageContainer.innerHTML = visibleComplaints.length ? markup : noDataMarkup;
+    }
+}
 
     const markup = visibleComplaints.map(renderTechComplaintCard).join('');
 
@@ -2836,8 +3107,8 @@ function renderAdminSummary(summary, complaints = [], allUsers = []) {
     const adminActiveTechnicians = document.getElementById('adminActiveTechnicians');
     const adminTotalWardens = document.getElementById('adminTotalWardens');
 
-    const techCount = (allUsers || users || []).filter(u => u.role === 'technician').length;
-    const wardenCount = (allUsers || users || []).filter(u => u.role === 'warden').length;
+    const techCount = (Array.isArray(allUsers) ? allUsers : []).filter(u => u.role === 'technician').length;
+    const wardenCount = (Array.isArray(allUsers) ? allUsers : []).filter(u => u.role === 'warden').length;
     const pendingCount = (complaints || []).filter(c => !c.status || c.status === 'Pending' || c.status === 'In Progress').length;
     const resolvedCount = (complaints || []).filter(c => c.status === 'Resolved' || c.status === 'Completed').length;
 
@@ -3304,7 +3575,7 @@ function renderAdminWardens(users = []) {
     const wardens = Array.isArray(users) ? users.filter((u) => normalizeText(u.role) === 'warden') : [];
     window.currentWardensList = wardens;
     if (!wardens.length) {
-        container.innerHTML = '<div class="col-span-3 glass p-6 rounded-2xl text-sm text-text-secondary text-center">No registered wardens found. Click "Add New Warden" above to add one.</div>';
+        container.innerHTML = '<div class="col-span-3 glass p-6 rounded-2xl text-sm text-text-secondary text-center">No registered wardens found. </div>';
         return;
     }
     container.innerHTML = wardens.map((w) => {
@@ -4017,10 +4288,12 @@ function renderCurrentUserProfile() {
     const roleLabel = roleLabels[currentUser.role] || 'User';
     const extraDetails = currentUser.role === 'student'
         ? [currentUser.hostelBlock, currentUser.roomNumber].filter(Boolean).join(' • ') || 'No room details provided'
-        : currentUser.role === 'technician'
-            ? 'Technician account'
-            : 'Administrator account';
-    const extraLabel = currentUser.role === 'student' ? 'Hostel / Room' : 'Account Details';
+        : currentUser.role === 'warden'
+            ? `${currentUser.block || currentUser.hostelBlock || 'Block A'} • Residential Warden`
+            : currentUser.role === 'technician'
+                ? 'Technician account'
+                : 'Administrator account';
+    const extraLabel = currentUser.role === 'student' ? 'Hostel / Room' : (currentUser.role === 'warden' ? 'Assigned Scope' : 'Account Details');
     const profileImage = getCurrentUserProfileImage();
     const initials = (currentUser.name || 'User')
         .split(/\s+/)
@@ -4046,13 +4319,40 @@ function renderCurrentUserProfile() {
         if (element) element.textContent = value;
     });
 
+    const wardenIdBtn = document.getElementById('btnProfileWardenDigitalId');
+    if (wardenIdBtn) {
+        if (currentUser.role === 'warden') {
+            wardenIdBtn.classList.remove('hidden');
+        } else {
+            wardenIdBtn.classList.add('hidden');
+        }
+    }
+
     const avatar = document.getElementById('profileAvatar');
     if (avatar) {
         avatar.innerHTML = profileImage
             ? `<img src="${profileImage}" alt="Profile picture" class="h-full w-full object-cover">`
             : initials;
     }
+
+    if (currentUser.role === 'admin' && typeof renderAdminProfileWardens === 'function') {
+        renderAdminProfileWardens();
+    }
 }
+
+function openCurrentWardenDigitalId() {
+    if (!currentUser) {
+        showToast('Please log in to view your Digital ID card.', 'warning');
+        return;
+    }
+    const targetWardenId = currentUser.userId || currentUser.wardenId || currentUser.id;
+    if (typeof openWardenDigitalIdModal === 'function') {
+        openWardenDigitalIdModal(targetWardenId);
+    } else {
+        showToast('Digital ID card preview ready.', 'info');
+    }
+}
+window.openCurrentWardenDigitalId = openCurrentWardenDigitalId;
 
 function handleProfileImageChange(event) {
     const file = event.target.files?.[0];
@@ -4162,6 +4462,21 @@ async function handleLogin(e) {
         persistCurrentUser();
         updateNavAfterLogin();
         studentNotifications = [];
+
+        // Check if mandatory password change is required on first login
+        if (data.mustChangePassword === true) {
+            const mandModal = document.getElementById('mandatoryChangePasswordModal');
+            if (mandModal) {
+                const curPassInput = document.getElementById('mandatoryCurrentPassword');
+                if (curPassInput) curPassInput.value = password;
+                const errBox = document.getElementById('mandatoryPasswordError');
+                if (errBox) errBox.classList.add('hidden');
+                mandModal.classList.remove('hidden');
+                showToast('Please set your permanent password to continue.', 'info');
+                return;
+            }
+        }
+
         showToast(`Welcome back, ${data.name}!`, 'success');
 
         const userRole = data.role || role;
@@ -4193,6 +4508,138 @@ async function handleLogin(e) {
         hideLoading();
         showToast('Unable to reach server. Please try again.', 'error');
         console.error(error);
+    }
+}
+
+async function handleMandatoryPasswordChange(event) {
+    if (event) event.preventDefault();
+    const currentPassword = document.getElementById('mandatoryCurrentPassword')?.value;
+    const newPassword = document.getElementById('mandatoryNewPassword')?.value;
+    const confirmPassword = document.getElementById('mandatoryConfirmPassword')?.value;
+    const errBox = document.getElementById('mandatoryPasswordError');
+
+    if (errBox) errBox.classList.add('hidden');
+
+    if (!currentPassword || !newPassword) {
+        showToast('Please enter both current and new passwords.', 'warning');
+        return;
+    }
+    if (newPassword.length < 6) {
+        if (errBox) {
+            errBox.textContent = 'Password must be at least 6 characters long.';
+            errBox.classList.remove('hidden');
+        }
+        showToast('Password must be at least 6 characters.', 'warning');
+        return;
+    }
+    if (newPassword !== confirmPassword) {
+        if (errBox) {
+            errBox.textContent = 'Passwords do not match.';
+            errBox.classList.remove('hidden');
+        }
+        showToast('Passwords do not match.', 'error');
+        return;
+    }
+
+    showLoading();
+    try {
+        const res = await apiRequest('/api/change-password', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${currentUser?.token || localStorage.getItem('token') || ''}`
+            },
+            body: JSON.stringify({
+                currentPassword,
+                newPassword,
+                confirmPassword,
+                email: currentUser?.email,
+                userId: currentUser?.userId || currentUser?.id
+            })
+        });
+
+        const data = await parseJsonResponse(res);
+        hideLoading();
+
+        if (!res.ok) {
+            if (errBox) {
+                errBox.textContent = data.error || 'Failed to update password.';
+                errBox.classList.remove('hidden');
+            }
+            showToast(data.error || 'Failed to update password.', 'error');
+            return;
+        }
+
+        if (currentUser) {
+            currentUser.mustChangePassword = false;
+            persistCurrentUser();
+        }
+
+        const modal = document.getElementById('mandatoryChangePasswordModal');
+        if (modal) modal.classList.add('hidden');
+
+        showToast('Permanent password set successfully! Welcome to your dashboard.', 'success');
+        navigateTo(currentUser?.role === 'warden' ? 'warden-dashboard' : getCurrentUserDashboard());
+    } catch (err) {
+        hideLoading();
+        console.error('Password change error:', err);
+        showToast('Network error while setting permanent password.', 'error');
+    }
+}
+
+async function handleProfilePasswordChange(event) {
+    if (event) event.preventDefault();
+    const currentPassword = document.getElementById('profileCurrentPassword')?.value;
+    const newPassword = document.getElementById('profileNewPassword')?.value;
+    const confirmPassword = document.getElementById('profileConfirmPassword')?.value;
+
+    if (!currentPassword || !newPassword) {
+        showToast('Please enter current and new password.', 'warning');
+        return;
+    }
+    if (newPassword.length < 6) {
+        showToast('New password must be at least 6 characters long.', 'warning');
+        return;
+    }
+    if (newPassword !== confirmPassword) {
+        showToast('New passwords do not match.', 'error');
+        return;
+    }
+
+    showLoading();
+    try {
+        const res = await apiRequest('/api/change-password', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${currentUser?.token || localStorage.getItem('token') || ''}`
+            },
+            body: JSON.stringify({
+                currentPassword,
+                newPassword,
+                confirmPassword,
+                email: currentUser?.email,
+                userId: currentUser?.userId || currentUser?.id
+            })
+        });
+
+        const data = await parseJsonResponse(res);
+        hideLoading();
+
+        if (!res.ok) {
+            showToast(data.error || 'Failed to update password.', 'error');
+            return;
+        }
+
+        document.getElementById('profileCurrentPassword').value = '';
+        document.getElementById('profileNewPassword').value = '';
+        document.getElementById('profileConfirmPassword').value = '';
+
+        showToast('Password updated successfully!', 'success');
+    } catch (err) {
+        hideLoading();
+        console.error('Profile password change error:', err);
+        showToast('Unable to update password.', 'error');
     }
 }
 
@@ -4254,18 +4701,24 @@ async function handleRegister(e) {
 async function handleComplaintSubmit(e) {
     e.preventDefault();
     const form = e.target;
-    const profile = getComplaintStudentProfile();
-    const studentName = profile.name;
-    const registrationNumber = profile.registrationNumber;
-    const hostelBlock = profile.hostelBlock;
-    const roomNumber = profile.roomNumber;
-    const category = document.getElementById('complaintCategory').value || 'General';
-    const description = document.getElementById('complaintDescription').value.trim();
-    const priority = form.querySelector('input[name="priority"]:checked')?.value || 'medium';
-    const assignedTo = document.getElementById('complaintAssignedTo')?.value || 'Unassigned';
 
-    if (!studentName || !registrationNumber || !roomNumber || !category || !description) {
-        showToast('Please complete all complaint details before submitting.', 'warning');
+    const studentName = document.getElementById('complaintStudentName')?.value.trim() || currentUser?.name || 'Resident Student';
+    const registrationNumber = document.getElementById('complaintRegistrationNumber')?.value.trim() || currentUser?.registrationNumber || currentUser?.userId || 'STU-001';
+    const studentEmail = document.getElementById('complaintStudentEmail')?.value.trim() || currentUser?.email || '';
+    const studentPhone = document.getElementById('complaintStudentPhone')?.value.trim() || currentUser?.phone || '';
+    const studentId = currentUser?.userId || currentUser?.id || registrationNumber;
+
+    const title = document.getElementById('complaintTitle')?.value.trim();
+    const category = document.getElementById('complaintCategory')?.value || 'General Maintenance';
+    const priority = form.querySelector('input[name="priority"]:checked')?.value || 'Medium';
+    const hostelBlock = document.getElementById('complaintHostelBlock')?.value || currentUser?.hostelBlock || 'Block A';
+    const roomNumber = document.getElementById('complaintRoomNumber')?.value.trim() || currentUser?.roomNumber || '101';
+    const preferredTime = document.getElementById('complaintPreferredTime')?.value.trim() || '';
+    const description = document.getElementById('complaintDescription')?.value.trim();
+    const photoUrl = currentComplaintPhotoDataUrl || '';
+
+    if (!title || !category || !description || !hostelBlock || !roomNumber) {
+        showToast('Please complete all required fields (*).', 'warning');
         return;
     }
 
@@ -4275,25 +4728,29 @@ async function handleComplaintSubmit(e) {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                student: studentName,
-                studentName: studentName,
-                name: studentName,
-                studentEmail: currentUser?.email || '',
-                email: currentUser?.email || '',
-                studentId: currentUser?.userId || currentUser?.id || '',
-                userId: currentUser?.userId || currentUser?.id || '',
-                registrationNumber,
+                title,
+                category,
+                priority,
                 hostelBlock,
                 block: hostelBlock,
                 roomNumber,
                 room: roomNumber,
-                category,
-                priority: priority.charAt(0).toUpperCase() + priority.slice(1),
+                floor: roomNumber.length >= 3 ? roomNumber.slice(0, -2) : '1',
+                preferredTime,
                 description,
-                title: `${category} Issue in ${hostelBlock} Room ${roomNumber}`,
-                assignedTo
+                photoUrl,
+                student: studentName,
+                studentName,
+                name: studentName,
+                studentId,
+                userId: studentId,
+                studentEmail,
+                email: studentEmail,
+                studentPhone,
+                registrationNumber
             })
         });
+
         const data = await parseJsonResponse(response);
         hideLoading();
 
@@ -4302,14 +4759,17 @@ async function handleComplaintSubmit(e) {
             return;
         }
 
-        showToast(`Complaint submitted successfully! ID: ${data.id}`, 'success');
+        showToast(`Complaint submitted successfully! Ticket ID: ${data.id}`, 'success');
         form.reset();
-        if (currentUser) {
-            prepareComplaintForm();
-            updateNavAfterLogin();
-        }
+        clearComplaintPhotoSelection();
+        prepareComplaintForm();
         loadLandingStats();
-        navigateTo('student-dashboard');
+        
+        // Navigate to complaint tracking and display the submitted ticket
+        navigateTo('complaint-tracking');
+        setTimeout(() => {
+            searchComplaint(data.id);
+        }, 150);
     } catch (error) {
         hideLoading();
         showToast('Unable to reach server. Please try again.', 'error');
@@ -4592,6 +5052,228 @@ function handleFileSelect(input) {
     }
 }
 
+function downloadComplaintPdf(complaintId) {
+    if (!complaintId) return;
+    const url = `/api/complaints/${encodeURIComponent(complaintId)}/pdf`;
+    window.open(url, '_blank');
+}
+
+function renderTrackingResult(complaint) {
+    if (!complaint) return '<div class="text-center py-8 text-text-secondary">No complaint selected.</div>';
+
+    const status = String(complaint.status || 'Submitted').trim();
+    const statusLower = status.toLowerCase();
+
+    let currentStep = 1;
+    if (statusLower === 'under review') currentStep = 2;
+    else if (statusLower === 'assigned' || statusLower === 'accepted') currentStep = 3;
+    else if (statusLower === 'in progress') currentStep = 4;
+    else if (statusLower === 'resolved') currentStep = 5;
+    else if (statusLower === 'verified' || statusLower === 'completed') currentStep = 6;
+    else if (statusLower === 'reopened') currentStep = 4;
+
+    const isReopened = statusLower === 'reopened';
+
+    const steps = [
+        {
+            title: '1. Complaint Submitted',
+            desc: `Submitted by ${complaint.studentName || complaint.student || 'Student'} on ${formatComplaintDate(complaint.createdAt)}`,
+            icon: 'fa-paper-plane',
+            done: currentStep >= 1
+        },
+        {
+            title: '2. Warden Reviewing',
+            desc: complaint.wardenName ? `Assigned to Warden ${complaint.wardenName} (${complaint.block || complaint.hostelBlock || 'Block'})` : 'Auto-routed to Block Warden',
+            icon: 'fa-user-shield',
+            done: currentStep >= 2
+        },
+        {
+            title: '3. Staff Assigned',
+            desc: (complaint.technicianName && complaint.technicianName !== 'Unassigned') ? `Assigned to ${complaint.technicianName}` : 'Awaiting staff dispatch',
+            icon: 'fa-screwdriver-wrench',
+            done: currentStep >= 3
+        },
+        {
+            title: '4. Work In Progress',
+            desc: currentStep >= 4 ? (isReopened ? 'Rework required by technician' : 'Technician started maintenance work') : 'Pending work start',
+            icon: 'fa-hammer',
+            done: currentStep >= 4
+        },
+        {
+            title: '5. Resolved by Staff',
+            desc: currentStep >= 5 ? `Resolved on ${complaint.resolvedAt ? formatComplaintDate(complaint.resolvedAt) : 'recently'}` : 'Pending repair completion',
+            icon: 'fa-circle-check',
+            done: currentStep >= 5
+        },
+        {
+            title: '6. Warden Verified',
+            desc: currentStep >= 6 ? `Verified & closed by ${complaint.verifiedBy || complaint.wardenName || 'Warden'}` : 'Pending final warden inspection',
+            icon: 'fa-badge-check',
+            done: currentStep >= 6
+        }
+    ];
+
+    return `
+        <div class="space-y-6">
+            <!-- Header Ticket Info -->
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-5 rounded-2xl bg-surface-alt/70 border border-border">
+                <div class="flex items-center gap-3.5">
+                    <div class="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center text-primary text-xl font-bold shrink-0">
+                        <i class="fa-solid ${getCategoryIcon(complaint.category)}"></i>
+                    </div>
+                    <div>
+                        <div class="flex flex-wrap items-center gap-2">
+                            <h3 class="font-bold text-base text-text">${complaint.title || complaint.category || 'Maintenance Request'}</h3>
+                            <span class="${getStatusBadgeClass(complaint.status)} px-2.5 py-0.5 rounded-full text-xs font-bold">${complaint.status || 'Submitted'}</span>
+                            <span class="${getPriorityBadgeClass(complaint.priority)} px-2.5 py-0.5 rounded-full text-xs font-bold">${complaint.priority || 'Medium'}</span>
+                        </div>
+                        <p class="text-xs text-text-secondary mt-1">Ticket ID: <strong class="font-mono text-primary font-bold">${complaint.id}</strong> • Registered: ${formatComplaintDate(complaint.createdAt)}</p>
+                    </div>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button onclick="downloadComplaintPdf('${complaint.id}')" class="btn-primary px-4 py-2.5 rounded-xl text-white font-bold text-xs flex items-center gap-2 shadow-sm">
+                        <i class="fa-solid fa-file-pdf"></i> Download PDF
+                    </button>
+                </div>
+            </div>
+
+            ${isReopened ? `
+                <div class="p-4 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-700 dark:text-rose-400 flex items-start gap-3">
+                    <i class="fa-solid fa-triangle-exclamation text-rose-600 mt-0.5 text-base shrink-0"></i>
+                    <div>
+                        <h4 class="font-bold text-xs">Resolution Rejected & Ticket Reopened</h4>
+                        <p class="text-xs mt-0.5">${complaint.rejectionReason || 'The warden rejected the resolution and requested rework.'}</p>
+                    </div>
+                </div>
+            ` : ''}
+
+            <!-- 6-Stage Timeline -->
+            <div class="p-6 rounded-2xl bg-surface border border-border shadow-xs">
+                <h4 class="font-bold text-xs uppercase tracking-wider text-text-secondary mb-6">Interactive 6-Stage Resolution Timeline</h4>
+                <div class="relative pl-6 sm:pl-8 space-y-6 border-l-2 border-border/80">
+                    ${steps.map((step, idx) => `
+                        <div class="relative group">
+                            <div class="absolute -left-[31px] sm:-left-[39px] top-0 w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition-all shadow-xs ${
+                                step.done ? 'bg-emerald text-white ring-4 ring-emerald/15' : 'bg-surface-alt border-2 border-border text-text-muted'
+                            }">
+                                <i class="fa-solid ${step.done ? 'fa-check' : step.icon}"></i>
+                            </div>
+                            <div class="pl-2">
+                                <h5 class="font-bold text-sm ${step.done ? 'text-text' : 'text-text-muted'}">${step.title}</h5>
+                                <p class="text-xs ${step.done ? 'text-text-secondary' : 'text-text-muted'} mt-0.5">${step.desc}</p>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+
+            <!-- Ticket Details Grid -->
+            <div class="grid sm:grid-cols-2 gap-4">
+                <div class="p-5 rounded-2xl bg-surface-alt/60 border border-border space-y-2.5">
+                    <h4 class="font-bold text-xs uppercase tracking-wider text-text-secondary mb-3 flex items-center gap-2">
+                        <i class="fa-solid fa-user-graduate text-primary"></i> Student & Location
+                    </h4>
+                    <div class="flex justify-between text-xs py-1 border-b border-border/50">
+                        <span class="text-text-secondary">Student Name:</span>
+                        <span class="font-bold text-text">${complaint.studentName || complaint.student || 'Resident'}</span>
+                    </div>
+                    <div class="flex justify-between text-xs py-1 border-b border-border/50">
+                        <span class="text-text-secondary">Hostel & Room:</span>
+                        <span class="font-bold text-text">${complaint.block || complaint.hostelBlock || 'Block A'} - Room ${complaint.roomNumber || complaint.room || 'N/A'}</span>
+                    </div>
+                    <div class="flex justify-between text-xs py-1 border-b border-border/50">
+                        <span class="text-text-secondary">Preferred Time:</span>
+                        <span class="font-semibold text-text">${complaint.preferredTime || 'Anytime'}</span>
+                    </div>
+                </div>
+
+                <div class="p-5 rounded-2xl bg-surface-alt/60 border border-border space-y-2.5">
+                    <h4 class="font-bold text-xs uppercase tracking-wider text-text-secondary mb-3 flex items-center gap-2">
+                        <i class="fa-solid fa-user-shield text-indigo-600"></i> Duty Assignments
+                    </h4>
+                    <div class="flex justify-between text-xs py-1 border-b border-border/50">
+                        <span class="text-text-secondary">Block Warden:</span>
+                        <span class="font-bold text-indigo-600">${complaint.wardenName || 'Duty Warden'}</span>
+                    </div>
+                    <div class="flex justify-between text-xs py-1 border-b border-border/50">
+                        <span class="text-text-secondary">Assigned Staff:</span>
+                        <span class="font-bold text-text">${complaint.technicianName || complaint.assignedTo || 'Unassigned'} ${complaint.technicianSpecialization ? `<span class="text-[11px] font-normal text-text-secondary">(${complaint.technicianSpecialization})</span>` : ''}</span>
+                    </div>
+                    ${complaint.technicianPhone ? `
+                        <div class="flex justify-between text-xs py-1 border-b border-border/50">
+                            <span class="text-text-secondary">Staff Contact:</span>
+                            <a href="tel:${complaint.technicianPhone}" class="font-bold text-primary hover:underline flex items-center gap-1">
+                                <i class="fa-solid fa-phone text-[10px]"></i> ${complaint.technicianPhone}
+                            </a>
+                        </div>
+                    ` : ''}
+                    ${complaint.estimatedCompletion ? `
+                        <div class="flex justify-between text-xs py-1 border-b border-border/50">
+                            <span class="text-text-secondary">Target Time:</span>
+                            <span class="font-semibold text-text">${complaint.estimatedCompletion}</span>
+                        </div>
+                    ` : ''}
+                    <div class="flex justify-between text-xs py-1 border-b border-border/50">
+                        <span class="text-text-secondary">Verified By:</span>
+                        <span class="font-bold ${complaint.verifiedBy ? 'text-emerald' : 'text-text-muted'}">${complaint.verifiedBy || 'Pending Verification'}</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Issue Description & Warden Instructions -->
+            <div class="p-5 rounded-2xl bg-surface-alt/60 border border-border space-y-3">
+                <div>
+                    <h4 class="font-bold text-xs uppercase tracking-wider text-text-secondary mb-1">Issue Description</h4>
+                    <p class="text-xs text-text leading-relaxed font-medium">${complaint.description || complaint.title || 'No description provided.'}</p>
+                </div>
+                ${complaint.instructions ? `
+                    <div class="p-3 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-xs">
+                        <p class="font-bold text-indigo-600 dark:text-indigo-400 flex items-center gap-1.5 mb-0.5">
+                            <i class="fa-solid fa-clipboard-user"></i> Warden Work Instructions:
+                        </p>
+                        <p class="text-text font-medium">${complaint.instructions}</p>
+                    </div>
+                ` : ''}
+                ${complaint.resolutionRemarks ? `
+                    <div class="pt-3 border-t border-border/60">
+                        <p class="text-[11px] font-bold text-text-secondary uppercase">Technician Remarks</p>
+                        <p class="text-xs text-text font-medium mt-1">${complaint.resolutionRemarks}</p>
+                    </div>
+                ` : ''}
+            </div>
+
+            <!-- Evidence Photos Section -->
+            ${(complaint.photoUrl || complaint.beforePhotoUrl || complaint.afterPhotoUrl) ? `
+                <div class="p-5 rounded-2xl bg-surface-alt/60 border border-border">
+                    <h4 class="font-bold text-xs uppercase tracking-wider text-text-secondary mb-3 flex items-center gap-2">
+                        <i class="fa-solid fa-images text-primary"></i> Photo Evidence
+                    </h4>
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        ${complaint.photoUrl ? `
+                            <div class="p-2.5 rounded-xl bg-surface border border-border text-center">
+                                <p class="text-[10px] font-bold text-text-secondary mb-1.5">Initial Evidence</p>
+                                <img src="${complaint.photoUrl}" alt="Evidence" class="w-full h-32 object-cover rounded-lg">
+                            </div>
+                        ` : ''}
+                        ${complaint.beforePhotoUrl ? `
+                            <div class="p-2.5 rounded-xl bg-surface border border-border text-center">
+                                <p class="text-[10px] font-bold text-amber-600 mb-1.5">Before Repair</p>
+                                <img src="${complaint.beforePhotoUrl}" alt="Before" class="w-full h-32 object-cover rounded-lg">
+                            </div>
+                        ` : ''}
+                        ${complaint.afterPhotoUrl ? `
+                            <div class="p-2.5 rounded-xl bg-surface border border-border text-center">
+                                <p class="text-[10px] font-bold text-emerald mb-1.5">After Repair / Fixed</p>
+                                <img src="${complaint.afterPhotoUrl}" alt="After" class="w-full h-32 object-cover rounded-lg">
+                            </div>
+                        ` : ''}
+                    </div>
+                </div>
+            ` : ''}
+        </div>
+    `;
+}
+
 async function searchComplaint(targetId) {
     const queryInput = document.getElementById('complaintSearchInput');
     const searchValue = (targetId || (queryInput ? queryInput.value.trim() : '')).toUpperCase();
@@ -4651,7 +5333,709 @@ async function searchComplaint(targetId) {
     }
 }
 
+async function prepareComplaintTracking() {
+    const trackingResult = document.getElementById('trackingResult');
+    if (!trackingResult) return;
+
+    if (currentUser?.role === 'student') {
+        const studentId = currentUser?.userId || currentUser?.id || currentUser?.registrationNumber || '';
+        try {
+            const res = await apiRequest(`/api/complaints?studentId=${encodeURIComponent(studentId)}`);
+            const list = await parseJsonResponse(res);
+            if (Array.isArray(list) && list.length > 0) {
+                searchComplaint(list[0].id);
+                return;
+            }
+        } catch (e) {
+            console.warn('Could not auto-load student complaints:', e);
+        }
+    }
+
+    trackingResult.innerHTML = `
+        <div class="text-center py-12">
+            <div class="w-16 h-16 rounded-2xl bg-primary/10 text-primary flex items-center justify-center mx-auto mb-4 text-2xl">
+                <i class="fa-solid fa-magnifying-glass"></i>
+            </div>
+            <h3 class="font-bold text-base text-text mb-1">Track Your Maintenance Request</h3>
+            <p class="text-xs text-text-secondary max-w-md mx-auto mb-4">Enter your Complaint Ticket ID above to view live dispatch status, assigned technician, and resolution proof.</p>
+        </div>
+    `;
+}
+
+// ===== WARDEN COMPLAINT WORKFLOW =====
+
+let currentWardenComplaintsList = [];
+let currentWardenComplaintFilter = 'all';
+let currentWardenComplaintSearch = '';
+
+function switchWardenPortalTab(tab) {
+    const gatePassSection = document.getElementById('wardenGatePassPortalSection');
+    const complaintsSection = document.getElementById('wardenComplaintsPortalSection');
+    const tabGatePassBtn = document.getElementById('wardenTabGatePassBtn');
+    const tabComplaintsBtn = document.getElementById('wardenTabComplaintsBtn');
+
+    if (tab === 'complaints') {
+        if (gatePassSection) gatePassSection.classList.add('hidden');
+        if (complaintsSection) complaintsSection.classList.remove('hidden');
+        if (tabGatePassBtn) {
+            tabGatePassBtn.className = 'px-4 py-2 rounded-xl text-xs font-bold text-text-secondary hover:text-text hover:bg-surface transition-all flex items-center gap-2';
+        }
+        if (tabComplaintsBtn) {
+            tabComplaintsBtn.className = 'px-4 py-2 rounded-xl text-xs font-bold bg-amber-500 text-white shadow-sm transition-all flex items-center gap-2';
+        }
+        loadWardenComplaints();
+    } else {
+        if (complaintsSection) complaintsSection.classList.add('hidden');
+        if (gatePassSection) gatePassSection.classList.remove('hidden');
+        if (tabGatePassBtn) {
+            tabGatePassBtn.className = 'px-4 py-2 rounded-xl text-xs font-bold bg-primary text-white shadow-sm transition-all flex items-center gap-2';
+        }
+        if (tabComplaintsBtn) {
+            tabComplaintsBtn.className = 'px-4 py-2 rounded-xl text-xs font-bold text-text-secondary hover:text-text hover:bg-surface transition-all flex items-center gap-2';
+        }
+        renderWardenDashboard();
+    }
+}
+
+async function loadWardenComplaints() {
+    const listContainer = document.getElementById('wardenComplaintsList');
+    if (listContainer) {
+        listContainer.innerHTML = `
+            <div class="text-center py-8 text-text-secondary">
+                <i class="fa-solid fa-spinner animate-spin text-xl text-primary mb-2"></i>
+                <p class="text-xs">Loading complaints for your assigned block...</p>
+            </div>
+        `;
+    }
+
+    try {
+        const wardenId = currentUser?.userId || currentUser?.id || '';
+        const wardenEmail = currentUser?.email || '';
+        const res = await apiRequest(`/api/complaints?role=warden&userId=${encodeURIComponent(wardenId)}&email=${encodeURIComponent(wardenEmail)}&_t=${Date.now()}`);
+        const complaints = await parseJsonResponse(res);
+
+        if (!res.ok) {
+            if (listContainer) listContainer.innerHTML = `<div class="text-center py-8 text-danger text-xs">Failed to load complaints.</div>`;
+            return;
+        }
+
+        currentWardenComplaintsList = Array.isArray(complaints) ? complaints : [];
+        updateWardenComplaintStats(currentWardenComplaintsList);
+        renderWardenComplaintsList(currentWardenComplaintsList);
+    } catch (err) {
+        console.error('Error loading warden complaints:', err);
+        if (listContainer) listContainer.innerHTML = `<div class="text-center py-8 text-danger text-xs">Error connecting to server.</div>`;
+    }
+}
+
+function updateWardenComplaintStats(complaints) {
+    const total = complaints.length;
+    const submitted = complaints.filter(c => ['submitted', 'pending', 'under review'].includes(String(c.status || '').toLowerCase())).length;
+    const assigned = complaints.filter(c => ['assigned', 'accepted'].includes(String(c.status || '').toLowerCase())).length;
+    const progress = complaints.filter(c => String(c.status || '').toLowerCase() === 'in progress').length;
+    const resolved = complaints.filter(c => String(c.status || '').toLowerCase() === 'resolved').length;
+    const verified = complaints.filter(c => ['verified', 'completed'].includes(String(c.status || '').toLowerCase())).length;
+
+    const elTotal = document.getElementById('wardenComplaintsTotalStat');
+    const elSub = document.getElementById('wardenComplaintsSubmittedStat');
+    const elAss = document.getElementById('wardenComplaintsAssignedStat');
+    const elProg = document.getElementById('wardenComplaintsProgressStat');
+    const elRes = document.getElementById('wardenComplaintsResolvedStat');
+    const elVer = document.getElementById('wardenComplaintsVerifiedStat');
+
+    if (elTotal) elTotal.textContent = String(total);
+    if (elSub) elSub.textContent = String(submitted);
+    if (elAss) elAss.textContent = String(assigned);
+    if (elProg) elProg.textContent = String(progress);
+    if (elRes) elRes.textContent = String(resolved);
+    if (elVer) elVer.textContent = String(verified);
+
+    const topBadge = document.getElementById('wardenTopComplaintsBadge');
+    if (topBadge) topBadge.textContent = String(total);
+    const sideBadge = document.getElementById('wardenSidebarComplaintBadge');
+    if (sideBadge) sideBadge.textContent = String(submitted + resolved);
+}
+
+function setWardenComplaintFilter(filter) {
+    currentWardenComplaintFilter = filter;
+    document.querySelectorAll('.warden-cfilter-btn').forEach(btn => {
+        if (btn.getAttribute('data-cfilter') === filter) {
+            btn.className = 'warden-cfilter-btn px-3 py-1.5 rounded-xl text-xs font-semibold bg-primary text-white transition-all shadow-sm';
+        } else {
+            btn.className = 'warden-cfilter-btn px-3 py-1.5 rounded-xl text-xs font-semibold border border-border bg-surface text-text-secondary hover:text-text transition-all';
+        }
+    });
+    renderWardenComplaintsList(currentWardenComplaintsList);
+}
+
+function handleWardenComplaintSearch(query) {
+    currentWardenComplaintSearch = String(query || '').trim().toLowerCase();
+    renderWardenComplaintsList(currentWardenComplaintsList);
+}
+
+async function refreshWardenComplaints(btn) {
+    if (btn) {
+        btn.disabled = true;
+        const icon = btn.querySelector('i');
+        if (icon) icon.classList.add('animate-spin');
+    }
+    await loadWardenComplaints();
+    if (btn) {
+        btn.disabled = false;
+        const icon = btn.querySelector('i');
+        if (icon) icon.classList.remove('animate-spin');
+        showToast('Complaints refreshed.', 'info');
+    }
+}
+
+function renderWardenComplaintsList(complaints) {
+    const container = document.getElementById('wardenComplaintsList');
+    if (!container) return;
+
+    let filtered = complaints.filter(c => {
+        const status = String(c.status || 'Submitted').toLowerCase();
+        if (currentWardenComplaintFilter === 'all') return true;
+        if (currentWardenComplaintFilter === 'submitted') return ['submitted', 'pending', 'under review'].includes(status);
+        if (currentWardenComplaintFilter === 'assigned') return ['assigned', 'accepted'].includes(status);
+        if (currentWardenComplaintFilter === 'in progress') return status === 'in progress';
+        if (currentWardenComplaintFilter === 'resolved') return status === 'resolved';
+        if (currentWardenComplaintFilter === 'verified') return ['verified', 'completed'].includes(status);
+        if (currentWardenComplaintFilter === 'reopened') return status === 'reopened';
+        return true;
+    });
+
+    if (currentWardenComplaintSearch) {
+        filtered = filtered.filter(c => {
+            const target = `${c.id || ''} ${c.studentName || c.student || ''} ${c.block || c.hostelBlock || ''} ${c.roomNumber || c.room || ''} ${c.category || ''} ${c.title || ''} ${c.description || ''} ${c.technicianName || ''}`.toLowerCase();
+            return target.includes(currentWardenComplaintSearch);
+        });
+    }
+
+    if (!filtered.length) {
+        container.innerHTML = `
+            <div class="text-center py-12 text-text-secondary bg-surface-alt/40 rounded-2xl border border-dashed border-border">
+                <i class="fa-solid fa-inbox text-3xl text-text-muted mb-2"></i>
+                <p class="font-bold text-sm">No complaints found</p>
+                <p class="text-xs text-text-muted mt-1">There are no complaints matching your current filter in your assigned block.</p>
+            </div>
+        `;
+        return;
+    }
+
+    container.innerHTML = filtered.map(complaint => {
+        const status = String(complaint.status || 'Submitted').trim();
+        const statusLower = status.toLowerCase();
+        const isEmergency = String(complaint.priority || '').toLowerCase() === 'emergency';
+        const isResolved = statusLower === 'resolved';
+        const hasStaff = complaint.technicianName && complaint.technicianName !== 'Unassigned';
+
+        return `
+            <div class="glass rounded-2xl border ${isEmergency ? 'border-red-500/60 bg-red-500/5' : 'border-border'} p-5 card-hover shadow-xs transition-all">
+                <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-border/60">
+                    <div class="flex items-start gap-3.5">
+                        <div class="w-11 h-11 rounded-2xl bg-primary/10 flex items-center justify-center text-primary text-xl font-bold shrink-0">
+                            <i class="fa-solid ${getCategoryIcon(complaint.category)}"></i>
+                        </div>
+                        <div>
+                            <div class="flex flex-wrap items-center gap-2">
+                                <span class="font-mono text-xs font-bold text-primary">${complaint.id}</span>
+                                <span class="text-xs font-bold text-text">${complaint.category || 'General'}</span>
+                                <span class="${getPriorityBadgeClass(complaint.priority)} px-2.5 py-0.5 rounded-full text-xs font-bold ${isEmergency ? 'animate-pulse' : ''}">${complaint.priority || 'Medium'}</span>
+                                <span class="${getStatusBadgeClass(complaint.status)} px-2.5 py-0.5 rounded-full text-xs font-bold">${complaint.status || 'Submitted'}</span>
+                            </div>
+                            <p class="text-xs text-text-secondary mt-1">
+                                <strong class="text-text">${complaint.studentName || complaint.student || 'Resident'}</strong> • 
+                                <span class="font-semibold text-text">${complaint.block || complaint.hostelBlock || 'Block A'} - Room ${complaint.roomNumber || complaint.room || 'N/A'}</span> • 
+                                Registered: ${formatComplaintDate(complaint.createdAt)}
+                            </p>
+                        </div>
+                    </div>
+
+                    <div class="flex flex-wrap items-center gap-2 self-start md:self-auto">
+                        ${isResolved ? `
+                            <button onclick="openWardenVerificationModal('${complaint.id}')" class="px-4 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs shadow-md shadow-teal-600/20 flex items-center gap-1.5 transition-all">
+                                <i class="fa-solid fa-clipboard-check"></i> Verify Resolution
+                            </button>
+                        ` : ''}
+
+                        <button onclick="openAssignStaffModal('${complaint.id}')" class="px-3.5 py-2 rounded-xl border border-indigo-500/30 bg-indigo-500/10 hover:bg-indigo-500 hover:text-white text-indigo-600 font-bold text-xs flex items-center gap-1.5 transition-all">
+                            <i class="fa-solid fa-user-gear"></i> ${hasStaff ? 'Re-assign Staff' : 'Assign Staff'}
+                        </button>
+
+                        <button onclick="downloadComplaintPdf('${complaint.id}')" class="px-3 py-2 rounded-xl border border-border bg-surface hover:bg-surface-alt text-text font-bold text-xs flex items-center gap-1.5 transition-all" title="Generate Official PDF Report">
+                            <i class="fa-solid fa-file-pdf text-danger"></i> PDF
+                        </button>
+
+                        <button onclick="openComplaintDetailsModal('${complaint.id}')" class="px-3 py-2 rounded-xl border border-border bg-surface hover:bg-surface-alt text-text font-bold text-xs flex items-center gap-1.5 transition-all">
+                            <i class="fa-solid fa-eye"></i> Details
+                        </button>
+                    </div>
+                </div>
+
+                <div class="pt-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                    <div>
+                        <p class="text-text font-semibold">${complaint.title || 'Maintenance Complaint'}</p>
+                        <p class="text-text-secondary mt-0.5 line-clamp-2">${complaint.description || 'No description provided.'}</p>
+                    </div>
+                    <div class="shrink-0 flex items-center gap-2">
+                        ${hasStaff ? `
+                            <span class="px-3 py-1 rounded-xl bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 font-semibold text-[11px] flex items-center gap-1.5">
+                                <i class="fa-solid fa-wrench"></i> ${complaint.technicianName}
+                            </span>
+                        ` : `
+                            <span class="px-3 py-1 rounded-xl bg-amber-500/10 text-amber-600 border border-amber-500/20 font-bold text-[11px] flex items-center gap-1.5">
+                                <i class="fa-solid fa-triangle-exclamation"></i> Action Required: Unassigned
+                            </span>
+                        `}
+                    </div>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+async function openAssignStaffModal(complaintId) {
+    const complaint = (currentWardenComplaintsList || latestComplaints || []).find(c => c.id === complaintId) || { id: complaintId };
+    
+    document.getElementById('assignModalComplaintId').value = complaintId;
+    document.getElementById('assignModalTicketId').textContent = complaintId;
+    document.getElementById('assignModalCategoryPriority').textContent = `${complaint.category || 'General'} (${complaint.priority || 'Medium'})`;
+    document.getElementById('assignModalLocation').textContent = `${complaint.block || complaint.hostelBlock || 'Block A'} - Room ${complaint.roomNumber || complaint.room || '101'}`;
+    document.getElementById('assignModalStudent').textContent = `${complaint.studentName || complaint.student || 'Resident'}`;
+
+    // Fill or clear manual fields
+    document.getElementById('assignModalTechId').value = complaint.technicianId || '';
+    document.getElementById('assignModalTechName').value = (complaint.technicianName && complaint.technicianName !== 'Unassigned') ? complaint.technicianName : '';
+    document.getElementById('assignModalTechPhone').value = complaint.technicianPhone || '';
+    
+    const specSelect = document.getElementById('assignModalTechSpecialization');
+    if (specSelect) {
+        if (complaint.technicianSpecialization) {
+            specSelect.value = complaint.technicianSpecialization;
+        } else {
+            const cat = String(complaint.category || '').toLowerCase();
+            if (cat.includes('electr') || cat.includes('fan') || cat.includes('light')) specSelect.value = 'Electrician';
+            else if (cat.includes('plumb') || cat.includes('water')) specSelect.value = 'Plumber';
+            else if (cat.includes('furn') || cat.includes('carp')) specSelect.value = 'Carpenter';
+            else if (cat.includes('clean') || cat.includes('laund')) specSelect.value = 'Cleaning & Housekeeping';
+            else if (cat.includes('net') || cat.includes('wi-fi')) specSelect.value = 'Internet & Network Tech';
+            else specSelect.value = 'General Maintenance';
+        }
+    }
+
+    document.getElementById('assignModalEstimatedTime').value = complaint.estimatedCompletion || '';
+    document.getElementById('assignModalInstructions').value = complaint.instructions || '';
+
+    const select = document.getElementById('assignModalTechSelect');
+    select.innerHTML = '<option value="" selected>Loading active technicians...</option>';
+
+    const modal = document.getElementById('assignStaffModal');
+    if (modal) modal.classList.remove('hidden');
+
+    try {
+        const res = await apiRequest('/api/technicians');
+        const technicians = await parseJsonResponse(res);
+        
+        if (!Array.isArray(technicians) || !technicians.length) {
+            select.innerHTML = '<option value="" selected>-- No registered technicians (Type details manually below) --</option>';
+            return;
+        }
+
+        const categoryLower = String(complaint.category || '').toLowerCase();
+        
+        const sorted = [...technicians].sort((a, b) => {
+            const aSpec = String(a.specialization || a.category || '').toLowerCase();
+            const bSpec = String(b.specialization || b.category || '').toLowerCase();
+            const aMatch = aSpec && categoryLower.includes(aSpec);
+            const bMatch = bSpec && categoryLower.includes(bSpec);
+            if (aMatch && !bMatch) return -1;
+            if (!aMatch && bMatch) return 1;
+            return 0;
+        });
+
+        select.innerHTML = `
+            <option value="" selected>-- Select a registered technician to auto-fill (or type below) --</option>
+            ${sorted.map(t => {
+                const spec = t.specialization || t.category || 'Maintenance Staff';
+                const isMatch = categoryLower.includes(spec.toLowerCase());
+                return `<option value="${t.id || t.userId}" data-id="${t.id || t.userId}" data-name="${t.name || ''}" data-phone="${t.phone || ''}" data-specialization="${spec}">
+                    ${t.name} (${spec}) ${isMatch ? '★ Category Match' : ''} ${t.phone ? `- Phone: ${t.phone}` : ''}
+                </option>`;
+            }).join('')}
+        `;
+    } catch (e) {
+        console.error('Failed to load technicians for modal:', e);
+        select.innerHTML = '<option value="" selected>-- Type manual staff details below --</option>';
+    }
+}
+
+function handleAssignStaffQuickSelect(select) {
+    if (!select || !select.value) return;
+    const opt = select.selectedOptions[0];
+    if (!opt) return;
+
+    const id = opt.getAttribute('data-id') || select.value;
+    const name = opt.getAttribute('data-name') || '';
+    const phone = opt.getAttribute('data-phone') || '';
+    const specialization = opt.getAttribute('data-specialization') || '';
+
+    const idInput = document.getElementById('assignModalTechId');
+    const nameInput = document.getElementById('assignModalTechName');
+    const phoneInput = document.getElementById('assignModalTechPhone');
+    const specSelect = document.getElementById('assignModalTechSpecialization');
+
+    if (idInput) idInput.value = id;
+    if (nameInput && name) nameInput.value = name;
+    if (phoneInput && phone) phoneInput.value = phone;
+    if (specSelect && specialization) {
+        for (let i = 0; i < specSelect.options.length; i++) {
+            if (specSelect.options[i].value.toLowerCase().includes(specialization.toLowerCase()) || specialization.toLowerCase().includes(specSelect.options[i].value.toLowerCase())) {
+                specSelect.selectedIndex = i;
+                break;
+            }
+        }
+    }
+}
+
+function closeAssignStaffModal() {
+    const modal = document.getElementById('assignStaffModal');
+    if (modal) modal.classList.add('hidden');
+}
+
+async function handleAssignStaffSubmit(e) {
+    e.preventDefault();
+    const complaintId = document.getElementById('assignModalComplaintId')?.value;
+    const technicianId = document.getElementById('assignModalTechId')?.value || `TECH-${Date.now()}`;
+    const technicianName = document.getElementById('assignModalTechName')?.value.trim();
+    const technicianPhone = document.getElementById('assignModalTechPhone')?.value.trim();
+    const technicianSpecialization = document.getElementById('assignModalTechSpecialization')?.value || 'General Maintenance';
+    const estimatedCompletion = document.getElementById('assignModalEstimatedTime')?.value.trim();
+    const instructions = document.getElementById('assignModalInstructions')?.value.trim();
+
+    if (!complaintId || !technicianName) {
+        showToast('Please enter the staff / technician name.', 'warning');
+        return;
+    }
+
+    showLoading();
+    try {
+        const response = await apiRequest(`/api/complaints/${encodeURIComponent(complaintId)}/assign`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                technicianId,
+                technicianName,
+                technicianPhone,
+                technicianSpecialization,
+                estimatedCompletion,
+                instructions,
+                assignedBy: currentUser?.name || 'Warden',
+                assignedByRole: currentUser?.role || 'warden'
+            })
+        });
+
+        const data = await parseJsonResponse(response);
+        hideLoading();
+
+        if (!response.ok) {
+            showToast(data.error || 'Failed to assign staff.', 'error');
+            return;
+        }
+
+        showToast(`Staff ${technicianName} assigned successfully!`, 'success');
+        closeAssignStaffModal();
+        await loadWardenComplaints();
+        await loadDashboardData();
+    } catch (err) {
+        hideLoading();
+        showToast('Unable to reach server.', 'error');
+        console.error(err);
+    }
+}
+
+function openWardenVerificationModal(complaintId) {
+    const complaint = (currentWardenComplaintsList || latestComplaints || []).find(c => c.id === complaintId) || { id: complaintId };
+
+    document.getElementById('verifyModalComplaintId').value = complaintId;
+    document.getElementById('verifyModalTicketId').textContent = complaintId;
+    document.getElementById('verifyModalTitle').textContent = complaint.title || complaint.category || 'Maintenance Request';
+    document.getElementById('verifyModalLocationStudent').textContent = `${complaint.block || complaint.hostelBlock || 'Block A'} - Room ${complaint.roomNumber || complaint.room || '101'} (${complaint.studentName || complaint.student || 'Resident'})`;
+    document.getElementById('verifyModalTechnician').textContent = `${complaint.technicianName || 'Maintenance Technician'}`;
+    document.getElementById('verifyModalRemarks').textContent = complaint.resolutionRemarks || 'No resolution remarks provided.';
+    document.getElementById('verifyModalRejectionNotes').value = '';
+
+    const beforeContainer = document.getElementById('verifyModalBeforePhotoContainer');
+    const afterContainer = document.getElementById('verifyModalAfterPhotoContainer');
+
+    if (beforeContainer) {
+        beforeContainer.innerHTML = (complaint.beforePhotoUrl || complaint.photoUrl)
+            ? `<img src="${complaint.beforePhotoUrl || complaint.photoUrl}" class="max-h-40 mx-auto rounded-lg object-contain">`
+            : '<span class="text-text-muted text-xs">No before photo attached</span>';
+    }
+
+    if (afterContainer) {
+        afterContainer.innerHTML = complaint.afterPhotoUrl
+            ? `<img src="${complaint.afterPhotoUrl}" class="max-h-40 mx-auto rounded-lg object-contain">`
+            : '<span class="text-text-muted text-xs">No after photo attached</span>';
+    }
+
+    const modal = document.getElementById('wardenVerificationModal');
+    if (modal) modal.classList.remove('hidden');
+}
+
+function closeWardenVerificationModal() {
+    const modal = document.getElementById('wardenVerificationModal');
+    if (modal) modal.classList.add('hidden');
+}
+
+async function handleWardenVerificationApprove() {
+    const complaintId = document.getElementById('verifyModalComplaintId')?.value;
+    if (!complaintId) return;
+
+    showLoading();
+    try {
+        const response = await apiRequest(`/api/complaints/${encodeURIComponent(complaintId)}/status`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                status: 'Verified',
+                actor: currentUser?.name || 'Warden',
+                role: 'warden'
+            })
+        });
+
+        const data = await parseJsonResponse(response);
+        hideLoading();
+
+        if (!response.ok) {
+            showToast(data.error || 'Failed to verify complaint.', 'error');
+            return;
+        }
+
+        showToast('Resolution approved! Complaint officially verified and closed.', 'success');
+        closeWardenVerificationModal();
+        await loadWardenComplaints();
+        await loadDashboardData();
+    } catch (err) {
+        hideLoading();
+        showToast('Error connecting to server.', 'error');
+    }
+}
+
+async function handleWardenVerificationReject() {
+    const complaintId = document.getElementById('verifyModalComplaintId')?.value;
+    const rejectionReason = document.getElementById('verifyModalRejectionNotes')?.value.trim();
+
+    if (!complaintId) return;
+    if (!rejectionReason) {
+        showToast('Please enter the reason for rejection and rework details.', 'warning');
+        return;
+    }
+
+    showLoading();
+    try {
+        const response = await apiRequest(`/api/complaints/${encodeURIComponent(complaintId)}/status`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                status: 'Reopened',
+                actor: currentUser?.name || 'Warden',
+                role: 'warden',
+                rejectionReason
+            })
+        });
+
+        const data = await parseJsonResponse(response);
+        hideLoading();
+
+        if (!response.ok) {
+            showToast(data.error || 'Failed to reject resolution.', 'error');
+            return;
+        }
+
+        showToast('Complaint rejected and sent back to staff for rework.', 'warning');
+        closeWardenVerificationModal();
+        await loadWardenComplaints();
+        await loadDashboardData();
+    } catch (err) {
+        hideLoading();
+        showToast('Error connecting to server.', 'error');
+    }
+}
+
+async function openComplaintDetailsModal(complaintId) {
+    const modal = document.getElementById('complaintDetailsModal');
+    const body = document.getElementById('complaintDetailsModalBody');
+    const pdfBtn = document.getElementById('detailsModalDownloadPdfBtn');
+
+    if (modal) modal.classList.remove('hidden');
+    if (pdfBtn) {
+        pdfBtn.onclick = () => downloadComplaintPdf(complaintId);
+    }
+
+    if (body) {
+        body.innerHTML = `
+            <div class="text-center py-10">
+                <i class="fa-solid fa-spinner animate-spin text-2xl text-primary mb-3"></i>
+                <p class="text-xs font-semibold text-text-secondary">Loading full complaint timeline & details...</p>
+            </div>
+        `;
+    }
+
+    try {
+        const response = await apiRequest(`/api/complaints/${encodeURIComponent(complaintId)}`);
+        const complaint = await parseJsonResponse(response);
+
+        if (!response.ok || !complaint) {
+            if (body) body.innerHTML = '<div class="text-center py-8 text-danger text-xs">Failed to load complaint details.</div>';
+            return;
+        }
+
+        if (body) {
+            body.innerHTML = renderTrackingResult(complaint);
+        }
+    } catch (err) {
+        if (body) body.innerHTML = '<div class="text-center py-8 text-danger text-xs">Error connecting to server.</div>';
+    }
+}
+
+function closeComplaintDetailsModal() {
+    const modal = document.getElementById('complaintDetailsModal');
+    if (modal) modal.classList.add('hidden');
+}
+
+// ===== ADMIN COMPLAINTS FILTERING & TABLE =====
+
+let adminComplaintStatusFilterValue = 'all';
+let adminComplaintCategoryFilterValue = 'all';
+let adminComplaintPriorityFilterValue = 'all';
+let adminComplaintSearchValue = '';
+
+function renderAdminComplaintsTable(complaints = []) {
+    const tbody = document.getElementById('adminFullComplaintsTableBody');
+    if (!tbody) return;
+
+    let filtered = complaints.slice();
+
+    // Apply quick filters
+    if (adminComplaintStatusFilterValue !== 'all') {
+        filtered = filtered.filter(c => String(c.status || '').toLowerCase() === adminComplaintStatusFilterValue.toLowerCase());
+    }
+    if (adminComplaintCategoryFilterValue !== 'all') {
+        filtered = filtered.filter(c => String(c.category || '').toLowerCase().includes(adminComplaintCategoryFilterValue.toLowerCase()));
+    }
+    if (adminComplaintPriorityFilterValue !== 'all') {
+        filtered = filtered.filter(c => String(c.priority || '').toLowerCase() === adminComplaintPriorityFilterValue.toLowerCase());
+    }
+    if (adminComplaintSearchValue) {
+        filtered = filtered.filter(c => {
+            const text = `${c.id} ${c.studentName || c.student} ${c.block || c.hostelBlock} ${c.roomNumber || c.room} ${c.category} ${c.title} ${c.description} ${c.technicianName}`.toLowerCase();
+            return text.includes(adminComplaintSearchValue);
+        });
+    }
+
+    // Update summary counts
+    const totalCount = complaints.length;
+    const pendingCount = complaints.filter(c => ['submitted', 'pending', 'under review', 'assigned'].includes(String(c.status || '').toLowerCase())).length;
+    const progressCount = complaints.filter(c => String(c.status || '').toLowerCase() === 'in progress').length;
+    const completedCount = complaints.filter(c => ['resolved', 'verified', 'completed'].includes(String(c.status || '').toLowerCase())).length;
+
+    const elTotal = document.getElementById('adminComplaintsTotalCount');
+    const elPending = document.getElementById('adminComplaintsPendingCount');
+    const elProgress = document.getElementById('adminComplaintsProgressCount');
+    const elCompleted = document.getElementById('adminComplaintsCompletedCount');
+
+    if (elTotal) elTotal.textContent = String(totalCount);
+    if (elPending) elPending.textContent = String(pendingCount);
+    if (elProgress) elProgress.textContent = String(progressCount);
+    if (elCompleted) elCompleted.textContent = String(completedCount);
+
+    if (!filtered.length) {
+        tbody.innerHTML = '<tr><td colspan="8" class="px-6 py-8 text-center text-text-secondary">No complaints match the selected filter.</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = filtered.map(c => `
+        <tr class="table-row hover:bg-surface-alt/40 transition-colors">
+            <td class="px-6 py-4 font-mono font-bold text-primary text-xs">${c.id}</td>
+            <td class="px-6 py-4">
+                <p class="font-bold text-text">${c.studentName || c.student || 'Resident'}</p>
+                <p class="text-[11px] text-text-secondary">${c.block || c.hostelBlock || 'Block A'} • Room ${c.roomNumber || c.room || 'N/A'}</p>
+            </td>
+            <td class="px-6 py-4">
+                <p class="font-semibold text-text">${c.category || 'General'}</p>
+                <p class="text-[11px] text-text-secondary truncate max-w-[200px]">${c.title || c.description || ''}</p>
+            </td>
+            <td class="px-6 py-4">
+                <span class="${getPriorityBadgeClass(c.priority)} px-2 py-0.5 rounded-full text-xs font-semibold">${c.priority || 'Medium'}</span>
+            </td>
+            <td class="px-6 py-4">
+                <span class="${getStatusBadgeClass(c.status)} px-2 py-0.5 rounded-full text-xs font-semibold">${c.status || 'Submitted'}</span>
+            </td>
+            <td class="px-6 py-4 text-xs font-medium">${c.technicianName || c.assignedTo || '<span class="text-amber-600">Unassigned</span>'}</td>
+            <td class="px-6 py-4 text-xs text-text-secondary">${formatComplaintDate(c.createdAt)}</td>
+            <td class="px-6 py-4 text-right">
+                <div class="flex items-center justify-end gap-1.5">
+                    <button onclick="downloadComplaintPdf('${c.id}')" class="w-7 h-7 rounded-lg border border-border hover:bg-surface text-danger flex items-center justify-center text-xs" title="Download PDF Certificate">
+                        <i class="fa-solid fa-file-pdf"></i>
+                    </button>
+                    <button onclick="openComplaintDetailsModal('${c.id}')" class="w-7 h-7 rounded-lg border border-border hover:bg-primary hover:text-white text-text-secondary flex items-center justify-center text-xs" title="View Timeline">
+                        <i class="fa-solid fa-eye"></i>
+                    </button>
+                    <button onclick="deleteComplaint('${c.id}')" class="w-7 h-7 rounded-lg border border-border hover:bg-danger hover:text-white text-text-secondary flex items-center justify-center text-xs" title="Delete Complaint">
+                        <i class="fa-solid fa-trash"></i>
+                    </button>
+                </div>
+            </td>
+        </tr>
+    `).join('');
+}
+
+function handleAdminComplaintsFilter() {
+    const searchInput = document.getElementById('adminComplaintsSearchInput');
+    const statusSelect = document.getElementById('adminComplaintsStatusFilter');
+    const categorySelect = document.getElementById('adminComplaintsCategoryFilter');
+    const prioritySelect = document.getElementById('adminComplaintsPriorityFilter');
+
+    adminComplaintSearchValue = searchInput ? searchInput.value.trim().toLowerCase() : '';
+    adminComplaintStatusFilterValue = statusSelect ? statusSelect.value : 'all';
+    adminComplaintCategoryFilterValue = categorySelect ? categorySelect.value : 'all';
+    adminComplaintPriorityFilterValue = prioritySelect ? prioritySelect.value : 'all';
+
+    renderAdminComplaintsTable(latestComplaints);
+}
+
+function filterComplaintsByQuickStatus(status) {
+    const statusSelect = document.getElementById('adminComplaintsStatusFilter');
+    if (statusSelect) statusSelect.value = status === 'all' ? 'all' : status;
+    adminComplaintStatusFilterValue = status === 'all' ? 'all' : status;
+    renderAdminComplaintsTable(latestComplaints);
+}
+
+function resetAdminComplaintsFilters() {
+    const searchInput = document.getElementById('adminComplaintsSearchInput');
+    const statusSelect = document.getElementById('adminComplaintsStatusFilter');
+    const categorySelect = document.getElementById('adminComplaintsCategoryFilter');
+    const prioritySelect = document.getElementById('adminComplaintsPriorityFilter');
+
+    if (searchInput) searchInput.value = '';
+    if (statusSelect) statusSelect.value = 'all';
+    if (categorySelect) categorySelect.value = 'all';
+    if (prioritySelect) prioritySelect.value = 'all';
+
+    adminComplaintSearchValue = '';
+    adminComplaintStatusFilterValue = 'all';
+    adminComplaintCategoryFilterValue = 'all';
+    adminComplaintPriorityFilterValue = 'all';
+
+    renderAdminComplaintsTable(latestComplaints);
+}
+
 async function loadDashboardData() {
+    const scopedRole = normalizeText(currentUser?.role);
+    const scopedComplaintsUrl = scopedRole === 'student' || scopedRole === 'warden'
+        ? `/api/complaints?role=${encodeURIComponent(scopedRole)}&userId=${encodeURIComponent(currentUser?.userId || currentUser?.id || '')}&email=${encodeURIComponent(currentUser?.email || '')}`
+        : '/api/complaints';
     try {
         const [
             summaryRes,
@@ -4663,7 +6047,7 @@ async function loadDashboardData() {
             inventoryRes
         ] = await Promise.allSettled([
             apiRequest('/api/summary'),
-            apiRequest('/api/complaints'),
+            apiRequest(scopedComplaintsUrl),
             apiRequest('/api/technicians'),
             apiRequest('/api/gate-passes'),
             apiRequest('/api/laundry-requests'),
@@ -4713,20 +6097,26 @@ async function loadDashboardData() {
         } else {
             updateStudentDashboardStats(summary);
         }
-        renderTechAssignedComplaints(complaints);
-        renderTechCompletedComplaints(complaints);
-        renderTechSummary(complaints);
-        renderAdminSummary(summary, complaints, allUsers);
-        renderGatePassTable(latestGatePasses);
-        renderAdminStudents(allUsers, complaints);
-        renderAdminWardens(allUsers);
-        renderAdminTechnicians(technicianList, complaints);
-        renderAdminFullComplaintsTable(complaints);
-        renderTechInventoryGrid(inventoryList);
-        loadSecurityAlertStats().catch((securityError) => console.warn('Security alert stats unavailable:', securityError));
-        renderWardenDashboard();
-        renderSecurityDashboard();
-        renderAdminGatePassLogsPage();
+        if (typeof renderTechAssignedComplaints === 'function') renderTechAssignedComplaints(complaints);
+        if (typeof renderTechCompletedComplaints === 'function') renderTechCompletedComplaints(complaints);
+        if (typeof renderTechSummary === 'function') renderTechSummary(complaints);
+        if (typeof renderAdminSummary === 'function') renderAdminSummary(summary, complaints, allUsers);
+        if (typeof renderGatePassTable === 'function') renderGatePassTable(latestGatePasses);
+        if (typeof renderAdminStudents === 'function') renderAdminStudents(allUsers, complaints);
+        if (typeof renderAdminWardensPage === 'function') {
+            renderAdminWardensPage();
+        } else if (typeof renderAdminWardens === 'function') {
+            renderAdminWardens(allUsers);
+        }
+        if (typeof renderAdminTechnicians === 'function') renderAdminTechnicians(technicianList, complaints);
+        if (typeof renderAdminFullComplaintsTable === 'function') renderAdminFullComplaintsTable(complaints);
+        if (typeof renderTechInventoryGrid === 'function') renderTechInventoryGrid(inventoryList);
+        if (typeof loadSecurityAlertStats === 'function') {
+            loadSecurityAlertStats().catch((securityError) => console.warn('Security alert stats unavailable:', securityError));
+        }
+        if (typeof renderWardenDashboard === 'function') renderWardenDashboard();
+        if (typeof renderSecurityDashboard === 'function') renderSecurityDashboard();
+        if (typeof renderAdminGatePassLogsPage === 'function') renderAdminGatePassLogsPage();
 
         const gatePassCount = document.getElementById('adminGatePassCount');
         if (gatePassCount) gatePassCount.textContent = `${latestGatePasses.length}`;
@@ -9089,7 +10479,7 @@ function hideLoading() {
     document.getElementById('loadingOverlay').classList.add('hidden');
 }
 
-document.getElementById('modalOverlay').addEventListener('click', function(e) {
+document.getElementById('modalOverlay')?.addEventListener('click', function(e) {
     if (e.target === this) closeModal();
 });
 
@@ -9776,7 +11166,8 @@ async function loadWardenAssignedStudents() {
     const select = document.getElementById('wardenAssignedStudentSelect');
     if (!section || !list || !select || currentUser?.role !== 'warden') return;
     try {
-        const response = await apiRequest(`/api/warden/students?wardenEmail=${encodeURIComponent(currentUser.email || '')}`);
+        const wardenId = currentUser.userId || currentUser.id || '';
+        const response = await apiRequest(`/api/warden/students?wardenId=${encodeURIComponent(wardenId)}&wardenEmail=${encodeURIComponent(currentUser.email || '')}`);
         const students = response.ok ? await parseJsonResponse(response) : [];
         window.currentWardenStudents = Array.isArray(students) ? students : [];
         select.innerHTML = `<option value="">Select a student to filter gate-pass requests</option>${students.map((student) => `<option value="${escapeHtml(student.name || '')}">${escapeHtml(student.name || 'Student')} · ${escapeHtml(student.registrationNumber || 'No reg. no.')}</option>`).join('')}`;
@@ -9888,25 +11279,126 @@ async function handleAdminStudentSubmit(event) {
     }
 }
 
-// Explicit global exports for inline event handlers across all browsers
-window.navigateTo = navigateTo;
-window.toggleDarkMode = toggleDarkMode;
-window.handleLogin = handleLogin;
-window.handleRegister = handleRegister;
-window.updateComplaintStatus = updateComplaintStatus;
-window.quickUpdateComplaintStatus = quickUpdateComplaintStatus;
-window.exportReports = exportReports;
-window.openAddStudentModal = openAddStudentModal;
-window.handleAdminStudentSubmit = handleAdminStudentSubmit;
-window.openAddWardenModal = openAddWardenModal;
-window.closeAddWardenModal = closeAddWardenModal;
-window.handleAddWarden = handleAddWarden;
-window.openEditWardenModal = openEditWardenModal;
-window.closeEditWardenModal = closeEditWardenModal;
-window.handleEditWarden = handleEditWarden;
-window.toggleAllAdminStudents = toggleAllAdminStudents;
-window.assignSelectedStudentsToWarden = assignSelectedStudentsToWarden;
-window.openWardenStudentEditModal = openWardenStudentEditModal;
-window.handleWardenStudentUpdate = handleWardenStudentUpdate;
+// ===== REAL-TIME SOCKET.IO COMPLAINT LISTENERS =====
+function initRealtimeComplaintSync() {
+    if (typeof io === 'undefined') return;
+    try {
+        const socket = io();
 
+        socket.on('new-complaint', (complaint) => {
+            console.log('[Realtime] New complaint received:', complaint);
+            if (currentUser?.role === 'warden') {
+                loadWardenComplaints();
+                showToast(`New ${complaint.priority || ''} complaint reported in ${complaint.block || 'hostel'}!`, 'info');
+            } else if (currentUser?.role === 'admin') {
+                loadDashboardData();
+            }
+        });
 
+        socket.on('complaint-assigned', (data) => {
+            console.log('[Realtime] Complaint assigned:', data);
+            if (currentUser?.role === 'technician') {
+                loadDashboardData();
+                showToast(`New maintenance job assigned to you: Ticket #${data.id}`, 'info');
+            } else if (currentUser?.role === 'warden') {
+                loadWardenComplaints();
+            } else if (currentUser?.role === 'admin') {
+                loadDashboardData();
+            }
+        });
+
+        socket.on('complaint-status-updated', (data) => {
+            console.log('[Realtime] Complaint status updated:', data);
+            if (currentUser?.role === 'warden') {
+                loadWardenComplaints();
+            } else if (currentUser?.role === 'technician') {
+                loadDashboardData();
+            } else if (currentUser?.role === 'admin') {
+                loadDashboardData();
+            } else if (currentUser?.role === 'student') {
+                const queryInput = document.getElementById('complaintSearchInput');
+                if (queryInput && queryInput.value.trim().toUpperCase() === String(data.id).toUpperCase()) {
+                    searchComplaint(data.id);
+                }
+            }
+        });
+
+        socket.on('complaint-deleted', (data) => {
+            if (currentUser?.role === 'warden') {
+                loadWardenComplaints();
+            } else if (currentUser?.role === 'technician' || currentUser?.role === 'admin') {
+                loadDashboardData();
+            }
+        });
+    } catch (e) {
+        console.warn('Socket.IO initialization skipped:', e);
+    }
+}
+
+// Initialize realtime listeners after DOM loads
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initRealtimeComplaintSync);
+} else {
+    initRealtimeComplaintSync();
+}
+
+// Explicit safe global exports for inline event handlers across all browsers
+const globalExports = {
+    navigateTo: typeof navigateTo !== 'undefined' ? navigateTo : undefined,
+    toggleDarkMode: typeof toggleDarkMode !== 'undefined' ? toggleDarkMode : undefined,
+    handleLogin: typeof handleLogin !== 'undefined' ? handleLogin : undefined,
+    handleRegister: typeof handleRegister !== 'undefined' ? handleRegister : undefined,
+    updateComplaintStatus: typeof updateComplaintStatus !== 'undefined' ? updateComplaintStatus : undefined,
+    quickUpdateComplaintStatus: typeof quickUpdateComplaintStatus !== 'undefined' ? quickUpdateComplaintStatus : undefined,
+    exportReports: typeof exportReports !== 'undefined' ? exportReports : undefined,
+    openAddStudentModal: typeof openAddStudentModal !== 'undefined' ? openAddStudentModal : undefined,
+    handleAdminStudentSubmit: typeof handleAdminStudentSubmit !== 'undefined' ? handleAdminStudentSubmit : undefined,
+    openAddWardenModal: typeof openAddWardenModal !== 'undefined' ? openAddWardenModal : undefined,
+    closeAddWardenModal: typeof closeAddWardenModal !== 'undefined' ? closeAddWardenModal : undefined,
+    handleAddWarden: typeof handleAddWarden !== 'undefined' ? handleAddWarden : undefined,
+    openEditWardenModal: typeof openEditWardenModal !== 'undefined' ? openEditWardenModal : undefined,
+    closeEditWardenModal: typeof closeEditWardenModal !== 'undefined' ? closeEditWardenModal : undefined,
+    handleEditWarden: typeof handleEditWarden !== 'undefined' ? handleEditWarden : undefined,
+    toggleAllAdminStudents: typeof toggleAllAdminStudents !== 'undefined' ? toggleAllAdminStudents : undefined,
+    assignSelectedStudentsToWarden: typeof assignSelectedStudentsToWarden !== 'undefined' ? assignSelectedStudentsToWarden : undefined,
+    openWardenStudentEditModal: typeof openWardenStudentEditModal !== 'undefined' ? openWardenStudentEditModal : undefined,
+    handleWardenStudentUpdate: typeof handleWardenStudentUpdate !== 'undefined' ? handleWardenStudentUpdate : undefined,
+    handleComplaintPhotoSelect: typeof handleComplaintPhotoSelect !== 'undefined' ? handleComplaintPhotoSelect : undefined,
+    clearComplaintPhotoSelection: typeof clearComplaintPhotoSelection !== 'undefined' ? clearComplaintPhotoSelection : undefined,
+    prepareComplaintForm: typeof prepareComplaintForm !== 'undefined' ? prepareComplaintForm : undefined,
+    handleComplaintSubmit: typeof handleComplaintSubmit !== 'undefined' ? handleComplaintSubmit : undefined,
+    downloadComplaintPdf: typeof downloadComplaintPdf !== 'undefined' ? downloadComplaintPdf : undefined,
+    searchComplaint: typeof searchComplaint !== 'undefined' ? searchComplaint : undefined,
+    prepareComplaintTracking: typeof prepareComplaintTracking !== 'undefined' ? prepareComplaintTracking : undefined,
+    switchWardenPortalTab: typeof switchWardenPortalTab !== 'undefined' ? switchWardenPortalTab : undefined,
+    loadWardenComplaints: typeof loadWardenComplaints !== 'undefined' ? loadWardenComplaints : undefined,
+    refreshWardenComplaints: typeof refreshWardenComplaints !== 'undefined' ? refreshWardenComplaints : undefined,
+    setWardenComplaintFilter: typeof setWardenComplaintFilter !== 'undefined' ? setWardenComplaintFilter : undefined,
+    handleWardenComplaintSearch: typeof handleWardenComplaintSearch !== 'undefined' ? handleWardenComplaintSearch : undefined,
+    openAssignStaffModal: typeof openAssignStaffModal !== 'undefined' ? openAssignStaffModal : undefined,
+    handleAssignStaffQuickSelect: typeof handleAssignStaffQuickSelect !== 'undefined' ? handleAssignStaffQuickSelect : undefined,
+    closeAssignStaffModal: typeof closeAssignStaffModal !== 'undefined' ? closeAssignStaffModal : undefined,
+    handleAssignStaffSubmit: typeof handleAssignStaffSubmit !== 'undefined' ? handleAssignStaffSubmit : undefined,
+    openWardenVerificationModal: typeof openWardenVerificationModal !== 'undefined' ? openWardenVerificationModal : undefined,
+    closeWardenVerificationModal: typeof closeWardenVerificationModal !== 'undefined' ? closeWardenVerificationModal : undefined,
+    handleWardenVerificationApprove: typeof handleWardenVerificationApprove !== 'undefined' ? handleWardenVerificationApprove : undefined,
+    handleWardenVerificationReject: typeof handleWardenVerificationReject !== 'undefined' ? handleWardenVerificationReject : undefined,
+    openComplaintDetailsModal: typeof openComplaintDetailsModal !== 'undefined' ? openComplaintDetailsModal : undefined,
+    closeComplaintDetailsModal: typeof closeComplaintDetailsModal !== 'undefined' ? closeComplaintDetailsModal : undefined,
+    handleTechPhotoSelect: typeof handleTechPhotoSelect !== 'undefined' ? handleTechPhotoSelect : undefined,
+    openTechResolveModal: typeof openTechResolveModal !== 'undefined' ? openTechResolveModal : undefined,
+    closeTechResolveModal: typeof closeTechResolveModal !== 'undefined' ? closeTechResolveModal : undefined,
+    handleTechResolveSubmit: typeof handleTechResolveSubmit !== 'undefined' ? handleTechResolveSubmit : undefined,
+    handleTechAcceptComplaint: typeof handleTechAcceptComplaint !== 'undefined' ? handleTechAcceptComplaint : undefined,
+    handleTechStartWork: typeof handleTechStartWork !== 'undefined' ? handleTechStartWork : undefined,
+    renderAdminComplaintsTable: typeof renderAdminComplaintsTable !== 'undefined' ? renderAdminComplaintsTable : undefined,
+    handleAdminComplaintsFilter: typeof handleAdminComplaintsFilter !== 'undefined' ? handleAdminComplaintsFilter : undefined,
+    filterComplaintsByQuickStatus: typeof filterComplaintsByQuickStatus !== 'undefined' ? filterComplaintsByQuickStatus : undefined,
+    resetAdminComplaintsFilters: typeof resetAdminComplaintsFilters !== 'undefined' ? resetAdminComplaintsFilters : undefined
+};
+
+Object.entries(globalExports).forEach(([key, fn]) => {
+    if (typeof fn === 'function') {
+        window[key] = fn;
+    }
+});
