@@ -1727,13 +1727,20 @@ function setupAnnouncementSocket() {
             console.warn('Socket.IO client not loaded. Live announcements will not update automatically.');
             return;
         }
-        const socketUrl = API_BASE_URL || undefined;
-        announcementSocket = socketUrl ? io(socketUrl) : io();
+        const socketUrl = (typeof API_BASE_URL !== 'undefined' && API_BASE_URL) ? API_BASE_URL : window.location.origin;
+        announcementSocket = io(socketUrl, {
+            path: '/socket.io',
+            transports: ['polling', 'websocket'],
+            upgrade: true,
+            reconnectionAttempts: 10,
+            timeout: 10000,
+            autoConnect: true
+        });
         announcementSocket.on('connect', () => {
-            console.debug('Connected to announcement socket', socketUrl || window.location.origin);
+            console.debug('Connected to live announcement socket', socketUrl);
         });
         announcementSocket.on('connect_error', (error) => {
-            console.warn('Live announcement socket connection error:', error);
+            console.debug('Live announcement socket connection fallback:', error.message || error);
         });
         const handleSurveillanceAlert = (event) => {
             if (!event || !['admin', 'warden'].includes(currentUser?.role)) return;
@@ -3620,16 +3627,45 @@ function renderAdminWardens(users = []) {
 }
 
 function renderAdminTechnicians(users = [], complaints = []) {
-    if (typeof window.renderAdminTechnicians === 'function' && window.renderAdminTechnicians !== renderAdminTechnicians) {
-        const techList = Array.isArray(users) ? users.filter((u) => String(u.role || '').toLowerCase() === 'technician') : [];
-        return window.renderAdminTechnicians(techList, complaints);
-    }
     const container = document.getElementById('adminTechniciansGrid');
     if (!container) return;
-    const technicians = Array.isArray(users) ? users.filter((u) => String(u.role || '').toLowerCase() === 'technician') : [];
+    const technicians = Array.isArray(users) ? users.filter((u) => !u.role || String(u.role || '').toLowerCase() === 'technician') : [];
     window.currentTechniciansList = technicians;
+
+    // Update Top Summary Stats Bar
+    const totalCount = technicians.length;
+    const activeCount = technicians.filter(t => String(t.status || 'Active').toLowerCase() === 'active').length;
+    const inactiveCount = totalCount - activeCount;
+    const specsSet = new Set(technicians.map(t => t.specialization || 'General Maintenance'));
+    const resolvedCount = (complaints || []).filter(c => String(c.status).toLowerCase() === 'completed').length;
+    const activeTasksCount = (complaints || []).filter(c => String(c.status).toLowerCase() !== 'completed').length;
+
+    const statTotal = document.getElementById('statTotalTechs');
+    const statActive = document.getElementById('statActiveTechs');
+    const statInactive = document.getElementById('statInactiveTechs');
+    const statSpecs = document.getElementById('statSpecializations');
+    const statTasks = document.getElementById('statActiveTasks');
+    const statResolved = document.getElementById('statResolvedTickets');
+
+    if (statTotal) statTotal.textContent = String(totalCount);
+    if (statActive) statActive.textContent = String(activeCount);
+    if (statInactive) statInactive.textContent = String(inactiveCount);
+    if (statSpecs) statSpecs.textContent = String(Math.max(specsSet.size, 1));
+    if (statTasks) statTasks.textContent = String(activeTasksCount);
+    if (statResolved) statResolved.textContent = String(resolvedCount);
+
     if (!technicians.length) {
-        container.innerHTML = '<div class="col-span-3 glass p-6 rounded-2xl text-sm text-text-secondary text-center">No active technicians found. Click "Add New Technician" above to add one.</div>';
+        container.innerHTML = `
+            <div class="col-span-3 glass p-10 rounded-3xl border border-border text-center flex flex-col items-center justify-center my-6 mx-auto w-full max-w-xl animate-fade-in shadow-xs">
+                <div class="w-16 h-16 rounded-2xl bg-indigo-500/10 text-indigo-500 flex items-center justify-center text-3xl mb-4">
+                    <i class="fa-solid fa-user-gear"></i>
+                </div>
+                <h3 class="font-bold text-lg text-text mb-1">No Technicians Added</h3>
+                <p class="text-xs text-text-secondary max-w-md mb-6 leading-relaxed">Create your first technician account to start managing hostel maintenance operations.</p>
+                <button type="button" onclick="openAddTechnicianModal()" class="btn-primary px-6 py-3 rounded-2xl text-white text-xs font-semibold flex items-center gap-2 shadow-lg shadow-primary/20 hover:scale-[1.02] transition-transform cursor-pointer">
+                    <i class="fa-solid fa-plus"></i> Add New Technician
+                </button>
+            </div>`;
         return;
     }
     container.innerHTML = technicians.map((t) => {
@@ -3662,6 +3698,95 @@ function renderAdminTechnicians(users = [], complaints = []) {
                 <div class="flex items-center justify-between">
                     <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-500/10 text-blue-600 border border-blue-500/30">${t.status || 'Active Duty'}</span>
                     <span class="text-[11px] text-text-muted font-mono">${t.phone || t.email || ''}</span>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+let techSearchQuery = '';
+let techStatusFilter = 'all';
+let techSpecFilter = 'all';
+
+function filterTechniciansBySearch(query = '') {
+    techSearchQuery = String(query).toLowerCase().trim();
+    applyTechnicianFilters();
+}
+
+function filterTechniciansByStatus(status = 'all') {
+    techStatusFilter = String(status).toLowerCase().trim();
+    applyTechnicianFilters();
+}
+
+function filterTechniciansBySpecialization(spec = 'all') {
+    techSpecFilter = String(spec).toLowerCase().trim();
+    applyTechnicianFilters();
+}
+
+function applyTechnicianFilters() {
+    const all = window.currentTechniciansList || [];
+    const filtered = all.filter(t => {
+        const matchesSearch = !techSearchQuery || 
+            String(t.name || '').toLowerCase().includes(techSearchQuery) ||
+            String(t.email || '').toLowerCase().includes(techSearchQuery) ||
+            String(t.phone || '').toLowerCase().includes(techSearchQuery) ||
+            String(t.specialization || '').toLowerCase().includes(techSearchQuery);
+        
+        const matchesStatus = techStatusFilter === 'all' || String(t.status || 'Active').toLowerCase() === techStatusFilter;
+        const matchesSpec = techSpecFilter === 'all' || String(t.specialization || '').toLowerCase().includes(techSpecFilter);
+        
+        return matchesSearch && matchesStatus && matchesSpec;
+    });
+
+    renderFilteredTechniciansGrid(filtered);
+}
+
+function renderFilteredTechniciansGrid(techs = []) {
+    const container = document.getElementById('adminTechniciansGrid');
+    if (!container) return;
+    if (!techs.length) {
+        container.innerHTML = `
+            <div class="col-span-3 glass p-10 rounded-3xl border border-border text-center flex flex-col items-center justify-center my-6 mx-auto w-full max-w-xl animate-fade-in shadow-xs">
+                <div class="w-16 h-16 rounded-2xl bg-indigo-500/10 text-indigo-500 flex items-center justify-center text-3xl mb-4">
+                    <i class="fa-solid fa-user-gear"></i>
+                </div>
+                <h3 class="font-bold text-lg text-text mb-1">No Technicians Match Filter</h3>
+                <p class="text-xs text-text-secondary max-w-md mb-6 leading-relaxed">No registered technicians match your current search or filter criteria.</p>
+                <button type="button" onclick="openAddTechnicianModal()" class="btn-primary px-6 py-3 rounded-2xl text-white text-xs font-semibold flex items-center gap-2 shadow-lg shadow-primary/20 hover:scale-[1.02] transition-transform cursor-pointer">
+                    <i class="fa-solid fa-plus"></i> Add New Technician
+                </button>
+            </div>`;
+        return;
+    }
+    container.innerHTML = techs.map((t) => {
+        const initials = (t.name || 'TC').split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase();
+        return `
+            <div class="glass rounded-2xl border border-border p-5 card-hover relative group shadow-xs">
+                <div class="flex items-center justify-between mb-4">
+                    <div class="flex items-center gap-3">
+                        <div class="w-12 h-12 rounded-full bg-gradient-to-br from-primary to-info flex items-center justify-center text-white font-bold text-sm shadow-md">${initials}</div>
+                        <div>
+                            <h4 class="font-bold text-sm text-text">${escapeHtml(t.name)}</h4>
+                            <p class="text-xs text-primary font-medium">${escapeHtml(t.specialization || 'General Maintenance')}</p>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-1.5">
+                        <button type="button" onclick="openEditTechnicianModal('${escapeHtml(getTechnicianIdentifier(t))}')" title="Edit Technician" class="w-8 h-8 rounded-xl bg-primary/10 text-primary hover:bg-primary hover:text-white flex items-center justify-center text-xs transition-all">
+                            <i class="fa-solid fa-pen-to-square"></i>
+                        </button>
+                        <button type="button" onclick="deleteTechnician('${escapeHtml(getTechnicianIdentifier(t))}')" title="Remove Technician" class="w-8 h-8 rounded-xl bg-danger/10 text-danger hover:bg-danger hover:text-white flex items-center justify-center text-xs transition-all">
+                            <i class="fa-solid fa-trash"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="grid grid-cols-3 gap-2 text-center mb-4">
+                    <div class="bg-surface-alt rounded-xl p-2 border border-border/60"><p class="font-bold text-sm text-text">${t.completedCount || 0}</p><p class="text-[10px] text-text-secondary">Done</p></div>
+                    <div class="bg-surface-alt rounded-xl p-2 border border-border/60"><p class="font-bold text-sm text-amber-500">${t.rating || 4.9}</p><p class="text-[10px] text-text-secondary">Rating</p></div>
+                    <div class="bg-surface-alt rounded-xl p-2 border border-border/60"><p class="font-bold text-sm text-text">${t.avgRepairTime || '2.5h'}</p><p class="text-[10px] text-text-secondary">Avg</p></div>
+                </div>
+                <div class="flex items-center justify-between">
+                    <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-500/10 text-blue-600 border border-blue-500/30">${escapeHtml(t.status || 'Active')}</span>
+                    <span class="text-[11px] text-text-muted font-mono">${escapeHtml(t.phone || t.email || '')}</span>
                 </div>
             </div>
         `;
@@ -4394,21 +4519,55 @@ function toggleDarkMode() {
     }
 }
 
+selectedLoginRole = 'student';
+let selectedRegisterRole = 'student';
+
 function selectRole(role) {
+    selectLoginRole(role);
+}
+
+function selectLoginRole(role) {
     selectedLoginRole = role;
-    const roleSelect = document.getElementById('loginRole');
-    if (roleSelect && role) {
-        roleSelect.value = role;
+    const input = document.getElementById('loginRole');
+    if (input) input.value = role;
+
+    const hintEl = document.getElementById('loginRoleHint');
+    const hints = {
+        student: 'Access student portal, lodge complaints & request gate passes.',
+        technician: 'Manage assigned maintenance tickets, track work orders & update repair status.',
+        warden: 'Approve gate passes, inspect hostel complaints & issue notices.',
+        security: 'Scan QR gate passes, record exit/entry logs & security alerts.',
+        admin: 'Full system governance, user management, analytics & operational control.'
+    };
+
+    if (hintEl && hints[role]) {
+        const textSpan = hintEl.querySelector('span');
+        if (textSpan) textSpan.textContent = hints[role];
     }
-    document.querySelectorAll('.role-btn').forEach(btn => {
-        btn.classList.remove('active', 'border-primary', 'bg-primary/5', 'text-primary');
-        btn.classList.add('border-border', 'text-text-secondary');
+
+    document.querySelectorAll('.login-role-tab').forEach(btn => {
+        const btnRole = btn.getAttribute('data-role');
+        if (btnRole === role) {
+            btn.className = 'login-role-tab active flex-1 min-w-[70px] py-2 px-2 rounded-xl text-xs font-bold transition-all duration-200 flex items-center justify-center gap-1.5 bg-surface text-primary shadow-sm border border-border/60';
+        } else {
+            btn.className = 'login-role-tab flex-1 min-w-[70px] py-2 px-2 rounded-xl text-xs font-medium transition-all duration-200 flex items-center justify-center gap-1.5 text-text-secondary hover:text-text';
+        }
     });
-    const active = document.querySelector('[data-role="' + role + '"]');
-    if (active) {
-        active.classList.remove('border-border', 'text-text-secondary');
-        active.classList.add('active', 'border-primary', 'bg-primary/5', 'text-primary');
-    }
+}
+
+function selectRegisterRole(role) {
+    selectedRegisterRole = role;
+    const input = document.getElementById('registerRole');
+    if (input) input.value = role;
+
+    document.querySelectorAll('.register-role-tab').forEach(btn => {
+        const btnRole = btn.getAttribute('data-role');
+        if (btnRole === role) {
+            btn.className = 'register-role-tab active flex-1 min-w-[70px] py-2 px-2 rounded-xl text-xs font-bold transition-all duration-200 flex items-center justify-center gap-1.5 bg-surface text-primary shadow-sm border border-border/60';
+        } else {
+            btn.className = 'register-role-tab flex-1 min-w-[70px] py-2 px-2 rounded-xl text-xs font-medium transition-all duration-200 flex items-center justify-center gap-1.5 text-text-secondary hover:text-text';
+        }
+    });
 }
 
 function togglePassword(btn) {
@@ -4424,6 +4583,414 @@ function togglePassword(btn) {
         icon.classList.add('fa-eye');
     }
 }
+
+// ============================================================================
+// FORGOT PASSWORD & EMAIL OTP RECOVERY FLOW
+// ============================================================================
+
+let currentForgotPasswordEmail = '';
+let currentResetToken = '';
+let resendTimerInterval = null;
+
+function maskEmailForDisplay(email) {
+    if (!email || !email.includes('@')) return email || '';
+    const [user, domain] = email.split('@');
+    if (user.length <= 2) return `${user[0]}***@${domain}`;
+    return `${user[0]}***${user[user.length - 1]}@${domain}`;
+}
+
+function openForgotPasswordFlow(e) {
+    if (e && e.preventDefault) e.preventDefault();
+    currentForgotPasswordEmail = '';
+    currentResetToken = '';
+    if (resendTimerInterval) clearInterval(resendTimerInterval);
+
+    const emailInput = document.getElementById('forgotPasswordEmail');
+    if (emailInput) emailInput.value = '';
+
+    const alertEl = document.getElementById('forgotPasswordAlert');
+    if (alertEl) {
+        alertEl.className = 'hidden p-3 rounded-xl text-xs font-medium border';
+        alertEl.textContent = '';
+    }
+
+    navigateTo('forgot-password');
+}
+
+async function handleSendForgotPasswordOtp(e) {
+    if (e && e.preventDefault) e.preventDefault();
+    
+    const emailInput = document.getElementById('forgotPasswordEmail');
+    const alertEl = document.getElementById('forgotPasswordAlert');
+    const btnSend = document.getElementById('btnSendOtp');
+    
+    const email = (emailInput?.value || '').trim().toLowerCase();
+
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        if (alertEl) {
+            alertEl.className = 'p-3 rounded-xl text-xs font-medium border bg-danger/10 text-danger border-danger/20';
+            alertEl.textContent = 'Please enter a valid email address.';
+            alertEl.classList.remove('hidden');
+        }
+        return;
+    }
+
+    if (btnSend) {
+        btnSend.disabled = true;
+        btnSend.innerHTML = '<i class="fa-solid fa-spinner fa-spin text-xs"></i> Sending Verification Code...';
+    }
+
+    try {
+        const response = await apiRequest('/api/auth/forgot-password', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email })
+        });
+        const data = await parseJsonResponse(response);
+
+        if (!response.ok) {
+            if (alertEl) {
+                alertEl.className = 'p-3 rounded-xl text-xs font-medium border bg-danger/10 text-danger border-danger/20';
+                alertEl.textContent = data.error || 'Failed to send verification code. Please try again.';
+                alertEl.classList.remove('hidden');
+            }
+            return;
+        }
+
+        currentForgotPasswordEmail = email;
+        const masked = maskEmailForDisplay(email);
+        
+        const maskedEl = document.getElementById('otpMaskedEmail');
+        if (maskedEl) maskedEl.textContent = `(${masked})`;
+
+        for (let i = 1; i <= 6; i++) {
+            const digitInput = document.getElementById(`otpDigit${i}`);
+            if (digitInput) digitInput.value = '';
+        }
+
+        const verifyAlert = document.getElementById('verifyOtpAlert');
+        if (verifyAlert) {
+            verifyAlert.className = 'hidden p-3 rounded-xl text-xs font-medium border text-center';
+            verifyAlert.textContent = '';
+        }
+
+        navigateTo('verify-otp');
+        initOtpInputBoxListeners();
+        startResendTimer(60);
+
+        showToast('If an account exists for this email, a verification code has been sent.', 'info');
+    } catch (err) {
+        if (alertEl) {
+            alertEl.className = 'p-3 rounded-xl text-xs font-medium border bg-danger/10 text-danger border-danger/20';
+            alertEl.textContent = err.message || 'Error processing request.';
+            alertEl.classList.remove('hidden');
+        }
+    } finally {
+        if (btnSend) {
+            btnSend.disabled = false;
+            btnSend.innerHTML = '<i class="fa-solid fa-paper-plane"></i> Send Verification Code';
+        }
+    }
+}
+
+function initOtpInputBoxListeners() {
+    const boxes = [];
+    for (let i = 1; i <= 6; i++) {
+        const box = document.getElementById(`otpDigit${i}`);
+        if (box) boxes.push(box);
+    }
+
+    boxes.forEach((box, idx) => {
+        box.oninput = null;
+        box.onkeydown = null;
+        box.onpaste = null;
+
+        box.oninput = (e) => {
+            const val = e.target.value.replace(/\D/g, '');
+            e.target.value = val ? val[val.length - 1] : '';
+
+            if (e.target.value && idx < boxes.length - 1) {
+                boxes[idx + 1].focus();
+            }
+        };
+
+        box.onkeydown = (e) => {
+            if (e.key === 'Backspace' && !e.target.value && idx > 0) {
+                boxes[idx - 1].focus();
+            }
+        };
+
+        box.onpaste = (e) => {
+            e.preventDefault();
+            const pasteData = (e.clipboardData || window.clipboardData).getData('text');
+            const digits = pasteData.replace(/\D/g, '').slice(0, 6);
+            if (digits) {
+                for (let i = 0; i < 6; i++) {
+                    if (boxes[i]) boxes[i].value = digits[i] || '';
+                }
+                if (digits.length === 6 && boxes[5]) {
+                    boxes[5].focus();
+                }
+            }
+        };
+    });
+
+    if (boxes[0]) setTimeout(() => boxes[0].focus(), 100);
+}
+
+function startResendTimer(seconds = 60) {
+    if (resendTimerInterval) clearInterval(resendTimerInterval);
+    
+    let remaining = seconds;
+    const timerContainer = document.getElementById('resendTimerContainer');
+    const countdownEl = document.getElementById('resendCountdown');
+    const resendBtn = document.getElementById('btnResendOtp');
+
+    if (timerContainer) timerContainer.classList.remove('hidden');
+    if (resendBtn) resendBtn.classList.add('hidden');
+    if (countdownEl) countdownEl.textContent = String(remaining);
+
+    resendTimerInterval = setInterval(() => {
+        remaining -= 1;
+        if (countdownEl) countdownEl.textContent = String(remaining);
+
+        if (remaining <= 0) {
+            clearInterval(resendTimerInterval);
+            if (timerContainer) timerContainer.classList.add('hidden');
+            if (resendBtn) resendBtn.classList.remove('hidden');
+        }
+    }, 1000);
+}
+
+async function resendOtpCode() {
+    if (!currentForgotPasswordEmail) {
+        showToast('Session expired. Please enter your email again.', 'warning');
+        navigateTo('forgot-password');
+        return;
+    }
+
+    const resendBtn = document.getElementById('btnResendOtp');
+    if (resendBtn) {
+        resendBtn.disabled = true;
+        resendBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin text-xs"></i> Resending...';
+    }
+
+    try {
+        const response = await apiRequest('/api/auth/forgot-password', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email: currentForgotPasswordEmail })
+        });
+        const data = await parseJsonResponse(response);
+
+        if (!response.ok) {
+            showToast(data.error || 'Failed to resend code.', 'error');
+            return;
+        }
+
+        showToast('A new verification code has been sent.', 'success');
+        startResendTimer(60);
+    } catch (err) {
+        showToast(err.message || 'Error resending code.', 'error');
+    } finally {
+        if (resendBtn) {
+            resendBtn.disabled = false;
+            resendBtn.innerHTML = '<i class="fa-solid fa-rotate-right mr-1"></i> Resend Code';
+        }
+    }
+}
+
+async function handleVerifyOtpSubmit(e) {
+    if (e && e.preventDefault) e.preventDefault();
+
+    let otp = '';
+    for (let i = 1; i <= 6; i++) {
+        const box = document.getElementById(`otpDigit${i}`);
+        if (box) otp += box.value.trim();
+    }
+
+    const alertEl = document.getElementById('verifyOtpAlert');
+    const btnVerify = document.getElementById('btnVerifyOtp');
+
+    if (otp.length !== 6 || !/^\d{6}$/.test(otp)) {
+        if (alertEl) {
+            alertEl.className = 'p-3 rounded-xl text-xs font-medium border bg-danger/10 text-danger border-danger/20 text-center';
+            alertEl.textContent = 'Please enter all 6 digits of your verification code.';
+            alertEl.classList.remove('hidden');
+        }
+        return;
+    }
+
+    if (btnVerify) {
+        btnVerify.disabled = true;
+        btnVerify.innerHTML = '<i class="fa-solid fa-spinner fa-spin text-xs"></i> Verifying Code...';
+    }
+
+    try {
+        const response = await apiRequest('/api/auth/verify-otp', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email: currentForgotPasswordEmail, otp })
+        });
+        const data = await parseJsonResponse(response);
+
+        if (!response.ok) {
+            if (alertEl) {
+                alertEl.className = 'p-3 rounded-xl text-xs font-medium border bg-danger/10 text-danger border-danger/20 text-center';
+                alertEl.textContent = data.error || 'Invalid verification code. Please try again.';
+                alertEl.classList.remove('hidden');
+            }
+            return;
+        }
+
+        currentResetToken = data.resetToken;
+        
+        const newPassEl = document.getElementById('resetNewPassword');
+        const confirmPassEl = document.getElementById('resetConfirmPassword');
+        if (newPassEl) newPassEl.value = '';
+        if (confirmPassEl) confirmPassEl.value = '';
+
+        const resetAlert = document.getElementById('resetPasswordAlert');
+        if (resetAlert) {
+            resetAlert.className = 'hidden p-3 rounded-xl text-xs font-medium border';
+            resetAlert.textContent = '';
+        }
+
+        navigateTo('reset-password');
+        showToast('Verification successful! Set your new password.', 'success');
+    } catch (err) {
+        if (alertEl) {
+            alertEl.className = 'p-3 rounded-xl text-xs font-medium border bg-danger/10 text-danger border-danger/20 text-center';
+            alertEl.textContent = err.message || 'Error verifying code.';
+            alertEl.classList.remove('hidden');
+        }
+    } finally {
+        if (btnVerify) {
+            btnVerify.disabled = false;
+            btnVerify.innerHTML = '<i class="fa-solid fa-circle-check"></i> Verify Code';
+        }
+    }
+}
+
+function checkResetPasswordStrength(password) {
+    const bar = document.getElementById('passwordStrengthBar');
+    const text = document.getElementById('passwordStrengthText');
+    if (!bar || !text) return;
+
+    if (!password) {
+        bar.style.width = '0%';
+        bar.className = 'h-full w-0 bg-danger transition-all duration-300';
+        text.textContent = '';
+        return;
+    }
+
+    let score = 0;
+    if (password.length >= 8) score += 1;
+    if (/[A-Z]/.test(password)) score += 1;
+    if (/[0-9]/.test(password)) score += 1;
+    if (/[^A-Za-z0-9]/.test(password)) score += 1;
+
+    if (score <= 1) {
+        bar.style.width = '25%';
+        bar.className = 'h-full bg-danger transition-all duration-300';
+        text.textContent = 'Weak password';
+        text.className = 'text-[11px] text-danger font-medium text-right';
+    } else if (score === 2 || score === 3) {
+        bar.style.width = '65%';
+        bar.className = 'h-full bg-amber-500 transition-all duration-300';
+        text.textContent = 'Medium password';
+        text.className = 'text-[11px] text-amber-500 font-medium text-right';
+    } else {
+        bar.style.width = '100%';
+        bar.className = 'h-full bg-emerald transition-all duration-300';
+        text.textContent = 'Strong password';
+        text.className = 'text-[11px] text-emerald font-medium text-right';
+    }
+}
+
+async function handleResetPasswordSubmit(e) {
+    if (e && e.preventDefault) e.preventDefault();
+
+    const newPassword = (document.getElementById('resetNewPassword')?.value || '');
+    const confirmPassword = (document.getElementById('resetConfirmPassword')?.value || '');
+    const alertEl = document.getElementById('resetPasswordAlert');
+    const btnReset = document.getElementById('btnResetPassword');
+
+    if (!newPassword || newPassword.length < 8) {
+        if (alertEl) {
+            alertEl.className = 'p-3 rounded-xl text-xs font-medium border bg-danger/10 text-danger border-danger/20';
+            alertEl.textContent = 'Password must be at least 8 characters long.';
+            alertEl.classList.remove('hidden');
+        }
+        return;
+    }
+
+    if (newPassword !== confirmPassword) {
+        if (alertEl) {
+            alertEl.className = 'p-3 rounded-xl text-xs font-medium border bg-danger/10 text-danger border-danger/20';
+            alertEl.textContent = 'Passwords do not match. Please re-enter your password.';
+            alertEl.classList.remove('hidden');
+        }
+        return;
+    }
+
+    if (!currentForgotPasswordEmail || !currentResetToken) {
+        showToast('Password reset session expired. Please start again.', 'warning');
+        navigateTo('forgot-password');
+        return;
+    }
+
+    if (btnReset) {
+        btnReset.disabled = true;
+        btnReset.innerHTML = '<i class="fa-solid fa-spinner fa-spin text-xs"></i> Updating Password...';
+    }
+
+    try {
+        const response = await apiRequest('/api/auth/reset-password', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                email: currentForgotPasswordEmail,
+                resetToken: currentResetToken,
+                newPassword
+            })
+        });
+        const data = await parseJsonResponse(response);
+
+        if (!response.ok) {
+            if (alertEl) {
+                alertEl.className = 'p-3 rounded-xl text-xs font-medium border bg-danger/10 text-danger border-danger/20';
+                alertEl.textContent = data.error || 'Failed to update password. Please try again.';
+                alertEl.classList.remove('hidden');
+            }
+            return;
+        }
+
+        currentForgotPasswordEmail = '';
+        currentResetToken = '';
+
+        navigateTo('password-reset-success');
+        showToast('Password updated successfully.', 'success');
+    } catch (err) {
+        if (alertEl) {
+            alertEl.className = 'p-3 rounded-xl text-xs font-medium border bg-danger/10 text-danger border-danger/20';
+            alertEl.textContent = err.message || 'Error updating password.';
+            alertEl.classList.remove('hidden');
+        }
+    } finally {
+        if (btnReset) {
+            btnReset.disabled = false;
+            btnReset.innerHTML = '<i class="fa-solid fa-lock text-xs"></i> Reset Password';
+        }
+    }
+}
+
+window.openForgotPasswordFlow = openForgotPasswordFlow;
+window.handleSendForgotPasswordOtp = handleSendForgotPasswordOtp;
+window.resendOtpCode = resendOtpCode;
+window.handleVerifyOtpSubmit = handleVerifyOtpSubmit;
+window.checkResetPasswordStrength = checkResetPasswordStrength;
+window.handleResetPasswordSubmit = handleResetPasswordSubmit;
 
 async function handleLogin(e) {
     e.preventDefault();
@@ -4464,14 +5031,16 @@ async function handleLogin(e) {
         studentNotifications = [];
 
         // Check if mandatory password change is required on first login
+        // Check if mandatory password change is required on first login
         if (data.mustChangePassword === true) {
-            const mandModal = document.getElementById('mandatoryChangePasswordModal');
+            const mandModal = document.getElementById('mandatoryChangePasswordModal') || document.getElementById('changePasswordModal');
             if (mandModal) {
-                const curPassInput = document.getElementById('mandatoryCurrentPassword');
+                const curPassInput = document.getElementById('mandatoryCurrentPassword') || document.getElementById('cpCurrentPassword');
                 if (curPassInput) curPassInput.value = password;
-                const errBox = document.getElementById('mandatoryPasswordError');
+                const errBox = document.getElementById('mandatoryPasswordError') || document.getElementById('changePasswordError');
                 if (errBox) errBox.classList.add('hidden');
                 mandModal.classList.remove('hidden');
+                mandModal.style.display = 'flex';
                 showToast('Please set your permanent password to continue.', 'info');
                 return;
             }
@@ -4511,12 +5080,16 @@ async function handleLogin(e) {
     }
 }
 
+async function handleChangePassword(event) {
+    return handleMandatoryPasswordChange(event);
+}
+
 async function handleMandatoryPasswordChange(event) {
     if (event) event.preventDefault();
-    const currentPassword = document.getElementById('mandatoryCurrentPassword')?.value;
-    const newPassword = document.getElementById('mandatoryNewPassword')?.value;
-    const confirmPassword = document.getElementById('mandatoryConfirmPassword')?.value;
-    const errBox = document.getElementById('mandatoryPasswordError');
+    const currentPassword = document.getElementById('mandatoryCurrentPassword')?.value || document.getElementById('cpCurrentPassword')?.value;
+    const newPassword = document.getElementById('mandatoryNewPassword')?.value || document.getElementById('cpNewPassword')?.value;
+    const confirmPassword = document.getElementById('mandatoryConfirmPassword')?.value || document.getElementById('cpConfirmPassword')?.value;
+    const errBox = document.getElementById('mandatoryPasswordError') || document.getElementById('changePasswordError');
 
     if (errBox) errBox.classList.add('hidden');
 
@@ -4575,11 +5148,14 @@ async function handleMandatoryPasswordChange(event) {
             persistCurrentUser();
         }
 
-        const modal = document.getElementById('mandatoryChangePasswordModal');
-        if (modal) modal.classList.add('hidden');
+        const modal = document.getElementById('mandatoryChangePasswordModal') || document.getElementById('changePasswordModal');
+        if (modal) {
+            modal.classList.add('hidden');
+            modal.style.display = 'none';
+        }
 
         showToast('Permanent password set successfully! Welcome to your dashboard.', 'success');
-        navigateTo(currentUser?.role === 'warden' ? 'warden-dashboard' : getCurrentUserDashboard());
+        navigateTo(currentUser?.role === 'warden' ? 'warden-dashboard' : currentUser?.role === 'technician' ? 'technician-dashboard' : getCurrentUserDashboard());
     } catch (err) {
         hideLoading();
         console.error('Password change error:', err);
@@ -10600,7 +11176,7 @@ async function loadTechniciansList() {
         if (countEl) countEl.textContent = String(techArray.length);
     } catch (error) {
         console.error('Error loading technicians:', error);
-        container.innerHTML = `<div class="col-span-3 glass p-6 rounded-2xl text-center text-danger font-medium">Unable to load technicians list. Please check server connection.</div>`;
+        renderAdminTechnicians([], []);
     }
 }
 
@@ -10630,8 +11206,8 @@ async function handleAddWarden(event) {
     const phone = document.getElementById('wardenPhone')?.value.trim();
     const password = document.getElementById('wardenPassword')?.value;
 
-    if (!name || !email || !password) {
-        showToast('Please enter name, unique email, and password.', 'warning');
+    if (!name || !email) {
+        showToast('Please enter name and unique email.', 'warning');
         return;
     }
 
@@ -10639,12 +11215,19 @@ async function handleAddWarden(event) {
         const response = await apiRequest('/api/wardens', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name, email, password, hostelBlock, phone })
+            body: JSON.stringify({ name, email, password: password || undefined, hostelBlock, phone })
         });
         const data = await parseJsonResponse(response);
         if (!response.ok) throw new Error(data.error || 'Failed to create warden');
 
-        showToast(`Warden ${data.name} added. Login ID: ${data.userId || data.id}`, 'success');
+        const loginId = data.userId || data.wardenId || data.id || email;
+        const tempPwd = data.temporaryPassword || password || 'Wrd_928173';
+
+        showToast(`Warden ${data.name} Created! Login ID: ${loginId} | Temporary Password: ${tempPwd}`, 'success');
+        if (typeof window.alert === 'function') {
+            window.alert(`✅ Warden Account Created Successfully!\n\nWarden Name: ${data.name}\nLogin ID: ${loginId}\nEmail: ${email}\nTemporary Password: ${tempPwd}\n\nNote: The warden must set a permanent password upon first login.`);
+        }
+
         closeAddWardenModal();
         event.target.reset();
         await loadWardensList();
@@ -10668,39 +11251,61 @@ async function deleteWarden(id) {
     }
 }
 
+function generateTechId() {
+    const idInput = document.getElementById('techEmployeeId');
+    const randomNum = Math.floor(100000 + Math.random() * 900000);
+    const newId = `TCH-${randomNum}`;
+    if (idInput) idInput.value = newId;
+    return newId;
+}
+
 function openAddTechnicianModal() {
     const modal = document.getElementById('addTechnicianModal');
-    if (modal) {
-        modal.classList.remove('hidden');
-        modal.style.display = 'flex';
-        const form = modal.querySelector('form');
-        if (form) {
-            form.reset();
-            const pwd = document.getElementById('techPassword');
-            if (pwd) pwd.value = 'tech123';
-        }
-        setTimeout(() => document.getElementById('techName')?.focus(), 50);
+    if (!modal) return;
+    if (modal.parentElement !== document.body) {
+        document.body.appendChild(modal);
     }
+    modal.classList.remove('hidden');
+    modal.style.setProperty('display', 'flex', 'important');
+    modal.style.setProperty('visibility', 'visible', 'important');
+    modal.style.setProperty('opacity', '1', 'important');
+    modal.style.setProperty('pointer-events', 'auto', 'important');
+    modal.style.setProperty('z-index', '999999', 'important');
+    const form = modal.querySelector('form');
+    if (form) form.reset();
+    generateTechId();
+    setTimeout(() => {
+        const input = document.getElementById('techName');
+        if (input) input.focus();
+    }, 50);
 }
 
 function closeAddTechnicianModal() {
     const modal = document.getElementById('addTechnicianModal');
-    if (modal) {
-        modal.classList.add('hidden');
-        modal.style.display = 'none';
-    }
+    if (!modal) return;
+    modal.classList.add('hidden');
+    modal.style.setProperty('display', 'none', 'important');
+    modal.style.setProperty('visibility', 'hidden', 'important');
+    modal.style.setProperty('opacity', '0', 'important');
+    modal.style.setProperty('pointer-events', 'none', 'important');
 }
 
 async function handleAddTechnician(event) {
     event.preventDefault();
     const name = document.getElementById('techName')?.value.trim();
     const email = document.getElementById('techEmail')?.value.trim();
-    const specialization = document.getElementById('techSpecialization')?.value;
     const phone = document.getElementById('techPhone')?.value.trim();
-    const password = document.getElementById('techPassword')?.value;
+    const technicianId = document.getElementById('techEmployeeId')?.value.trim() || generateTechId();
+    const specialization = document.getElementById('techSpecialization')?.value;
+    const department = document.getElementById('techDepartment')?.value;
+    const hostelBlock = document.getElementById('techHostelBlock')?.value;
+    const shift = document.getElementById('techShift')?.value;
+    const gender = document.getElementById('techGender')?.value;
+    const emergencyContact = document.getElementById('techEmergencyContact')?.value.trim();
+    const password = 'tech123';
 
-    if (!name || !email) {
-        showToast('Please enter both name and email.', 'warning');
+    if (!name || !email || !phone) {
+        showToast('Please enter full name, email address, and mobile number.', 'warning');
         return;
     }
 
@@ -10708,12 +11313,29 @@ async function handleAddTechnician(event) {
         const response = await apiRequest('/api/technicians', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name, email, password, specialization, phone })
+            body: JSON.stringify({
+                name,
+                email,
+                password,
+                phone,
+                technicianId,
+                specialization,
+                department,
+                hostelBlock,
+                shift,
+                gender,
+                emergencyContact
+            })
         });
         const data = await parseJsonResponse(response);
-        if (!response.ok) throw new Error(data.error || 'Failed to create technician');
+        if (!response.ok) throw new Error(data.error || 'Failed to create technician account');
 
-        showToast(`Technician ${data.name} added successfully!`, 'success');
+        const loginId = data.userId || data.technicianId || technicianId || email;
+        const tempPwd = data.temporaryPassword || password || 'tech123';
+        showToast(`Technician ${data.name} created! Login ID: ${loginId} | Password: ${tempPwd}`, 'success');
+        if (typeof window.alert === 'function') {
+            window.alert(`✅ Technician Account Created Successfully!\n\nTechnician Name: ${data.name}\nLogin ID: ${loginId}\nEmail: ${email}\nTemporary Password: ${tempPwd}\n\nNote: The technician must set a permanent password upon first login.`);
+        }
         closeAddTechnicianModal();
         event.target.reset();
         await loadTechniciansList();
@@ -10795,12 +11417,24 @@ function openEditTechnicianModal(id) {
         showToast('Technician details are unavailable. Please refresh the list and try again.', 'error');
         return;
     }
-    document.getElementById('editTechId').value = getTechnicianIdentifier(tech);
-    document.getElementById('editTechName').value = tech.name || '';
-    document.getElementById('editTechEmail').value = tech.email || '';
-    document.getElementById('editTechSpecialization').value = tech.specialization || 'General Maintenance';
-    document.getElementById('editTechPhone').value = tech.phone || '+91 98765 12345';
-    
+    const idEl = document.getElementById('editTechId');
+    const nameEl = document.getElementById('editTechName');
+    const emailEl = document.getElementById('editTechEmail');
+    const specEl = document.getElementById('editTechSpecialization');
+    const deptEl = document.getElementById('editTechDepartment');
+    const phoneEl = document.getElementById('editTechPhone');
+    const statusEl = document.getElementById('editTechStatus');
+    const passEl = document.getElementById('editTechPassword');
+
+    if (idEl) idEl.value = getTechnicianIdentifier(tech);
+    if (nameEl) nameEl.value = tech.name || '';
+    if (emailEl) emailEl.value = tech.email || '';
+    if (specEl) specEl.value = tech.specialization || 'General Maintenance';
+    if (deptEl) deptEl.value = tech.department || 'Maintenance Department';
+    if (phoneEl) phoneEl.value = tech.phone || '';
+    if (statusEl) statusEl.value = tech.status || 'Active';
+    if (passEl) passEl.value = '';
+
     const modal = document.getElementById('editTechnicianModal');
     if (modal) {
         modal.classList.remove('hidden');
@@ -10822,18 +11456,26 @@ async function handleEditTechnician(event) {
     const name = document.getElementById('editTechName')?.value.trim();
     const email = document.getElementById('editTechEmail')?.value.trim();
     const specialization = document.getElementById('editTechSpecialization')?.value;
+    const department = document.getElementById('editTechDepartment')?.value;
     const phone = document.getElementById('editTechPhone')?.value.trim();
+    const status = document.getElementById('editTechStatus')?.value;
+    const password = document.getElementById('editTechPassword')?.value;
 
     if (!id || !name || !email) {
         showToast('Please complete the technician name and email.', 'warning');
         return;
     }
 
+    const payload = { name, email, specialization, department, phone, status };
+    if (password && password.trim().length >= 6) {
+        payload.password = password.trim();
+    }
+
     try {
         const response = await apiRequest(`/api/technicians/${encodeURIComponent(id)}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name, email, specialization, phone })
+            body: JSON.stringify(payload)
         });
         const data = await parseJsonResponse(response);
         if (!response.ok) throw new Error(data.error || 'Failed to update technician');
@@ -11283,7 +11925,7 @@ async function handleAdminStudentSubmit(event) {
 function initRealtimeComplaintSync() {
     if (typeof io === 'undefined') return;
     try {
-        const socket = io();
+        const socket = announcementSocket || io({ transports: ['polling', 'websocket'], upgrade: true });
 
         socket.on('new-complaint', (complaint) => {
             console.log('[Realtime] New complaint received:', complaint);
@@ -11394,7 +12036,15 @@ const globalExports = {
     renderAdminComplaintsTable: typeof renderAdminComplaintsTable !== 'undefined' ? renderAdminComplaintsTable : undefined,
     handleAdminComplaintsFilter: typeof handleAdminComplaintsFilter !== 'undefined' ? handleAdminComplaintsFilter : undefined,
     filterComplaintsByQuickStatus: typeof filterComplaintsByQuickStatus !== 'undefined' ? filterComplaintsByQuickStatus : undefined,
-    resetAdminComplaintsFilters: typeof resetAdminComplaintsFilters !== 'undefined' ? resetAdminComplaintsFilters : undefined
+    resetAdminComplaintsFilters: typeof resetAdminComplaintsFilters !== 'undefined' ? resetAdminComplaintsFilters : undefined,
+    openForgotPasswordFlow: typeof openForgotPasswordFlow !== 'undefined' ? openForgotPasswordFlow : undefined,
+    handleSendForgotPasswordOtp: typeof handleSendForgotPasswordOtp !== 'undefined' ? handleSendForgotPasswordOtp : undefined,
+    resendOtpCode: typeof resendOtpCode !== 'undefined' ? resendOtpCode : undefined,
+    handleVerifyOtpSubmit: typeof handleVerifyOtpSubmit !== 'undefined' ? handleVerifyOtpSubmit : undefined,
+    checkResetPasswordStrength: typeof checkResetPasswordStrength !== 'undefined' ? checkResetPasswordStrength : undefined,
+    handleResetPasswordSubmit: typeof handleResetPasswordSubmit !== 'undefined' ? handleResetPasswordSubmit : undefined,
+    selectLoginRole: typeof selectLoginRole !== 'undefined' ? selectLoginRole : undefined,
+    selectRegisterRole: typeof selectRegisterRole !== 'undefined' ? selectRegisterRole : undefined
 };
 
 Object.entries(globalExports).forEach(([key, fn]) => {

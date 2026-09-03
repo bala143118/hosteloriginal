@@ -71,6 +71,7 @@ input[type="password"]::-ms-clear {
 .modal-overlay.active .modal-content { transform: scale(1) translateY(0); }
 .page { display: none !important; opacity: 0; transition: opacity 0.3s ease; min-height: calc(100vh - 5rem); padding-bottom: 6rem; box-sizing: border-box; }
 .page.active { display: block !important; opacity: 1 !important; }
+#page-login.active, #page-register.active { display: flex !important; align-items: center; justify-content: center; opacity: 1 !important; width: 100%; }
 .fab { transition: all 0.3s ease; }
 .fab:hover { transform: scale(1.1) rotate(90deg); }
 .sidebar-item { transition: all 0.2s ease; }
@@ -568,6 +569,141 @@ input[type="date"] {
 .page .flex-1 {
     min-width: 0 !important;
     max-width: 100% !important;
+}
+
+/* ===== Sleek Premium UI Form Control & Select Dropdown Styles ===== */
+select, 
+input[type="text"],
+input[type="email"],
+input[type="tel"],
+input[type="password"],
+input[type="url"],
+input[type="number"],
+textarea {
+    select, 
+input[type="text"],
+input[type="email"],
+input[type="tel"],
+input[type="password"],
+input[type="url"],
+input[type="number"],
+textarea {
+    font-family: inherit;
+    font-size: 0.875rem !important;
+    font-weight: 500 !important;
+    border-radius: 0.875rem !important;
+    padding-top: 0.7rem !important;
+    padding-bottom: 0.7rem !important;
+    padding-left: 1rem;
+    padding-right: 1rem;
+    border: 1px solid rgba(226, 232, 240, 0.9) !important;
+    background-color: #f8fafc !important;
+    color: #0f172a !important;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+    box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.03) !important;
+}
+
+/* Explicit padding utilities for inputs with inner icons */
+.pl-8, input.pl-8, select.pl-8 { padding-left: 2rem !important; }
+.pl-10, input.pl-10, select.pl-10 { padding-left: 2.5rem !important; }
+.pl-12, input.pl-12, select.pl-12 { padding-left: 3rem !important; }
+.pl-14, input.pl-14, select.pl-14 { padding-left: 3.5rem !important; }
+.pr-10, input.pr-10, select.pr-10 { padding-right: 2.5rem !important; }
+.pr-12, input.pr-12, select.pr-12 { padding-right: 3rem !important; }
+
+.dark select,
+.dark input[type="text"],
+.dark input[type="email"],
+.dark input[type="tel"],
+.dark input[type="password"],
+.dark input[type="url"],
+.dark input[type="number"],
+.dark textarea {
+    background-color: #1e293b !important;
+    border-color: #334155 !important;
+    color: #f8fafc !important;
+}
+
+select:hover,
+input[type="text"]:hover,
+input[type="email"]:hover,
+input[type="tel"]:hover,
+input[type="password"]:hover,
+input[type="url"]:hover,
+input[type="number"]:hover,
+textarea:hover {
+    border-color: #cbd5e1 !important;
+    background-color: #ffffff !important;
+}
+
+.dark select:hover,
+.dark input[type="text"]:hover,
+.dark input[type="email"]:hover,
+.dark input[type="tel"]:hover,
+.dark input[type="password"]:hover,
+.dark input[type="url"]:hover,
+.dark input[type="number"]:hover,
+.dark textarea:hover {
+    border-color: #475569 !important;
+    background-color: #0f172a !important;
+}
+
+select:focus,
+input[type="text"]:focus,
+input[type="email"]:focus,
+input[type="tel"]:focus,
+input[type="password"]:focus,
+input[type="url"]:focus,
+input[type="number"]:focus,
+textarea:focus {
+    outline: none !important;
+    border-color: #2563eb !important;
+    background-color: #ffffff !important;
+    box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.15), 0 2px 4px 0 rgba(0, 0, 0, 0.05) !important;
+}
+
+.dark select:focus,
+.dark input[type="text"]:focus,
+.dark input[type="email"]:focus,
+.dark input[type="tel"]:focus,
+.dark input[type="password"]:focus,
+.dark input[type="url"]:focus,
+.dark input[type="number"]:focus,
+.dark textarea:focus {
+    border-color: #3b82f6 !important;
+    background-color: #0f172a !important;
+    box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.2) !important;
+}
+
+/* Custom Dropdown Arrow Icon & Spacing */
+select {
+    appearance: none !important;
+    -webkit-appearance: none !important;
+    -moz-appearance: none !important;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%232563eb'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2.5' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E") !important;
+    background-repeat: no-repeat !important;
+    background-position: right 0.85rem center !important;
+    background-size: 1.1rem 1.1rem !important;
+    padding-right: 2.75rem !important;
+    cursor: pointer !important;
+}
+
+.dark select {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%2360a5fa'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2.5' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E") !important;
+}
+
+/* Styled Options List */
+select option {
+    font-size: 0.875rem !important;
+    font-weight: 500 !important;
+    padding: 0.6rem 1rem !important;
+    background-color: #ffffff !important;
+    color: #0f172a !important;
+}
+
+.dark select option {
+    background-color: #1e293b !important;
+    color: #f8fafc !important;
 }
 
 

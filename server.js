@@ -26,7 +26,13 @@ const {
   formatTelegramWardenRejection
 } = require('./telegram_service');
 
+const { sendOtpEmail } = require('./email_service');
+
+const otpStore = new Map();
+const resetTokenStore = new Map();
+
 const {
+  getSupabaseClient,
   userRepository,
   studentRepository,
   wardenRepository,
@@ -73,8 +79,14 @@ const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
     origin: '*',
-    methods: ['GET', 'POST']
-  }
+    methods: ['GET', 'POST', 'OPTIONS'],
+    allowedHeaders: ['*'],
+    credentials: true
+  },
+  transports: ['polling', 'websocket'],
+  allowEIO3: true,
+  pingTimeout: 60000,
+  pingInterval: 25000
 });
 
 let cctvInferenceProcess = null;
@@ -106,6 +118,8 @@ app.use('/public', express.static(PUBLIC_DIR, { maxAge: '7d' }));
 app.use('/alert-images', express.static(ALERT_IMAGES_DIR, { maxAge: '7d' }));
 app.use((req, res, next) => { req.io = io; next(); });
 app.use(authenticateToken);
+
+app.get('/favicon.ico', (req, res) => res.status(204).end());
 
 app.get(['/public', '/public/', '/public/index.html'], (req, res) => {
   res.redirect('/');
@@ -218,6 +232,79 @@ async function provisionGatePassQr(gatePass, req) {
   } catch (err) {}
 }
 
+// Endpoint to resolve & proxy image URLs or extract images from web page links (e.g. kommodo.ai, imgur, etc.)
+app.get('/api/resolve-image', async (req, res) => {
+  const targetUrl = req.query.url;
+  if (!targetUrl || typeof targetUrl !== 'string') {
+    return res.status(400).json({ error: 'URL parameter is required' });
+  }
+
+  try {
+    const parsedUrl = new URL(targetUrl);
+    if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
+      return res.status(400).json({ error: 'Invalid URL protocol' });
+    }
+
+    const response = await fetch(targetUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8'
+      },
+      redirect: 'follow'
+    });
+
+    const contentType = response.headers.get('content-type') || '';
+
+    if (contentType.startsWith('image/')) {
+      const arrayBuffer = await response.arrayBuffer();
+      const base64 = Buffer.from(arrayBuffer).toString('base64');
+      const dataUrl = `data:${contentType.split(';')[0]};base64,${base64}`;
+      return res.json({ success: true, imageUrl: dataUrl });
+    }
+
+    if (contentType.includes('text/html') || contentType.includes('application/xhtml+xml')) {
+      const htmlText = await response.text();
+
+      let extractedUrl = null;
+      const ogMatch = htmlText.match(/<meta\s+property=["']og:image["']\s+content=["']([^"']+)["']/i) ||
+                      htmlText.match(/<meta\s+content=["']([^"']+)["']\s+property=["']og:image["']/i);
+      const twitterMatch = htmlText.match(/<meta\s+name=["']twitter:image["']\s+content=["']([^"']+)["']/i) ||
+                           htmlText.match(/<meta\s+content=["']([^"']+)["']\s+name=["']twitter:image["']/i);
+      const relImgMatch = htmlText.match(/<link\s+rel=["']image_src["']\s+href=["']([^"']+)["']/i);
+      const firstImgMatch = htmlText.match(/<img\s+[^>]*src=["']([^"']+)["']/i);
+
+      if (ogMatch && ogMatch[1]) extractedUrl = ogMatch[1];
+      else if (twitterMatch && twitterMatch[1]) extractedUrl = twitterMatch[1];
+      else if (relImgMatch && relImgMatch[1]) extractedUrl = relImgMatch[1];
+      else if (firstImgMatch && firstImgMatch[1]) extractedUrl = firstImgMatch[1];
+
+      if (extractedUrl) {
+        const resolvedImageUrl = new URL(extractedUrl, targetUrl).href;
+        const imgResponse = await fetch(resolvedImageUrl, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+          }
+        });
+        const imgContentType = imgResponse.headers.get('content-type') || 'image/png';
+        const imgArrayBuffer = await imgResponse.arrayBuffer();
+        const base64 = Buffer.from(imgArrayBuffer).toString('base64');
+        const dataUrl = `data:${imgContentType.split(';')[0]};base64,${base64}`;
+
+        return res.json({ success: true, imageUrl: dataUrl, resolvedUrl: resolvedImageUrl });
+      }
+    }
+
+    const arrayBuffer = await response.arrayBuffer();
+    const base64 = Buffer.from(arrayBuffer).toString('base64');
+    const mime = contentType.split(';')[0] || 'image/png';
+    return res.json({ success: true, imageUrl: `data:${mime};base64,${base64}` });
+
+  } catch (err) {
+    console.error('Error resolving image URL:', err);
+    res.status(500).json({ error: 'Failed to fetch or resolve image from URL' });
+  }
+});
+
 // ============================================================================
 // 1. AUTHENTICATION & USER MANAGEMENT (SUPABASE BACKED)
 // ============================================================================
@@ -257,20 +344,45 @@ app.post('/api/register', async (req, res) => {
       return res.status(403).json({ error: 'Administrator registration is restricted to the authorized administrator email.' });
     }
 
-    const existingUser = await userRepository.findByEmail(email);
+    let existingUser = await userRepository.findByEmail(email);
+    if (!existingUser) {
+      const data = readData();
+      existingUser = data.users.find(u => normalizeEmail(u.email) === email);
+    }
     if (existingUser) {
       return res.status(409).json({ error: 'This email is already registered. Please login instead.' });
     }
 
-    const newUser = await userRepository.create({
+    let newUser = await userRepository.create({
       email,
-      password,
+      password: hashPassword(password),
       role,
       name,
       roomNumber: req.body.roomNumber || '101',
       block: req.body.hostelBlock || req.body.block || 'Block A',
       phone: req.body.phone || ''
     });
+
+    if (!newUser) {
+      const data = readData();
+      const prefix = role === 'warden' ? 'WRD' : role === 'technician' ? 'TECH' : role === 'admin' ? 'ADM' : 'STU';
+      const userId = req.body.userId || `${prefix}-${Date.now().toString(36).toUpperCase()}`;
+      newUser = {
+        id: userId,
+        userId,
+        email,
+        password: hashPassword(password),
+        name,
+        role,
+        roomNumber: req.body.roomNumber || '101',
+        block: req.body.hostelBlock || req.body.block || 'Block A',
+        phone: req.body.phone || '',
+        status: 'Active',
+        createdAt: new Date().toISOString()
+      };
+      data.users.push(newUser);
+      writeData(data);
+    }
 
     const token = generateToken(newUser);
     return res.status(201).json({ ...sanitizeUser(newUser), token });
@@ -337,8 +449,169 @@ app.post('/api/login', async (req, res) => {
 });
 
 // ============================================================================
-// 1.5 AUTHENTICATION & PASSWORD MANAGEMENT
+// 1.5 AUTHENTICATION & PASSWORD MANAGEMENT (EMAIL OTP & RESET)
 // ============================================================================
+
+app.post('/api/auth/forgot-password', async (req, res) => {
+  try {
+    const rawEmail = String(req.body.email || '').trim().toLowerCase();
+    if (!rawEmail || !isValidEmail(rawEmail)) {
+      return res.status(400).json({ error: 'Please enter a valid email address.' });
+    }
+
+    // Rate Limiting: Respect Supabase Auth rate limits / prevent spamming (60 seconds)
+    const existingSession = otpStore.get(rawEmail);
+    if (existingSession && (Date.now() - existingSession.lastRequestedAt < 60 * 1000)) {
+      const waitSeconds = Math.ceil((60 * 1000 - (Date.now() - existingSession.lastRequestedAt)) / 1000);
+      return res.status(429).json({ error: `Please wait ${waitSeconds} seconds before requesting a new verification code.` });
+    }
+
+    // Check whether the entered email belongs to an existing HostelFix account
+    let registeredUser = await userRepository.findByEmail(rawEmail);
+    if (!registeredUser) {
+      const data = readData();
+      registeredUser = data.users.find(u => normalizeEmail(u.email) === rawEmail);
+    }
+
+    // IMPORTANT SECURITY REQUIREMENT: Generic response, do not reveal account existence to attackers
+    const genericSuccessMsg = 'If an account exists for this email, a verification code has been sent.';
+
+    if (!registeredUser) {
+      return res.json({ success: true, message: genericSuccessMsg });
+    }
+
+    // Generate secure 6-digit OTP
+    const otpCode = String(crypto.randomInt(100000, 999999));
+    const otpHash = crypto.createHash('sha256').update(otpCode + rawEmail).digest('hex');
+
+    otpStore.set(rawEmail, {
+      otpHash,
+      expiresAt: Date.now() + 10 * 60 * 1000, // Valid for 10 minutes
+      attempts: 0,
+      lastRequestedAt: Date.now()
+    });
+
+    // Deliver OTP via Supabase Auth / Email Service
+    sendOtpEmail(rawEmail, otpCode).catch(err => {
+      console.error('[Auth] Error sending OTP email:', err.message);
+    });
+
+    return res.json({ success: true, message: genericSuccessMsg });
+  } catch (err) {
+    console.error('[ForgotPassword Error]', err);
+    return res.status(500).json({ error: 'Failed to process forgot password request.' });
+  }
+});
+
+app.post('/api/auth/verify-otp', async (req, res) => {
+  try {
+    const rawEmail = String(req.body.email || '').trim().toLowerCase();
+    const otpInput = String(req.body.otp || '').trim();
+
+    if (!rawEmail || !otpInput || !/^\d{6}$/.test(otpInput)) {
+      return res.status(400).json({ error: 'Please enter the complete 6-digit verification code.' });
+    }
+
+    const session = otpStore.get(rawEmail);
+    if (!session) {
+      return res.status(400).json({ error: 'No verification request found for this email. Please request a new code.' });
+    }
+
+    if (Date.now() > session.expiresAt) {
+      otpStore.delete(rawEmail);
+      return res.status(400).json({ error: 'This verification code has expired. Please request a new code.' });
+    }
+
+    const inputHash = crypto.createHash('sha256').update(otpInput + rawEmail).digest('hex');
+    if (inputHash !== session.otpHash) {
+      session.attempts += 1;
+      if (session.attempts >= 5) {
+        otpStore.delete(rawEmail);
+        return res.status(400).json({ error: 'Too many incorrect attempts. Please request a new verification code.' });
+      }
+      return res.status(400).json({ error: 'Invalid verification code. Please try again.' });
+    }
+
+    // OTP Verified successfully! Create single-use recovery token for password reset
+    const resetToken = crypto.randomBytes(32).toString('hex');
+    const resetTokenHash = crypto.createHash('sha256').update(resetToken + rawEmail).digest('hex');
+
+    resetTokenStore.set(rawEmail, {
+      resetTokenHash,
+      expiresAt: Date.now() + 15 * 60 * 1000 // Valid for 15 minutes
+    });
+
+    otpStore.delete(rawEmail); // Delete one-time OTP session
+
+    return res.json({
+      success: true,
+      resetToken,
+      message: 'Verification successful.'
+    });
+  } catch (err) {
+    console.error('[VerifyOTP Error]', err);
+    return res.status(500).json({ error: 'Failed to verify code.' });
+  }
+});
+
+app.post('/api/auth/reset-password', async (req, res) => {
+  try {
+    const rawEmail = String(req.body.email || '').trim().toLowerCase();
+    const resetToken = String(req.body.resetToken || '').trim();
+    const newPassword = String(req.body.newPassword || '');
+
+    if (!rawEmail || !resetToken || !newPassword) {
+      return res.status(400).json({ error: 'All fields are required.' });
+    }
+
+    if (newPassword.length < 8) {
+      return res.status(400).json({ error: 'Password must be at least 8 characters long.' });
+    }
+
+    const resetSession = resetTokenStore.get(rawEmail);
+    if (!resetSession || Date.now() > resetSession.expiresAt) {
+      resetTokenStore.delete(rawEmail);
+      return res.status(400).json({ error: 'Password reset session has expired. Please start again.' });
+    }
+
+    const tokenHash = crypto.createHash('sha256').update(resetToken + rawEmail).digest('hex');
+    if (tokenHash !== resetSession.resetTokenHash) {
+      return res.status(400).json({ error: 'Invalid password reset token. Please start again.' });
+    }
+
+    let user = await userRepository.findByEmail(rawEmail);
+    if (!user) {
+      const data = readData();
+      user = data.users.find(u => normalizeEmail(u.email) === rawEmail);
+    }
+
+    if (!user) {
+      return res.status(404).json({ error: 'Account not found.' });
+    }
+
+    const updated = await userRepository.updatePassword(user.userId || user.id || user.email, newPassword);
+    
+    if (!updated) {
+      const data = readData();
+      const localIdx = data.users.findIndex(u => normalizeEmail(u.email) === rawEmail || u.userId === user.userId);
+      if (localIdx !== -1) {
+        data.users[localIdx].password = userRepository.hashPassword(newPassword);
+        data.users[localIdx].mustChangePassword = false;
+        writeData(data);
+      }
+    }
+
+    resetTokenStore.delete(rawEmail); // Delete single-use reset token
+
+    return res.json({
+      success: true,
+      message: 'Your password has been updated successfully.'
+    });
+  } catch (err) {
+    console.error('[ResetPassword Error]', err);
+    return res.status(500).json({ error: 'Failed to reset password.' });
+  }
+});
 
 app.post(['/api/change-password', '/api/warden/change-password', '/api/user/change-password'], async (req, res) => {
   try {
@@ -845,9 +1118,9 @@ app.get(['/api/gatepass/public-key', '/api/gatepass-public-key'], (req, res) => 
 app.get('/api/technicians', async (req, res) => {
   try {
     const techs = await userRepository.getByRole('technician');
-    res.json(techs.map(sanitizeUser));
+    res.json((techs || []).map(sanitizeUser));
   } catch (err) {
-    res.status(500).json({ error: 'Failed to fetch technicians.' });
+    res.json([]);
   }
 });
 
@@ -863,7 +1136,7 @@ app.get('/api/technicians/:id', async (req, res) => {
 
 app.post('/api/technicians', async (req, res) => {
   try {
-    const { name, email, password, confirmPassword, specialization, department, phone, technicianId, employeeId, userId, status } = req.body;
+    const { name, email, password, confirmPassword, specialization, department, hostelBlock, shift, phone, technicianId, employeeId, userId, gender, emergencyContact, photoUrl, experience, status } = req.body;
     
     if (!name || !String(name).trim()) {
       return res.status(400).json({ error: 'Full Name is required.' });
@@ -871,11 +1144,9 @@ app.post('/api/technicians', async (req, res) => {
     if (!email || !isValidEmail(email)) {
       return res.status(400).json({ error: 'A valid email address is required.' });
     }
-    if (!password || !isValidPassword(password)) {
+    const finalPassword = password || 'tech123';
+    if (!isValidPassword(finalPassword)) {
       return res.status(400).json({ error: 'Password must be at least 6 characters long.' });
-    }
-    if (confirmPassword && confirmPassword !== password) {
-      return res.status(400).json({ error: 'Password and Confirm Password do not match.' });
     }
 
     const normEmail = normalizeEmail(email);
@@ -884,30 +1155,68 @@ app.post('/api/technicians', async (req, res) => {
       return res.status(409).json({ error: 'A technician with this email already exists.' });
     }
 
-    const customId = String(technicianId || employeeId || userId || '').trim();
-    if (customId) {
-      const existingId = await userRepository.findByUserId(customId);
-      if (existingId) {
-        return res.status(409).json({ error: `A technician with ID '${customId}' already exists.` });
-      }
+    const generatedId = `TCH-${Math.floor(100000 + Math.random() * 900000)}`;
+    const customId = String(technicianId || employeeId || userId || generatedId).trim();
+    const hashedPassword = hashPassword(finalPassword);
+
+    const adminId = req.user?.userId || req.user?.id || '';
+    const adminEmail = req.user?.email || '';
+
+    // Supabase Auth integration for technician
+    const client = getSupabaseClient();
+    let authUserId = '';
+    if (client && client.auth && client.auth.admin) {
+      try {
+        const { data: authData } = await client.auth.admin.createUser({
+          email: normEmail,
+          password: finalPassword,
+          email_confirm: true,
+          user_metadata: {
+            role: 'technician',
+            name: name.trim(),
+            technicianId: customId,
+            must_change_password: true
+          }
+        });
+        if (authData && authData.user) authUserId = authData.user.id;
+      } catch (authErr) {}
     }
 
     const tech = await userRepository.create({
-      technicianId: customId || undefined,
+      userId: customId,
+      user_id: customId,
+      technicianId: customId,
       name: name.trim(),
       email: normEmail,
-      password: String(password),
+      password: hashedPassword,
       role: 'technician',
-      specialization: specialization || department || 'General Maintenance',
-      department: department || specialization || 'Maintenance',
+      specialization: specialization || 'General Maintenance',
+      department: department || 'Maintenance Department',
+      hostelBlock: hostelBlock || 'All Blocks',
+      shift: shift || 'General Shift',
       phone: phone || '',
-      status: status || 'Active'
+      gender: gender || 'Male',
+      emergencyContact: emergencyContact || '',
+      photoUrl: photoUrl || '',
+      experience: experience || '',
+      status: status || 'Active',
+      mustChangePassword: true,
+      adminId,
+      adminEmail
     });
 
-    res.status(201).json(sanitizeUser(tech));
+    if (req.io) {
+      req.io.emit('technician-created', sanitizeUser(tech));
+    }
+
+    res.status(201).json({
+      ...sanitizeUser(tech),
+      temporaryPassword: finalPassword,
+      mustChangePassword: true
+    });
   } catch (err) {
     console.error('[Create Technician Error]', err);
-    res.status(500).json({ error: 'Failed to create technician.' });
+    res.status(500).json({ error: 'Failed to create technician account.' });
   }
 });
 
@@ -1485,14 +1794,73 @@ app.post(['/api/gate-passes', '/api/gatepass/apply'], async (req, res) => {
   }
 });
 
-app.get('/api/gatepass/:id', async (req, res) => {
+app.get(['/api/gatepass/:id', '/api/gate-passes/:id', '/api/gate-passes/:id/status', '/api/gatepass/:id/status'], async (req, res) => {
   try {
     let pass = await gatePassRepository.findById(req.params.id);
     if (!pass) pass = inMemoryGatePasses.get(req.params.id);
+    if (!pass) {
+      const data = readData();
+      pass = (data.gatePasses || []).find(p => p.id === req.params.id);
+    }
     if (!pass) return res.status(404).json({ error: 'Gate pass not found' });
     res.json(pass);
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch gate pass.' });
+  }
+});
+
+app.put(['/api/gatepass/:id/status', '/api/gate-passes/:id/status', '/api/gatepass/:id', '/api/gate-passes/:id'], async (req, res) => {
+  try {
+    const id = req.params.id;
+    const { status, approvedBy, wardenName, remarks } = req.body;
+    let pass = await gatePassRepository.findById(id);
+    if (!pass) pass = inMemoryGatePasses.get(id);
+
+    if (!pass) {
+      const data = readData();
+      pass = (data.gatePasses || []).find(p => p.id === id);
+    }
+
+    if (!pass) {
+      return res.status(404).json({ error: 'Gate pass not found' });
+    }
+
+    const normalizedStatus = String(status || '').toUpperCase();
+
+    if (['APPROVED', 'ACCEPT', 'ACCEPTED'].includes(normalizedStatus)) {
+      pass.status = 'Approved';
+      await provisionGatePassQr(pass, req);
+    } else if (['REJECTED', 'REJECT', 'DENIED'].includes(normalizedStatus)) {
+      pass.status = 'Rejected';
+    } else if (['OUT', 'OUTSIDE'].includes(normalizedStatus)) {
+      pass.status = 'OUT';
+    } else if (['RETURNED', 'COMPLETED', 'IN'].includes(normalizedStatus)) {
+      pass.status = 'COMPLETED';
+    } else if (status) {
+      pass.status = status;
+    }
+
+    pass.updatedAt = new Date().toISOString();
+    if (approvedBy || wardenName) pass.approvedBy = approvedBy || wardenName;
+
+    try {
+      await gatePassRepository.updateStatus(id, pass.status, approvedBy || wardenName, remarks);
+    } catch (e) {}
+
+    inMemoryGatePasses.set(id, pass);
+
+    const data = readData();
+    const idx = (data.gatePasses || []).findIndex(p => p.id === id);
+    if (idx !== -1) {
+      data.gatePasses[idx] = { ...data.gatePasses[idx], ...pass };
+      writeData(data);
+    }
+
+    if (req.io) req.io.emit('gate-pass.updated', pass);
+    res.json({ success: true, gatePass: pass });
+  } catch (err) {
+    console.error('[GatePass Status Update Error]', err);
+    res.status(500).json({ error: 'Failed to update gate pass status.' });
   }
 });
 

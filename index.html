@@ -403,7 +403,7 @@
             box-shadow:0 4px 12px rgba(37,99,235,.25);
         }
     </style>
-    <link rel="stylesheet" href="styles.css?v=portal-auth-fix-2026">
+    <link rel="stylesheet" href="styles.css?v=2026-09-03-v19">
 </head>
 <body class="bg-surface-alt text-text antialiased">
     <div id="toastContainer" class="fixed top-4 right-4 z-50 space-y-3"></div>
@@ -417,13 +417,13 @@
     <nav id="navbar" class="fixed top-0 left-0 right-0 z-40 glass border-b border-border">
         <div class="mx-auto w-full px-5 sm:px-8 lg:px-12 2xl:px-16">
             <div class="flex items-center justify-between h-20">
-                <div class="flex items-center gap-3 cursor-pointer" onclick="navigateTo('landing')">
-                    <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-primary to-emerald flex items-center justify-center shadow-sm">
-                        <i class="fa-solid fa-building text-white text-xl"></i>
+                <div class="flex items-center gap-3.5 cursor-pointer group" onclick="navigateTo('landing')">
+                    <div class="w-12 h-12 sm:w-14 sm:h-14 rounded-2xl bg-white border border-border p-1 flex items-center justify-center shadow-md group-hover:scale-105 transition-transform">
+                        <img src="/public/siet-logo.png?v=2026-09-03-v2" alt="Sri Shakthi Institute Logo" class="w-full h-full object-contain">
                     </div>
                     <div class="hidden sm:block">
-                        <h1 class="font-bold text-xl leading-tight">Hostel<span class="text-primary">Fix</span></h1>
-                        <p class="text-sm text-text-secondary -mt-0.5">Maintenance System</p>
+                        <h1 class="font-extrabold text-xl leading-tight tracking-tight text-text">Sri Shakthi <span class="text-primary">HostelFix</span></h1>
+                        <p class="text-xs text-text-secondary -mt-0.5 font-medium">Smart Maintenance System</p>
                     </div>
                 </div>
                 <div class="flex items-center gap-3">
@@ -477,32 +477,146 @@
                             </div>
                         </div>
                         <div class="hidden lg:flex justify-center animate-float">
-                            <div class="relative">
-                                <div class="w-[500px] h-[400px] bg-gradient-to-br from-primary/20 to-emerald/20 rounded-3xl flex items-center justify-center">
-                                    <div class="text-center">
-                                        <div class="w-32 h-32 mx-auto mb-6 bg-gradient-to-br from-primary to-emerald rounded-3xl flex items-center justify-center shadow-2xl">
-                                            <i class="fa-solid fa-building text-white text-5xl"></i>
+                            <div class="relative group">
+                                <!-- Glow backdrop -->
+                                <div class="absolute -inset-1 bg-gradient-to-r from-blue-600 via-indigo-600 to-emerald-500 rounded-[2.5rem] blur-xl opacity-40 group-hover:opacity-65 transition duration-1000 group-hover:duration-200"></div>
+                                
+                                <!-- Main Cinematic Photo Container -->
+                                <div class="relative w-[520px] h-[400px] rounded-[2.2rem] overflow-hidden border-2 border-white/40 shadow-2xl shadow-indigo-950/40 bg-slate-900/90 backdrop-blur-md flex items-center justify-center">
+                                    <img src="/public/campus-hero.png" alt="Sri Shakthi Institute Campus" class="w-full h-full object-cover transform hover:scale-105 transition-transform duration-700">
+                                    
+                                    <!-- Gradient overlay -->
+                                    <div class="absolute inset-0 bg-gradient-to-t from-slate-950/85 via-slate-950/20 to-transparent"></div>
+                                    
+                                    <!-- Overlay Campus Badge -->
+                                    <div class="absolute top-4 left-4 right-4 flex items-center justify-between pointer-events-none">
+                                        <div class="px-3.5 py-1.5 rounded-xl bg-slate-900/80 backdrop-blur-md border border-white/20 text-white text-xs font-bold flex items-center gap-2 shadow-lg">
+                                            <i class="fa-solid fa-building-columns text-amber-400"></i>
+                                            <span>Sri Shakthi Institute</span>
                                         </div>
-                                        <div class="space-y-3">
-                                            <div class="w-64 h-3 bg-surface rounded-full mx-auto shadow-sm"></div>
-                                            <div class="w-48 h-3 bg-surface rounded-full mx-auto shadow-sm"></div>
-                                            <div class="w-56 h-3 bg-surface rounded-full mx-auto shadow-sm"></div>
-                                        </div>
+                                        <span class="px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px] font-mono font-bold uppercase tracking-wider backdrop-blur-md">OFFICIAL CAMPUS</span>
+                                    </div>
+
+                                    <!-- Bottom Caption -->
+                                    <div class="absolute bottom-4 left-4 right-4 pointer-events-none">
+                                        <h4 class="text-white font-extrabold text-lg tracking-tight">Sri Shakthi Engineering Campus</h4>
+                                        <p class="text-slate-300 text-xs font-medium">Autonomous Institution • Approved by AICTE • NAAC A Grade</p>
                                     </div>
                                 </div>
-                                <div class="absolute -top-4 -right-4 glass rounded-2xl p-4 shadow-xl animate-fade-in delay-300">
+
+                                <!-- Floating Badges -->
+                                <div class="absolute -top-4 -right-4 glass rounded-2xl p-4 shadow-xl animate-fade-in delay-300 border border-white/30 bg-white/90 backdrop-blur-md">
                                     <div class="flex items-center gap-3">
-                                        <div class="w-10 h-10 rounded-xl bg-emerald/20 flex items-center justify-center"><i class="fa-solid fa-check text-emerald"></i></div>
-                                        <div><p class="text-xs text-text-secondary">Resolved Today</p><p class="font-bold text-lg">24</p></div>
+                                        <div class="w-10 h-10 rounded-xl bg-emerald/20 text-emerald flex items-center justify-center font-bold text-base"><i class="fa-solid fa-check-double"></i></div>
+                                        <div><p class="text-[11px] text-text-secondary font-semibold">Resolved Today</p><p class="font-extrabold text-lg text-slate-900">24 Issues</p></div>
                                     </div>
                                 </div>
-                                <div class="absolute -bottom-4 -left-4 glass rounded-2xl p-4 shadow-xl animate-fade-in delay-500">
+                                <div class="absolute -bottom-4 -left-4 glass rounded-2xl p-4 shadow-xl animate-fade-in delay-500 border border-white/30 bg-white/90 backdrop-blur-md">
                                     <div class="flex items-center gap-3">
-                                        <div class="w-10 h-10 rounded-xl bg-primary/20 flex items-center justify-center"><i class="fa-solid fa-clock text-primary"></i></div>
-                                        <div><p class="text-xs text-text-secondary">Avg. Response</p><p class="font-bold text-lg">18 min</p></div>
+                                        <div class="w-10 h-10 rounded-xl bg-primary/20 text-primary flex items-center justify-center font-bold text-base"><i class="fa-solid fa-bolt"></i></div>
+                                        <div><p class="text-[11px] text-text-secondary font-semibold">Avg. Response Time</p><p class="font-extrabold text-lg text-slate-900">18 mins</p></div>
                                     </div>
                                 </div>
                             </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ===== CINEMATIC PANORAMIC CAMPUS SHOWCASE SECTION ===== -->
+            <section class="relative py-16 sm:py-20 overflow-hidden bg-slate-950 text-white">
+                <!-- Ambient Glow Background -->
+                <div class="absolute -top-32 -left-32 w-96 h-96 bg-blue-600/20 rounded-full blur-[120px] pointer-events-none"></div>
+                <div class="absolute -bottom-32 -right-32 w-96 h-96 bg-emerald-500/20 rounded-full blur-[120px] pointer-events-none"></div>
+
+                <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
+                    <div class="text-center mb-10 animate-fade-in">
+                        <div class="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-white/10 backdrop-blur-md border border-white/20 text-amber-400 text-xs font-bold uppercase tracking-widest mb-3">
+                            <i class="fa-solid fa-building-columns"></i>
+                            <span>State-of-the-Art Engineering Campus</span>
+                        </div>
+                        <h2 class="text-3xl sm:text-4xl lg:text-5xl font-extrabold text-white tracking-tight">
+                            Sri Shakthi Institute of Engineering & Technology
+                        </h2>
+                        <p class="text-sm sm:text-base text-slate-300 max-w-2xl mx-auto mt-3 font-medium leading-relaxed">
+                            Autonomous Institution • Approved by AICTE • NAAC A Grade Accredited • Coimbatore, Tamil Nadu
+                        </p>
+                    </div>
+
+                    <!-- Main Panoramic Cinematic Frame -->
+                    <div class="relative group rounded-3xl sm:rounded-[2.5rem] overflow-hidden border-2 border-white/20 shadow-2xl shadow-indigo-950/80 bg-slate-900 transition-all duration-500">
+                        
+                        <!-- Panoramic Image -->
+                        <div class="relative w-full h-[320px] sm:h-[450px] lg:h-[520px] overflow-hidden">
+                            <img src="/public/sri-shakthi-panoramic.png" alt="Sri Shakthi Institute Panoramic View" class="w-full h-full object-cover transform group-hover:scale-105 transition-transform duration-1000">
+                            
+                            <!-- Vignette & Gradient overlays -->
+                            <div class="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/20 to-slate-950/40"></div>
+                            
+                            <!-- Top Left Badge -->
+                            <div class="absolute top-6 left-6 flex items-center gap-3">
+                                <div class="px-4 py-2 rounded-2xl bg-slate-900/80 backdrop-blur-md border border-white/20 text-white text-xs font-extrabold flex items-center gap-2 shadow-2xl">
+                                    <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping"></span>
+                                    <i class="fa-solid fa-hotel text-amber-400"></i>
+                                    <span>HOSTEL COMPLEX & INFRASTRUCTURE</span>
+                                </div>
+                            </div>
+
+                            <!-- Top Right Floating Pill -->
+                            <div class="absolute top-6 right-6 hidden sm:flex items-center gap-2">
+                                <span class="px-3.5 py-1.5 rounded-xl bg-blue-500/20 text-blue-300 border border-blue-400/30 text-xs font-mono font-bold backdrop-blur-md">
+                                    <i class="fa-solid fa-shield-halved mr-1 text-blue-400"></i>24/7 Security & Maintenance
+                                </span>
+                            </div>
+
+                            <!-- Bottom Floating Stats Bar -->
+                            <div class="absolute bottom-6 left-6 right-6 grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 pointer-events-none">
+                                <div class="bg-slate-900/85 backdrop-blur-md border border-white/15 rounded-2xl p-3 sm:p-4 shadow-xl">
+                                    <div class="flex items-center gap-2.5">
+                                        <div class="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold text-sm sm:text-base">
+                                            <i class="fa-solid fa-building"></i>
+                                        </div>
+                                        <div>
+                                            <p class="text-[10px] sm:text-xs text-slate-400 uppercase font-semibold">Hostel Blocks</p>
+                                            <p class="font-extrabold text-sm sm:text-lg text-white">Boys & Girls</p>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="bg-slate-900/85 backdrop-blur-md border border-white/15 rounded-2xl p-3 sm:p-4 shadow-xl">
+                                    <div class="flex items-center gap-2.5">
+                                        <div class="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center font-bold text-sm sm:text-base">
+                                            <i class="fa-solid fa-user-shield"></i>
+                                        </div>
+                                        <div>
+                                            <p class="text-[10px] sm:text-xs text-slate-400 uppercase font-semibold">Warden Team</p>
+                                            <p class="font-extrabold text-sm sm:text-lg text-white">Active 24/7</p>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="bg-slate-900/85 backdrop-blur-md border border-white/15 rounded-2xl p-3 sm:p-4 shadow-xl">
+                                    <div class="flex items-center gap-2.5">
+                                        <div class="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-blue-500/20 text-blue-400 flex items-center justify-center font-bold text-sm sm:text-base">
+                                            <i class="fa-solid fa-wrench"></i>
+                                        </div>
+                                        <div>
+                                            <p class="text-[10px] sm:text-xs text-slate-400 uppercase font-semibold">Technicians</p>
+                                            <p class="font-extrabold text-sm sm:text-lg text-white">Multi-Specialty</p>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="bg-slate-900/85 backdrop-blur-md border border-white/15 rounded-2xl p-3 sm:p-4 shadow-xl">
+                                    <div class="flex items-center gap-2.5">
+                                        <div class="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-purple-500/20 text-purple-400 flex items-center justify-center font-bold text-sm sm:text-base">
+                                            <i class="fa-solid fa-qrcode"></i>
+                                        </div>
+                                        <div>
+                                            <p class="text-[10px] sm:text-xs text-slate-400 uppercase font-semibold">Smart QR</p>
+                                            <p class="font-extrabold text-sm sm:text-lg text-white">Room Verification</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
                         </div>
                     </div>
                 </div>
@@ -595,9 +709,11 @@
                 <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                     <div class="grid sm:grid-cols-2 lg:grid-cols-4 gap-8 mb-8">
                         <div>
-                            <div class="flex items-center gap-2 mb-4">
-                                <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-primary to-emerald flex items-center justify-center"><i class="fa-solid fa-building text-white text-sm"></i></div>
-                                <span class="font-bold text-lg">Hostel<span class="text-primary">Fix</span></span>
+                            <div class="flex items-center gap-3 mb-4">
+                                <div class="w-10 h-10 rounded-xl bg-slate-900/90 border border-amber-400/30 p-1 flex items-center justify-center shadow-sm">
+                                    <img src="/public/siet-logo.png?v=2026-09-03-v2" alt="Sri Shakthi Logo" class="w-full h-full object-contain">
+                                </div>
+                                <span class="font-extrabold text-lg">Sri Shakthi <span class="text-primary">HostelFix</span></span>
                             </div>
                             <p class="text-text-secondary text-sm leading-relaxed">Smart maintenance management for modern hostels. Streamline repairs, enhance student satisfaction.</p>
                         </div>
@@ -642,128 +758,334 @@
 
         <!-- ===== LOGIN PAGE ===== -->
         <div id="page-login" class="page">
-            <div class="min-h-screen flex items-center justify-center p-4 sm:p-6 lg:p-8 bg-surface">
-                <div class="glass max-w-md w-full rounded-3xl border border-border p-6 sm:p-8 shadow-xl animate-fade-in">
-                    <div class="text-center mb-8">
-                        <div class="w-16 h-16 rounded-2xl bg-gradient-to-br from-primary to-emerald flex items-center justify-center mx-auto mb-4 text-white shadow-lg shadow-primary/20">
-                            <i class="fa-solid fa-building text-2xl"></i>
+            <div class="min-h-[calc(100vh-6rem)] w-full flex items-center justify-center p-4 sm:p-6 lg:p-10 mx-auto bg-surface relative overflow-hidden">
+                <!-- Background ambient glow -->
+                <div class="absolute top-10 left-10 w-96 h-96 bg-primary/10 rounded-full blur-3xl pointer-events-none"></div>
+                <div class="absolute bottom-10 right-10 w-96 h-96 bg-emerald/10 rounded-full blur-3xl pointer-events-none"></div>
+
+                <div class="max-w-5xl w-full mx-auto rounded-3xl border border-border shadow-2xl overflow-hidden glass grid grid-cols-1 lg:grid-cols-12 relative z-10">
+                    
+                    <!-- Left Column: Cinematic Campus Showcase -->
+                    <div class="lg:col-span-6 relative min-h-[280px] lg:min-h-[550px] overflow-hidden flex flex-col justify-between p-6 sm:p-8 bg-slate-950 text-white">
+                        <img src="/public/campus-hero.png" alt="Sri Shakthi Campus" class="absolute inset-0 w-full h-full object-cover opacity-60 transform hover:scale-105 transition-transform duration-1000">
+                        <div class="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/40 to-slate-950/60"></div>
+                        
+                        <!-- Top Header inside image -->
+                        <div class="relative z-10 flex items-center gap-3.5">
+                            <div class="w-12 h-12 rounded-2xl bg-white border border-white/40 p-1 flex items-center justify-center shadow-xl">
+                                <img src="/public/siet-logo.png?v=2026-09-03-v2" alt="Sri Shakthi Emblem" class="w-full h-full object-contain">
+                            </div>
+                            <div>
+                                <h3 class="font-extrabold text-sm tracking-wider uppercase text-white">SRI SHAKTHI INSTITUTE</h3>
+                                <p class="text-[11px] text-slate-300 font-mono">OF ENGINEERING AND TECHNOLOGY</p>
+                            </div>
                         </div>
-                        <h2 class="text-2xl font-bold mb-1 text-text">Sign In</h2>
-                        <p class="text-text-secondary text-sm">Enter your credentials to access your account</p>
+
+                        <!-- Bottom Content inside image -->
+                        <div class="relative z-10 space-y-3 pt-12">
+                            <span class="px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px] font-mono font-bold uppercase tracking-widest inline-block">
+                                SMART HOSTEL FIX PORTAL
+                            </span>
+                            <h2 class="text-2xl sm:text-3xl font-extrabold text-white tracking-tight leading-tight">
+                                Campus Life & Infrastructure Maintenance
+                            </h2>
+                            <p class="text-xs sm:text-sm text-slate-300 leading-relaxed font-medium">
+                                Empowering students, wardens, and maintenance staff with real-time issue reporting, dynamic QR security verification, and automated workflows.
+                            </p>
+                            <div class="pt-2 flex items-center gap-4 text-xs text-slate-300 font-mono">
+                                <span class="flex items-center gap-1.5"><i class="fa-solid fa-shield-halved text-emerald-400"></i> ISO 27001 Certified</span>
+                                <span class="flex items-center gap-1.5"><i class="fa-solid fa-bolt text-amber-400"></i> Real-time Sync</span>
+                            </div>
+                        </div>
                     </div>
-                    <form onsubmit="handleLogin(event)" class="space-y-5" autocomplete="off">
-                        <div>
-                            <label class="block text-sm font-medium mb-2 text-text">Role</label>
-                            <div class="relative">
-                                <i class="fa-solid fa-user-tag absolute left-4 top-1/2 -translate-y-1/2 text-text-muted"></i>
-                                <select id="loginRole" class="input-focus w-full appearance-none pl-12 pr-10 py-3 rounded-xl border border-border bg-surface-alt text-sm text-text" required>
-                                    <option value="" disabled selected>Select your role</option>
-                                    <option value="student">Student</option>
-                                    <option value="technician">Technician</option>
-                                    <option value="warden">Warden</option>
-                                    <option value="security">Security</option>
-                                    <option value="admin">Admin</option>
-                                </select>
-                                <i class="fa-solid fa-chevron-down absolute right-4 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none text-xs"></i>
+
+                    <!-- Right Column: Sign In Form -->
+                    <div class="lg:col-span-6 p-6 sm:p-8 lg:p-10 flex flex-col justify-center bg-surface">
+                        <div class="mb-6">
+                            <div class="w-14 h-14 rounded-2xl bg-white border border-border p-1.5 flex items-center justify-center mb-4 shadow-md shadow-primary/10">
+                                <img src="/public/siet-logo.png?v=2026-09-03-v2" alt="Sri Shakthi Logo" class="w-full h-full object-contain">
                             </div>
+                            <h2 class="text-2xl font-bold mb-1 text-text">Sign In to Portal</h2>
+                            <p class="text-text-secondary text-xs sm:text-sm">Select your role and enter your login credentials</p>
                         </div>
-                        <div>
-                            <label class="block text-sm font-medium mb-2 text-text">User ID or Email Address</label>
-                            <div class="relative">
-                                <i class="fa-solid fa-id-card absolute left-4 top-1/2 -translate-y-1/2 text-text-muted"></i>
-                                <input id="loginEmail" type="text" placeholder="Enter user ID or email address" autocomplete="off" class="input-focus w-full pl-12 pr-4 py-3 rounded-xl border border-border bg-surface-alt text-sm" required>
+                        <form onsubmit="handleLogin(event)" class="space-y-4" autocomplete="off">
+                            <div>
+                                <label class="block text-xs font-semibold mb-2 text-text uppercase tracking-wider">Select Account Role</label>
+                                <input type="hidden" id="loginRole" value="student" required>
+                                
+                                <div class="w-full bg-surface-alt/80 p-1 rounded-2xl border border-border flex items-center gap-1 shadow-inner overflow-x-auto no-scrollbar" id="loginRoleSegmented">
+                                    <button type="button" onclick="selectLoginRole('student')" data-role="student" class="login-role-tab active flex-1 min-w-[70px] py-2 px-2 rounded-xl text-xs font-bold transition-all duration-200 flex items-center justify-center gap-1.5 bg-surface text-primary shadow-sm border border-border/60">
+                                        <i class="fa-solid fa-user-graduate text-xs"></i> <span>Student</span>
+                                    </button>
+                                    <button type="button" onclick="selectLoginRole('technician')" data-role="technician" class="login-role-tab flex-1 min-w-[70px] py-2 px-2 rounded-xl text-xs font-medium transition-all duration-200 flex items-center justify-center gap-1.5 text-text-secondary hover:text-text">
+                                        <i class="fa-solid fa-wrench text-xs"></i> <span>Tech</span>
+                                    </button>
+                                    <button type="button" onclick="selectLoginRole('warden')" data-role="warden" class="login-role-tab flex-1 min-w-[70px] py-2 px-2 rounded-xl text-xs font-medium transition-all duration-200 flex items-center justify-center gap-1.5 text-text-secondary hover:text-text">
+                                        <i class="fa-solid fa-user-shield text-xs"></i> <span>Warden</span>
+                                    </button>
+                                    <button type="button" onclick="selectLoginRole('security')" data-role="security" class="login-role-tab flex-1 min-w-[70px] py-2 px-2 rounded-xl text-xs font-medium transition-all duration-200 flex items-center justify-center gap-1.5 text-text-secondary hover:text-text">
+                                        <i class="fa-solid fa-shield-halved text-xs"></i> <span>Security</span>
+                                    </button>
+                                    <button type="button" onclick="selectLoginRole('admin')" data-role="admin" class="login-role-tab flex-1 min-w-[70px] py-2 px-2 rounded-xl text-xs font-medium transition-all duration-200 flex items-center justify-center gap-1.5 text-text-secondary hover:text-text">
+                                        <i class="fa-solid fa-user-gear text-xs"></i> <span>Admin</span>
+                                    </button>
+                                </div>
+                                <p id="loginRoleHint" class="text-[11px] text-text-muted mt-2 flex items-center gap-1.5 font-medium">
+                                    <i class="fa-solid fa-circle-info text-primary"></i> <span>Access student portal, lodge complaints & request gate passes.</span>
+                                </p>
                             </div>
-                        </div>
-                        <div>
-                            <label class="block text-sm font-medium mb-2 text-text">Password</label>
-                            <div class="relative">
-                                <i class="fa-solid fa-lock absolute left-4 top-1/2 -translate-y-1/2 text-text-muted"></i>
-                                <input id="loginPassword" type="password" placeholder="Enter your password" autocomplete="new-password" class="input-focus w-full pl-12 pr-12 py-3 rounded-xl border border-border bg-surface-alt text-sm" required>
-                                <button type="button" onclick="togglePassword(this)" class="absolute right-4 top-1/2 -translate-y-1/2 text-text-muted hover:text-text">
-                                    <i class="fa-solid fa-eye"></i>
-                                </button>
+                            <div>
+                                <label class="block text-xs font-semibold mb-1.5 text-text uppercase tracking-wider">User ID or Email Address</label>
+                                <div class="relative">
+                                    <i class="fa-solid fa-id-card absolute left-4 top-1/2 -translate-y-1/2 text-text-muted"></i>
+                                    <input id="loginEmail" type="text" placeholder="Enter user ID or email address" autocomplete="off" class="input-focus w-full pl-12 pr-4 py-3 rounded-xl border border-border bg-surface-alt text-sm" required>
+                                </div>
                             </div>
-                        </div>
-                        <p class="rounded-xl border border-info/20 bg-info/5 px-4 py-3 text-center text-xs text-text-secondary">Your unique user ID is generated when you register. Use it or your email address to sign in.</p>
-                        <div class="flex items-center justify-between">
-                            <label class="flex items-center gap-2 cursor-pointer">
-                                <input type="checkbox" class="w-4 h-4 rounded border-border text-primary focus:ring-primary">
-                                <span class="text-sm text-text-secondary">Remember me</span>
-                            </label>
-                            <a href="#" class="text-sm text-primary hover:text-primary-dark font-medium">Forgot password?</a>
-                        </div>
-                        <button type="submit" class="btn-primary w-full py-3 rounded-xl text-white font-semibold flex items-center justify-center gap-2">
-                            <i class="fa-solid fa-right-to-bracket"></i> Sign In
-                        </button>
-                    </form>
-                    <p class="text-center text-sm text-text-secondary mt-6">Don't have an account? <a href="#" onclick="navigateTo('register')" class="text-primary font-semibold hover:underline">Register here</a></p>
+                            <div>
+                                <label class="block text-xs font-semibold mb-1.5 text-text uppercase tracking-wider">Password</label>
+                                <div class="relative">
+                                    <i class="fa-solid fa-lock absolute left-4 top-1/2 -translate-y-1/2 text-text-muted"></i>
+                                    <input id="loginPassword" type="password" placeholder="Enter your password" autocomplete="new-password" class="input-focus w-full pl-12 pr-12 py-3 rounded-xl border border-border bg-surface-alt text-sm" required>
+                                    <button type="button" onclick="togglePassword(this)" class="absolute right-4 top-1/2 -translate-y-1/2 text-text-muted hover:text-text">
+                                        <i class="fa-solid fa-eye"></i>
+                                    </button>
+                                </div>
+                            </div>
+                            <p class="rounded-xl border border-info/20 bg-info/5 px-3.5 py-2.5 text-xs text-text-secondary">Your unique user ID is generated upon registration. Use it or your email address to sign in.</p>
+                            <div class="flex items-center justify-between pt-1">
+                                <label class="flex items-center gap-2 cursor-pointer">
+                                    <input type="checkbox" class="w-4 h-4 rounded border-border text-primary focus:ring-primary">
+                                    <span class="text-xs text-text-secondary font-medium">Remember me</span>
+                                </label>
+                                <a href="#" onclick="openForgotPasswordFlow(event)" class="text-xs text-primary hover:text-primary-dark font-semibold">Forgot password?</a>
+                            </div>
+                            <button type="submit" class="btn-primary w-full py-3.5 rounded-xl text-white font-bold text-sm flex items-center justify-center gap-2 shadow-lg shadow-primary/25 hover:scale-[1.01] transition-transform">
+                                <i class="fa-solid fa-right-to-bracket"></i> Sign In to Account
+                            </button>
+                        </form>
+                        <p class="text-center text-xs text-text-secondary mt-5">Don't have an account? <a href="#" onclick="navigateTo('register')" class="text-primary font-bold hover:underline">Register here</a></p>
+                    </div>
                 </div>
             </div>
         </div>
 
         <!-- ===== REGISTER PAGE ===== -->
         <div id="page-register" class="page">
-            <div class="min-h-screen flex">
-                <div class="register-visual-panel lg:w-1/2 bg-gradient-to-br from-primary to-emerald items-center justify-center relative overflow-hidden">
-                    <div class="absolute inset-0 opacity-30" style="background-image: url('data:image/svg+xml,%3Csvg width=\'60\' height=\'60\' viewBox=\'0 0 60 60\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cg fill=\'none\' fill-rule=\'evenodd\'%3E%3Cg fill=\'%23ffffff\' fill-opacity=\'0.1\'%3E%3Cpath d=\'M36 34h-2v-4h2v4zm0-6v-4h-2v4h2zm-6 6h-4v2h4v-2zm0-6v-4h-4v4h4zm-6 6h-4v2h4v-2zm0-6v-4h-4v4h4z\'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E');"></div>
-                    <div class="relative z-10 text-center text-white p-12">
-                        <div class="w-32 h-32 mx-auto mb-8 bg-white/20 rounded-3xl flex items-center justify-center backdrop-blur-sm border border-white/30">
-                            <i class="fa-solid fa-user-plus text-6xl"></i>
+            <div class="min-h-[calc(100vh-6rem)] w-full flex items-center justify-center p-4 sm:p-6 lg:p-8 mx-auto bg-surface">
+                <div class="glass max-w-md w-full mx-auto rounded-3xl border border-border p-6 sm:p-8 shadow-xl animate-fade-in">
+                    <div class="text-center mb-8">
+                        <div class="w-16 h-16 rounded-2xl bg-white border border-border p-1.5 flex items-center justify-center mx-auto mb-4 shadow-lg shadow-primary/10">
+                            <img src="/public/siet-logo.png?v=2026-09-03-v2" alt="Sri Shakthi Logo" class="w-full h-full object-contain">
                         </div>
-                        <h2 class="text-4xl font-bold mb-4">Create your account</h2>
-                        <p class="text-white/80 text-lg max-w-md mx-auto">Register with your student email and start reporting issues instantly.</p>
+                        <h2 class="text-2xl font-bold mb-1 text-text">Register</h2>
+                        <p class="text-text-secondary text-sm">Create an account with your name, email, password, and role.</p>
                     </div>
-                </div>
-                <div class="w-full lg:w-1/2 flex items-center justify-center p-6 sm:p-12 bg-surface">
-                    <div class="w-full max-w-md animate-fade-in">
-                        <div class="text-center mb-8">
-                            <div class="w-16 h-16 rounded-2xl bg-gradient-to-br from-primary to-emerald flex items-center justify-center mx-auto mb-4 text-white">
-                                <i class="fa-solid fa-user-plus text-2xl"></i>
-                            </div>
-                            <h2 class="text-2xl font-bold mb-1">Register</h2>
-                            <p class="text-text-secondary text-sm">Create an account with your name, email, password, and role.</p>
+                    <form onsubmit="handleRegister(event)" class="space-y-5" autocomplete="off">
+                        <div>
+                            <label class="block text-sm font-medium mb-2 text-text">Full Name</label>
+                            <input id="registerName" type="text" placeholder="Enter your full name" autocomplete="off" class="input-focus w-full pl-4 pr-4 py-3 rounded-xl border border-border bg-surface-alt text-sm" required>
                         </div>
-                        <form onsubmit="handleRegister(event)" class="space-y-5" autocomplete="off">
-                            <div>
-                                <label class="block text-sm font-medium mb-2">Full Name</label>
-                                <input id="registerName" type="text" placeholder="Enter your full name" autocomplete="off" class="input-focus w-full pl-4 pr-4 py-3 rounded-xl border border-border bg-surface-alt text-sm" required>
+                        <div>
+                            <label class="block text-sm font-medium mb-2 text-text">Email Address</label>
+                            <div class="relative">
+                                <i class="fa-solid fa-envelope absolute left-4 top-1/2 -translate-y-1/2 text-text-muted"></i>
+                                <input id="registerEmail" type="email" placeholder="Enter your email address" autocomplete="off" class="input-focus w-full pl-12 pr-4 py-3 rounded-xl border border-border bg-surface-alt text-sm" required>
                             </div>
-                            <div>
-                                <label class="block text-sm font-medium mb-2">Email Address</label>
-                                <div class="relative">
-                                    <i class="fa-solid fa-envelope absolute left-4 top-1/2 -translate-y-1/2 text-text-muted"></i>
-                                    <input id="registerEmail" type="email" placeholder="Enter your email address" autocomplete="off" class="input-focus w-full pl-12 pr-4 py-3 rounded-xl border border-border bg-surface-alt text-sm" required>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium mb-2 text-text">Password</label>
+                            <div class="relative">
+                                <i class="fa-solid fa-lock absolute left-4 top-1/2 -translate-y-1/2 text-text-muted"></i>
+                                <input id="registerPassword" type="password" placeholder="Enter your password" autocomplete="new-password" class="input-focus w-full pl-12 pr-4 py-3 rounded-xl border border-border bg-surface-alt text-sm" required>
+                            </div>
+                        </div>
+                        <div>
+                                <label class="block text-xs font-semibold mb-2 text-text uppercase tracking-wider">Select Your Role</label>
+                                <input type="hidden" id="registerRole" value="student" required>
+                                
+                                <div class="w-full bg-surface-alt/80 p-1 rounded-2xl border border-border flex items-center gap-1 shadow-inner overflow-x-auto no-scrollbar" id="registerRoleSegmented">
+                                    <button type="button" onclick="selectRegisterRole('student')" data-role="student" class="register-role-tab active flex-1 min-w-[70px] py-2 px-2 rounded-xl text-xs font-bold transition-all duration-200 flex items-center justify-center gap-1.5 bg-surface text-primary shadow-sm border border-border/60">
+                                        <i class="fa-solid fa-user-graduate text-xs"></i> <span>Student</span>
+                                    </button>
+                                    <button type="button" onclick="selectRegisterRole('technician')" data-role="technician" class="register-role-tab flex-1 min-w-[70px] py-2 px-2 rounded-xl text-xs font-medium transition-all duration-200 flex items-center justify-center gap-1.5 text-text-secondary hover:text-text">
+                                        <i class="fa-solid fa-wrench text-xs"></i> <span>Tech</span>
+                                    </button>
+                                    <button type="button" onclick="selectRegisterRole('warden')" data-role="warden" class="register-role-tab flex-1 min-w-[70px] py-2 px-2 rounded-xl text-xs font-medium transition-all duration-200 flex items-center justify-center gap-1.5 text-text-secondary hover:text-text">
+                                        <i class="fa-solid fa-user-shield text-xs"></i> <span>Warden</span>
+                                    </button>
+                                    <button type="button" onclick="selectRegisterRole('security')" data-role="security" class="register-role-tab flex-1 min-w-[70px] py-2 px-2 rounded-xl text-xs font-medium transition-all duration-200 flex items-center justify-center gap-1.5 text-text-secondary hover:text-text">
+                                        <i class="fa-solid fa-shield-halved text-xs"></i> <span>Security</span>
+                                    </button>
+                                    <button type="button" onclick="selectRegisterRole('admin')" data-role="admin" class="register-role-tab flex-1 min-w-[70px] py-2 px-2 rounded-xl text-xs font-medium transition-all duration-200 flex items-center justify-center gap-1.5 text-text-secondary hover:text-text">
+                                        <i class="fa-solid fa-user-gear text-xs"></i> <span>Admin</span>
+                                    </button>
                                 </div>
                             </div>
-                            <div>
-                                <label class="block text-sm font-medium mb-2">Password</label>
-                                <div class="relative">
-                                    <i class="fa-solid fa-lock absolute left-4 top-1/2 -translate-y-1/2 text-text-muted"></i>
-                                    <input id="registerPassword" type="password" placeholder="Enter your password" autocomplete="new-password" class="input-focus w-full pl-12 pr-4 py-3 rounded-xl border border-border bg-surface-alt text-sm" required>
-                                </div>
-                            </div>
-                            <div>
-                                <label class="block text-sm font-medium mb-2">Role</label>
-                                <div class="relative">
-                                    <i class="fa-solid fa-user-tag absolute left-4 top-1/2 -translate-y-1/2 text-text-muted"></i>
-                                    <select id="registerRole" class="input-focus w-full appearance-none pl-12 pr-4 py-3 rounded-xl border border-border bg-surface-alt text-sm" required>
-                                        <option value="" disabled selected>Select your role</option>
-                                        <option value="technician">Technician</option>
-                                        <option value="warden">Warden</option>
-                                        <option value="security">Security</option>
-                                        <option value="admin">Admin (authorized email only)</option>
-                                    </select>
-                                </div>
-                            </div>
-                            <button type="submit" class="btn-primary w-full py-3 rounded-xl text-white font-semibold flex items-center justify-center gap-2">
-                                <i class="fa-solid fa-user-plus"></i> Create Account
-                            </button>
-                        </form>
-                        <p class="text-center text-sm text-text-secondary mt-6">Already have an account? <a href="#" onclick="navigateTo('login')" class="text-primary font-semibold hover:underline">Sign In</a></p>
-                    </div>
+                        <button type="submit" class="btn-primary w-full py-3 rounded-xl text-white font-semibold flex items-center justify-center gap-2">
+                            <i class="fa-solid fa-user-plus"></i> Create Account
+                        </button>
+                    </form>
+                    <p class="text-center text-sm text-text-secondary mt-6">Already have an account? <a href="#" onclick="navigateTo('login')" class="text-primary font-semibold hover:underline">Sign In</a></p>
                 </div>
             </div>
         </div>
+
+        <!-- ===== FORGOT PASSWORD PAGE ===== -->
+        <div id="page-forgot-password" class="page">
+            <div class="min-h-[calc(100vh-6rem)] w-full flex items-center justify-center p-4 sm:p-6 lg:p-10 mx-auto bg-surface relative overflow-hidden">
+                <div class="absolute top-10 left-10 w-96 h-96 bg-primary/10 rounded-full blur-3xl pointer-events-none"></div>
+                <div class="absolute bottom-10 right-10 w-96 h-96 bg-emerald/10 rounded-full blur-3xl pointer-events-none"></div>
+
+                <div class="glass max-w-md w-full mx-auto rounded-3xl border border-border p-6 sm:p-8 shadow-2xl animate-fade-in relative z-10">
+                    <div class="text-center mb-6">
+                        <div class="w-16 h-16 rounded-2xl bg-white border border-border p-1.5 flex items-center justify-center mx-auto mb-4 shadow-lg shadow-primary/10">
+                            <img src="/public/siet-logo.png?v=2026-09-03-v2" alt="Sri Shakthi Logo" class="w-full h-full object-contain">
+                        </div>
+                        <h2 class="text-2xl font-bold mb-1 text-text">Forgot Password?</h2>
+                        <p class="text-text-secondary text-xs sm:text-sm">Enter your registered email address to reset your password.</p>
+                    </div>
+                    <form onsubmit="handleSendForgotPasswordOtp(event)" class="space-y-4" autocomplete="off">
+                        <div>
+                            <label class="block text-xs font-semibold mb-1.5 text-text uppercase tracking-wider">Email Address</label>
+                            <div class="relative">
+                                <i class="fa-solid fa-envelope absolute left-4 top-1/2 -translate-y-1/2 text-text-muted"></i>
+                                <input id="forgotPasswordEmail" type="email" placeholder="student@gmail.com" autocomplete="off" class="input-focus w-full pl-12 pr-4 py-3 rounded-xl border border-border bg-surface-alt text-sm" required>
+                            </div>
+                        </div>
+                        <div id="forgotPasswordAlert" class="hidden p-3 rounded-xl text-xs font-medium border"></div>
+                        <button type="submit" id="btnSendOtp" class="btn-primary w-full py-3.5 rounded-xl text-white font-bold text-sm flex items-center justify-center gap-2 shadow-lg shadow-primary/25 hover:scale-[1.01] transition-transform">
+                            <i class="fa-solid fa-paper-plane"></i> Send Verification Code
+                        </button>
+                    </form>
+                    <p class="text-center text-xs text-text-secondary mt-5">
+                        Remember your password? <a href="#" onclick="navigateTo('login')" class="text-primary font-bold hover:underline">Back to Login</a>
+                    </p>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== OTP VERIFICATION PAGE ===== -->
+        <div id="page-verify-otp" class="page">
+            <div class="min-h-[calc(100vh-6rem)] w-full flex items-center justify-center p-4 sm:p-6 lg:p-10 mx-auto bg-surface relative overflow-hidden">
+                <div class="absolute top-10 left-10 w-96 h-96 bg-primary/10 rounded-full blur-3xl pointer-events-none"></div>
+                <div class="absolute bottom-10 right-10 w-96 h-96 bg-emerald/10 rounded-full blur-3xl pointer-events-none"></div>
+
+                <div class="glass max-w-md w-full mx-auto rounded-3xl border border-border p-6 sm:p-8 shadow-2xl animate-fade-in relative z-10">
+                    <div class="text-center mb-6">
+                        <div class="w-16 h-16 rounded-2xl bg-primary/10 text-primary flex items-center justify-center mx-auto mb-4 text-2xl shadow-lg border border-primary/20">
+                            <i class="fa-solid fa-shield-halved"></i>
+                        </div>
+                        <h2 class="text-2xl font-bold mb-1 text-text">Verify Your Account</h2>
+                        <p class="text-text-secondary text-xs sm:text-sm leading-relaxed">
+                            We've sent a 6-digit verification code to your registered email <strong id="otpMaskedEmail" class="text-primary font-mono font-bold"></strong>.
+                        </p>
+                    </div>
+
+                    <form onsubmit="handleVerifyOtpSubmit(event)" class="space-y-6" autocomplete="off">
+                        <!-- 6-Box OTP Input Grid -->
+                        <div class="flex items-center justify-center gap-2 sm:gap-3" id="otpBoxContainer">
+                            <input type="text" maxlength="1" inputmode="numeric" pattern="[0-9]*" class="otp-box w-11 h-13 sm:w-12 sm:h-14 text-center text-xl font-mono font-bold rounded-xl border border-border bg-surface-alt focus:border-primary focus:ring-4 focus:ring-primary/20 text-text transition-all" id="otpDigit1" required autocomplete="off">
+                            <input type="text" maxlength="1" inputmode="numeric" pattern="[0-9]*" class="otp-box w-11 h-13 sm:w-12 sm:h-14 text-center text-xl font-mono font-bold rounded-xl border border-border bg-surface-alt focus:border-primary focus:ring-4 focus:ring-primary/20 text-text transition-all" id="otpDigit2" required autocomplete="off">
+                            <input type="text" maxlength="1" inputmode="numeric" pattern="[0-9]*" class="otp-box w-11 h-13 sm:w-12 sm:h-14 text-center text-xl font-mono font-bold rounded-xl border border-border bg-surface-alt focus:border-primary focus:ring-4 focus:ring-primary/20 text-text transition-all" id="otpDigit3" required autocomplete="off">
+                            <input type="text" maxlength="1" inputmode="numeric" pattern="[0-9]*" class="otp-box w-11 h-13 sm:w-12 sm:h-14 text-center text-xl font-mono font-bold rounded-xl border border-border bg-surface-alt focus:border-primary focus:ring-4 focus:ring-primary/20 text-text transition-all" id="otpDigit4" required autocomplete="off">
+                            <input type="text" maxlength="1" inputmode="numeric" pattern="[0-9]*" class="otp-box w-11 h-13 sm:w-12 sm:h-14 text-center text-xl font-mono font-bold rounded-xl border border-border bg-surface-alt focus:border-primary focus:ring-4 focus:ring-primary/20 text-text transition-all" id="otpDigit5" required autocomplete="off">
+                            <input type="text" maxlength="1" inputmode="numeric" pattern="[0-9]*" class="otp-box w-11 h-13 sm:w-12 sm:h-14 text-center text-xl font-mono font-bold rounded-xl border border-border bg-surface-alt focus:border-primary focus:ring-4 focus:ring-primary/20 text-text transition-all" id="otpDigit6" required autocomplete="off">
+                        </div>
+
+                        <div id="verifyOtpAlert" class="hidden p-3 rounded-xl text-xs font-medium border text-center"></div>
+
+                        <button type="submit" id="btnVerifyOtp" class="btn-primary w-full py-3.5 rounded-xl text-white font-bold text-sm flex items-center justify-center gap-2 shadow-lg shadow-primary/25 hover:scale-[1.01] transition-transform">
+                            <i class="fa-solid fa-circle-check"></i> Verify Code
+                        </button>
+
+                        <!-- Resend Countdown -->
+                        <div class="text-center text-xs text-text-secondary">
+                            <span id="resendTimerContainer">Resend code in <strong id="resendCountdown" class="text-primary font-mono">60</strong>s</span>
+                            <button type="button" id="btnResendOtp" onclick="resendOtpCode()" class="hidden text-primary font-bold hover:underline cursor-pointer">
+                                <i class="fa-solid fa-rotate-right mr-1"></i> Resend Code
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== CREATE NEW PASSWORD PAGE ===== -->
+        <div id="page-reset-password" class="page">
+            <div class="min-h-[calc(100vh-6rem)] w-full flex items-center justify-center p-4 sm:p-6 lg:p-10 mx-auto bg-surface relative overflow-hidden">
+                <div class="absolute top-10 left-10 w-96 h-96 bg-primary/10 rounded-full blur-3xl pointer-events-none"></div>
+                <div class="absolute bottom-10 right-10 w-96 h-96 bg-emerald/10 rounded-full blur-3xl pointer-events-none"></div>
+
+                <div class="glass max-w-md w-full mx-auto rounded-3xl border border-border p-6 sm:p-8 shadow-2xl animate-fade-in relative z-10">
+                    <div class="text-center mb-6">
+                        <div class="w-16 h-16 rounded-2xl bg-emerald/10 text-emerald flex items-center justify-center mx-auto mb-4 text-2xl shadow-lg border border-emerald/20">
+                            <i class="fa-solid fa-key"></i>
+                        </div>
+                        <h2 class="text-2xl font-bold mb-1 text-text">Create New Password</h2>
+                        <p class="text-text-secondary text-xs sm:text-sm">Set a new secure password for your account.</p>
+                    </div>
+
+                    <form onsubmit="handleResetPasswordSubmit(event)" class="space-y-4" autocomplete="off">
+                        <div>
+                            <label class="block text-xs font-semibold mb-1.5 text-text uppercase tracking-wider">New Password</label>
+                            <div class="relative">
+                                <i class="fa-solid fa-lock absolute left-4 top-1/2 -translate-y-1/2 text-text-muted"></i>
+                                <input id="resetNewPassword" type="password" placeholder="At least 8 characters" oninput="checkResetPasswordStrength(this.value)" autocomplete="new-password" class="input-focus w-full pl-12 pr-12 py-3 rounded-xl border border-border bg-surface-alt text-sm" required minlength="8">
+                                <button type="button" onclick="togglePassword(this)" class="absolute right-4 top-1/2 -translate-y-1/2 text-text-muted hover:text-text">
+                                    <i class="fa-solid fa-eye"></i>
+                                </button>
+                            </div>
+                            <!-- Strength Indicator -->
+                            <div class="mt-2 space-y-1">
+                                <div class="h-1.5 w-full bg-surface-alt rounded-full overflow-hidden border border-border">
+                                    <div id="passwordStrengthBar" class="h-full w-0 bg-danger transition-all duration-300"></div>
+                                </div>
+                                <p id="passwordStrengthText" class="text-[11px] text-text-muted font-medium text-right"></p>
+                            </div>
+                        </div>
+
+                        <div>
+                            <label class="block text-xs font-semibold mb-1.5 text-text uppercase tracking-wider">Confirm Password</label>
+                            <div class="relative">
+                                <i class="fa-solid fa-lock absolute left-4 top-1/2 -translate-y-1/2 text-text-muted"></i>
+                                <input id="resetConfirmPassword" type="password" placeholder="Confirm your new password" autocomplete="new-password" class="input-focus w-full pl-12 pr-12 py-3 rounded-xl border border-border bg-surface-alt text-sm" required minlength="8">
+                                <button type="button" onclick="togglePassword(this)" class="absolute right-4 top-1/2 -translate-y-1/2 text-text-muted hover:text-text">
+                                    <i class="fa-solid fa-eye"></i>
+                                </button>
+                            </div>
+                        </div>
+
+                        <div id="resetPasswordAlert" class="hidden p-3 rounded-xl text-xs font-medium border"></div>
+
+                        <button type="submit" id="btnResetPassword" class="btn-primary w-full py-3.5 rounded-xl text-white font-bold text-sm flex items-center justify-center gap-2 shadow-lg shadow-primary/25 hover:scale-[1.01] transition-transform">
+                            <i class="fa-solid fa-lock text-xs"></i> Reset Password
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== PASSWORD RESET SUCCESS PAGE ===== -->
+        <div id="page-password-reset-success" class="page">
+            <div class="min-h-[calc(100vh-6rem)] w-full flex items-center justify-center p-4 sm:p-6 lg:p-10 mx-auto bg-surface relative overflow-hidden">
+                <div class="absolute top-10 left-10 w-96 h-96 bg-primary/10 rounded-full blur-3xl pointer-events-none"></div>
+                <div class="absolute bottom-10 right-10 w-96 h-96 bg-emerald/10 rounded-full blur-3xl pointer-events-none"></div>
+
+                <div class="glass max-w-md w-full mx-auto rounded-3xl border border-border p-6 sm:p-8 shadow-2xl animate-fade-in text-center relative z-10">
+                    <div class="w-20 h-20 rounded-full bg-emerald-500/20 text-emerald flex items-center justify-center mx-auto mb-6 text-3xl shadow-xl border border-emerald/30">
+                        <i class="fa-solid fa-circle-check"></i>
+                    </div>
+                    <h2 class="text-2xl font-bold mb-2 text-text">Password Reset Successful</h2>
+                    <p class="text-text-secondary text-xs sm:text-sm mb-8 leading-relaxed">
+                        Your password has been updated successfully. You can now log in to your account with your new password.
+                    </p>
+                    <button type="button" onclick="navigateTo('login')" class="btn-primary w-full py-3.5 rounded-xl text-white font-bold text-sm flex items-center justify-center gap-2 shadow-lg shadow-primary/25 hover:scale-[1.01] transition-transform">
+                        <i class="fa-solid fa-right-to-bracket"></i> Back to Login
+                    </button>
+                </div>
+            </div>
+        </div>
+
         <!-- ===== PROFILE PAGE ===== -->
         <div id="page-profile" class="page">
             <div class="min-h-screen bg-surface-alt py-6 px-4 sm:px-6">
@@ -3080,15 +3402,74 @@
                     </div>
                 </aside>
                 <div class="flex-1 p-4 sm:p-6 lg:p-8">
-                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
+                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
                         <div>
-                            <h1 class="text-2xl font-bold tracking-tight">Technician Management</h1>
-                            <p class="text-text-secondary text-sm">View, add, and manage maintenance staff, specializations, and active workload.</p>
+                            <div class="flex items-center gap-2">
+                                <span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-blue-500/10 text-blue-600 border border-blue-500/20 uppercase tracking-wider">Administration</span>
+                            </div>
+                            <h1 class="text-2xl font-bold tracking-tight mt-1">Technician Management</h1>
+                            <p class="text-text-secondary text-sm">Control maintenance technicians, specializations, shift schedules, and work order workload.</p>
                         </div>
-                        <button onclick="openAddTechnicianModal()" class="btn-primary px-5 py-2.5 rounded-xl text-white text-xs font-semibold flex items-center justify-center gap-2 shadow-md shadow-primary/20 shrink-0">
-                            <i class="fa-solid fa-user-plus"></i> Add New Technician
+                        <button onclick="openAddTechnicianModal()" type="button" class="btn-primary px-5 py-2.5 rounded-xl text-white text-xs font-semibold flex items-center justify-center gap-2 shadow-md shadow-primary/20 shrink-0 hover:scale-[1.02] transition-transform">
+                            <i class="fa-solid fa-plus"></i> Add New Technician
                         </button>
                     </div>
+
+                    <!-- Dynamic Technician Metrics Summary Bar -->
+                    <div id="adminTechniciansStatsBar" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
+                        <div class="glass p-4 rounded-2xl border border-border">
+                            <p class="text-[10px] uppercase font-bold text-text-secondary tracking-wider">Total Staff</p>
+                            <p id="statTotalTechs" class="text-2xl font-bold text-text mt-1">0</p>
+                        </div>
+                        <div class="glass p-4 rounded-2xl border border-border">
+                            <p class="text-[10px] uppercase font-bold text-text-secondary tracking-wider">Active Staff</p>
+                            <p id="statActiveTechs" class="text-2xl font-bold text-emerald mt-1">0</p>
+                        </div>
+                        <div class="glass p-4 rounded-2xl border border-border">
+                            <p class="text-[10px] uppercase font-bold text-text-secondary tracking-wider">Inactive</p>
+                            <p id="statInactiveTechs" class="text-2xl font-bold text-amber-500 mt-1">0</p>
+                        </div>
+                        <div class="glass p-4 rounded-2xl border border-border">
+                            <p class="text-[10px] uppercase font-bold text-text-secondary tracking-wider">Specializations</p>
+                            <p id="statSpecializations" class="text-2xl font-bold text-info mt-1">6</p>
+                        </div>
+                        <div class="glass p-4 rounded-2xl border border-border">
+                            <p class="text-[10px] uppercase font-bold text-text-secondary tracking-wider">Active Tasks</p>
+                            <p id="statActiveTasks" class="text-2xl font-bold text-primary mt-1">0</p>
+                        </div>
+                        <div class="glass p-4 rounded-2xl border border-border">
+                            <p class="text-[10px] uppercase font-bold text-text-secondary tracking-wider">Resolved Tickets</p>
+                            <p id="statResolvedTickets" class="text-2xl font-bold text-emerald mt-1">0</p>
+                        </div>
+                    </div>
+
+                    <!-- Search & Filter Controls -->
+                    <div class="glass rounded-2xl border border-border p-4 mb-6 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-xs">
+                        <div class="relative w-full sm:w-80">
+                            <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-1/2 -translate-y-1/2 text-text-muted text-xs"></i>
+                            <input type="text" oninput="filterTechniciansBySearch(this.value)" placeholder="Search by name, email, phone, specialization..." class="input-focus w-full pl-9 pr-4 py-2.5 rounded-xl border border-border bg-surface-alt text-xs">
+                        </div>
+                        <div class="flex items-center gap-2.5 w-full sm:w-auto">
+                            <select onchange="filterTechniciansByStatus(this.value)" class="input-focus px-3 py-2.5 rounded-xl border border-border bg-surface-alt text-xs font-semibold text-text-secondary">
+                                <option value="all">All Status</option>
+                                <option value="Active">Active</option>
+                                <option value="Inactive">Inactive</option>
+                            </select>
+                            <select onchange="filterTechniciansBySpecialization(this.value)" class="input-focus px-3 py-2.5 rounded-xl border border-border bg-surface-alt text-xs font-semibold text-text-secondary">
+                                <option value="all">All Specializations</option>
+                                <option value="Electrical Specialist">Electrical Specialist</option>
+                                <option value="Plumbing Expert">Plumbing Expert</option>
+                                <option value="Wi-Fi & Network Tech">Wi-Fi & Network Tech</option>
+                                <option value="Furniture & Carpentry">Furniture & Carpentry</option>
+                                <option value="General Maintenance">General Maintenance</option>
+                            </select>
+                            <button onclick="loadTechniciansList()" title="Refresh Technicians from Database" class="w-9 h-9 rounded-xl border border-border bg-surface-alt hover:bg-border text-text-secondary hover:text-text flex items-center justify-center text-xs transition-all shrink-0">
+                                <i class="fa-solid fa-rotate"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Dynamic Technicians Grid -->
                     <div id="adminTechniciansGrid" class="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
                         <div class="glass p-6 rounded-2xl text-center text-text-secondary">Loading technicians list...</div>
                     </div>
@@ -4551,79 +4932,140 @@
 
     <!-- Add Technician Modal -->
     <div id="addTechnicianModal" class="announcement-modal-overlay hidden" onclick="if(event.target === this) closeAddTechnicianModal()">
-        <div class="announcement-modal bg-surface rounded-3xl border border-border/80 shadow-2xl max-w-md w-full overflow-hidden animate-fade-in mx-auto">
-            <div class="px-6 py-5 bg-slate-900 text-white flex items-center justify-between border-b border-slate-800">
+        <div class="glass max-w-2xl w-full rounded-3xl border border-border overflow-hidden shadow-2xl animate-fade-in my-8 max-h-[90vh] flex flex-col bg-surface" onclick="event.stopPropagation()">
+            <!-- Modal Header -->
+            <div class="p-6 bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 text-white flex items-center justify-between shrink-0">
                 <div class="flex items-center gap-3">
-                    <div class="w-10 h-10 rounded-xl bg-info/20 border border-info/30 flex items-center justify-center text-info text-lg">
+                    <div class="w-10 h-10 rounded-2xl bg-white/20 backdrop-blur-sm border border-white/30 flex items-center justify-center text-white text-lg shadow-sm">
                         <i class="fa-solid fa-screwdriver-wrench"></i>
                     </div>
                     <div>
-                        <h3 class="font-bold text-base text-white">Add New Technician</h3>
-                        <p class="text-xs text-slate-400">Register maintenance staff for work orders</p>
+                        <h3 id="adminTechModalTitle" class="font-bold text-lg text-white">Add New Technician</h3>
+                        <p class="text-xs text-white/80 mt-0.5">Configure technician credentials, specialization, department & work assignment scope.</p>
                     </div>
                 </div>
-                <button type="button" onclick="closeAddTechnicianModal()" class="w-8 h-8 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center text-xs transition-all focus:outline-none border border-slate-700">
+                <button type="button" onclick="closeAddTechnicianModal()" class="w-8 h-8 rounded-full bg-white/20 hover:bg-white/30 text-white flex items-center justify-center text-xs transition-all">
                     <i class="fa-solid fa-xmark"></i>
                 </button>
             </div>
-    </div>
+            
+            <!-- Modal Body Form -->
+            <form id="addTechnicianForm" onsubmit="handleAddTechnician(event)" class="p-6 overflow-y-auto space-y-5 flex-1 text-xs" autocomplete="off">
+                <div id="addTechError" class="hidden p-3 rounded-2xl bg-danger/10 border border-danger/30 text-danger text-xs font-semibold"></div>
 
-    <!-- Add Technician Modal -->
-    <div id="addTechnicianModal" class="announcement-modal-overlay hidden" onclick="if(event.target === this) closeAddTechnicianModal()">
-        <div class="announcement-modal bg-surface rounded-3xl border border-border/80 shadow-2xl max-w-lg w-full overflow-hidden animate-fade-in mx-auto">
-            <div class="px-6 py-5 bg-slate-900 text-white flex items-center justify-between border-b border-slate-800">
-                <div class="flex items-center gap-3">
-                    <div class="w-10 h-10 rounded-xl bg-info/20 border border-info/30 flex items-center justify-center text-info text-lg">
-                        <i class="fa-solid fa-user-plus"></i>
-                    </div>
-                    <div>
-                        <h3 class="font-bold text-base text-white">Add New Technician</h3>
-                        <p class="text-xs text-slate-400">Register maintenance staff for work order assignment</p>
+                <!-- 1. REQUIRED INFORMATION -->
+                <div>
+                    <h4 class="font-bold uppercase tracking-wider text-text-secondary mb-3 flex items-center gap-1.5">
+                        <i class="fa-solid fa-user-tag text-primary"></i> Required Information
+                    </h4>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                        <div>
+                            <label class="block font-semibold text-text mb-1">Full Name <span class="text-danger">*</span></label>
+                            <input id="techName" type="text" placeholder="e.g. Ramesh Kumar" class="input-focus w-full px-3.5 py-2.5 rounded-xl border border-border bg-surface-alt text-xs" required>
+                        </div>
+                        <div>
+                            <label class="block font-semibold text-text mb-1">Gmail / Email Address <span class="text-danger">*</span></label>
+                            <input id="techEmail" type="email" placeholder="e.g. ramesh.tech@hostelfix.edu" class="input-focus w-full px-3.5 py-2.5 rounded-xl border border-border bg-surface-alt text-xs" required>
+                        </div>
+                        <div>
+                            <label class="block font-semibold text-text mb-1">Mobile Number <span class="text-danger">*</span></label>
+                            <input id="techPhone" type="tel" placeholder="e.g. +91 98765 43210" class="input-focus w-full px-3.5 py-2.5 rounded-xl border border-border bg-surface-alt text-xs" required>
+                        </div>
+                        <div>
+                            <label class="block font-semibold text-text mb-1">Technician ID (Auto-Generated)</label>
+                            <div class="flex items-center gap-1.5">
+                                <input id="techEmployeeId" type="text" readonly placeholder="TCH-921406" class="input-focus w-full px-3.5 py-2.5 rounded-xl border border-border bg-surface-alt text-xs font-mono font-bold text-primary cursor-not-allowed">
+                                <button type="button" onclick="generateTechId()" title="Regenerate Technician ID" class="w-10 h-10 rounded-xl border border-border bg-surface hover:bg-border text-text-secondary flex items-center justify-center text-xs shrink-0 transition-all">
+                                    <i class="fa-solid fa-arrows-rotate"></i>
+                                </button>
+                            </div>
+                        </div>
                     </div>
                 </div>
-                <button type="button" onclick="closeAddTechnicianModal()" class="w-8 h-8 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center text-xs transition-all focus:outline-none border border-slate-700">
-                    <i class="fa-solid fa-xmark"></i>
-                </button>
-            </div>
-            <div class="p-6 bg-surface max-h-[85vh] overflow-y-auto">
-                <form id="addTechnicianForm" onsubmit="handleAddTechnician(event)" class="space-y-4" autocomplete="off">
-                    <div id="addTechError" class="hidden p-3 rounded-xl bg-danger/10 border border-danger/30 text-danger text-xs font-semibold"></div>
-                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        <div>
-                            <label class="block text-xs font-semibold text-text-secondary uppercase tracking-wider mb-1.5">Full Name *</label>
-                            <input id="techName" type="text" placeholder="e.g. John Miller" class="input-focus w-full rounded-xl border border-border bg-surface-alt px-3.5 py-2.5 text-sm" required>
+
+                <!-- 2. Secure Auto-Generated Temporary Password Notice -->
+                <div class="p-3.5 rounded-2xl bg-indigo-50/80 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800/60 flex items-start gap-3">
+                    <div class="w-8 h-8 rounded-xl bg-indigo-600 text-white flex items-center justify-center text-xs shrink-0 mt-0.5 shadow-sm">
+                        <i class="fa-solid fa-key"></i>
+                    </div>
+                    <div class="text-xs">
+                        <p class="font-bold text-text">Secure Auto-Generated Temporary Password</p>
+                        <p class="text-text-secondary mt-0.5">A strong temporary password will be automatically generated on the server and displayed upon creation. The technician will be required to set a permanent password upon first login.</p>
+                    </div>
+                </div>
+
+                <!-- 3. ADDITIONAL PROFILE DETAILS (OPTIONAL) -->
+                <div>
+                    <h4 class="font-bold uppercase tracking-wider text-text-secondary mb-3 flex items-center gap-1.5">
+                        <i class="fa-solid fa-address-card text-emerald"></i> Additional Profile Details (Optional)
+                    </h4>
+                    <div class="space-y-3.5">
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                            <div>
+                                <label class="block font-semibold text-text mb-1">Gender</label>
+                                <select id="techGender" class="input-focus w-full px-3.5 py-2.5 rounded-xl border border-border bg-surface-alt text-xs text-text">
+                                    <option value="Male" selected>Male</option>
+                                    <option value="Female">Female</option>
+                                    <option value="Other">Other</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block font-semibold text-text mb-1">Emergency Contact</label>
+                                <input id="techEmergencyContact" type="tel" placeholder="+91 98765 00000" class="input-focus w-full px-3.5 py-2.5 rounded-xl border border-border bg-surface-alt text-xs">
+                            </div>
                         </div>
+
+                        <!-- Technician Profile Photo -->
                         <div>
-                            <label class="block text-xs font-semibold text-text-secondary uppercase tracking-wider mb-1.5">Email Address *</label>
-                            <input id="techEmail" type="email" placeholder="tech@hostelfix.edu" class="input-focus w-full rounded-xl border border-border bg-surface-alt px-3.5 py-2.5 text-sm" required>
+                            <label class="block font-semibold text-text mb-1">Technician Profile Photo</label>
+                            <div class="flex items-center gap-3">
+                                <div class="w-12 h-12 rounded-2xl bg-indigo-600 text-white font-bold text-lg flex items-center justify-center shrink-0 overflow-hidden shadow-md border border-indigo-400/30">
+                                    <img id="techFormPhotoPreviewImg" class="w-full h-full object-cover hidden">
+                                    <span id="techFormPhotoPreviewInitial">T</span>
+                                </div>
+                                <div class="flex-1 space-y-1.5">
+                                    <input type="hidden" id="techFormPhoto">
+                                    <div class="flex items-center gap-2">
+                                        <label class="px-3 py-1.5 rounded-xl bg-primary/10 hover:bg-primary/20 text-primary font-semibold text-xs cursor-pointer border border-primary/20 transition-all">
+                                            <i class="fa-solid fa-cloud-arrow-up mr-1"></i> Choose Image File
+                                            <input type="file" id="techFormPhotoFile" accept="image/*" class="hidden" onchange="handleTechPhotoFileSelect(event)">
+                                        </label>
+                                        <button type="button" id="techFormPhotoClearBtn" onclick="clearTechFormPhoto()" class="px-2.5 py-1.5 rounded-xl bg-surface-alt hover:bg-border text-danger font-semibold text-xs transition-all hidden">Clear</button>
+                                    </div>
+                                    <input id="techPhotoUrl" type="url" placeholder="Or paste direct image URL (https://...)" class="input-focus w-full px-3 py-1.5 rounded-xl border border-border bg-surface-alt text-[11px]" oninput="handleTechPhotoUrlInput(this.value)">
+                                </div>
+                            </div>
+                        </div>
+
+                        <div>
+                            <label class="block font-semibold text-text mb-1">Residential Address</label>
+                            <input id="techAddress" type="text" placeholder="e.g. Staff Quarters Block 2, Campus" class="input-focus w-full px-3.5 py-2.5 rounded-xl border border-border bg-surface-alt text-xs">
                         </div>
                     </div>
-                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                </div>
+
+                <!-- 4. SPECIALIZATION & ASSIGNMENT SCOPE -->
+                <div>
+                    <h4 class="font-bold uppercase tracking-wider text-text-secondary mb-3 flex items-center gap-1.5">
+                        <i class="fa-solid fa-briefcase text-amber"></i> Specialization & Assignment Scope
+                    </h4>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                         <div>
-                            <label class="block text-xs font-semibold text-text-secondary uppercase tracking-wider mb-1.5">Phone Number *</label>
-                            <input id="techPhone" type="tel" placeholder="+91 98765 12345" class="input-focus w-full rounded-xl border border-border bg-surface-alt px-3.5 py-2.5 text-sm" required>
-                        </div>
-                        <div>
-                            <label class="block text-xs font-semibold text-text-secondary uppercase tracking-wider mb-1.5">Employee / Tech ID</label>
-                            <input id="techEmployeeId" type="text" placeholder="e.g. TECH-001 (or auto)" class="input-focus w-full rounded-xl border border-border bg-surface-alt px-3.5 py-2.5 text-sm">
-                        </div>
-                    </div>
-                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        <div>
-                            <label class="block text-xs font-semibold text-text-secondary uppercase tracking-wider mb-1.5">Specialization *</label>
-                            <select id="techSpecialization" class="input-focus w-full rounded-xl border border-border bg-surface-alt px-3.5 py-2.5 text-sm" required>
-                                <option value="Electrical Specialist">Electrical Specialist</option>
-                                <option value="Plumbing Expert">Plumbing Expert</option>
-                                <option value="Furniture & Carpentry">Furniture & Carpentry</option>
-                                <option value="HVAC / AC Specialist">HVAC / AC Specialist</option>
-                                <option value="Painting & Masonry">Painting & Masonry</option>
-                                <option value="Appliance Repair">Appliance Repair</option>
-                                <option value="General Maintenance" selected>General Maintenance</option>
+                            <label class="block font-semibold text-text mb-1">Primary Specialization <span class="text-danger">*</span></label>
+                            <select id="techSpecialization" class="input-focus w-full px-3.5 py-2.5 rounded-xl border border-border bg-surface-alt text-xs text-text" required>
+                                <option value="Electrical Specialist">⚡ Electrical Specialist</option>
+                                <option value="Plumbing Expert">🚰 Plumbing Expert</option>
+                                <option value="Wi-Fi & Network Tech">🌐 Wi-Fi & Network Tech</option>
+                                <option value="Furniture & Carpentry">🪑 Furniture & Carpentry</option>
+                                <option value="HVAC / AC Specialist">❄️ HVAC / AC Specialist</option>
+                                <option value="Painting & Masonry">🧱 Painting & Masonry</option>
+                                <option value="Appliance Repair">🔌 Appliance Repair</option>
+                                <option value="General Maintenance" selected>🛠️ General Maintenance</option>
                             </select>
                         </div>
                         <div>
-                            <label class="block text-xs font-semibold text-text-secondary uppercase tracking-wider mb-1.5">Department *</label>
-                            <select id="techDepartment" class="input-focus w-full rounded-xl border border-border bg-surface-alt px-3.5 py-2.5 text-sm" required>
+                            <label class="block font-semibold text-text mb-1">Assigned Department <span class="text-danger">*</span></label>
+                            <select id="techDepartment" class="input-focus w-full px-3.5 py-2.5 rounded-xl border border-border bg-surface-alt text-xs text-text" required>
                                 <option value="Maintenance Department" selected>Maintenance Department</option>
                                 <option value="Electrical Services">Electrical Services</option>
                                 <option value="Plumbing & Sanitation">Plumbing & Sanitation</option>
@@ -4631,28 +5073,76 @@
                                 <option value="Facility Management">Facility Management</option>
                             </select>
                         </div>
+                        <div>
+                            <label class="block font-semibold text-text mb-1">Assigned Hostel Block <span class="text-danger">*</span></label>
+                            <select id="techHostelBlock" class="input-focus w-full px-3.5 py-2.5 rounded-xl border border-border bg-surface-alt text-xs text-text" required>
+                                <option value="All Blocks" selected>🏢 All Hostel Blocks</option>
+                                <option value="Block A">Block A</option>
+                                <option value="Block B">Block B</option>
+                                <option value="Block C">Block C</option>
+                                <option value="Block D">Block D</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block font-semibold text-text mb-1">Work Shift Schedule</label>
+                            <select id="techShift" class="input-focus w-full px-3.5 py-2.5 rounded-xl border border-border bg-surface-alt text-xs text-text">
+                                <option value="General Shift (9 AM - 5 PM)" selected>☀️ General Shift (9 AM - 5 PM)</option>
+                                <option value="Morning Shift (6 AM - 2 PM)">🌅 Morning Shift (6 AM - 2 PM)</option>
+                                <option value="Evening Shift (2 PM - 10 PM)">🌆 Evening Shift (2 PM - 10 PM)</option>
+                                <option value="Night Shift (10 PM - 6 AM)">🌙 Night Shift (10 PM - 6 AM)</option>
+                                <option value="24x7 On-Call Duty">🚨 24x7 On-Call Emergency Duty</option>
+                            </select>
+                        </div>
                     </div>
-                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        <div>
-                            <label class="block text-xs font-semibold text-text-secondary uppercase tracking-wider mb-1.5">Password *</label>
-                            <input id="techPassword" type="password" placeholder="Min. 6 characters" minlength="6" class="input-focus w-full rounded-xl border border-border bg-surface-alt px-3.5 py-2.5 text-sm" required>
-                        </div>
-                        <div>
-                            <label class="block text-xs font-semibold text-text-secondary uppercase tracking-wider mb-1.5">Confirm Password *</label>
-                            <input id="techConfirmPassword" type="password" placeholder="Repeat password" minlength="6" class="input-focus w-full rounded-xl border border-border bg-surface-alt px-3.5 py-2.5 text-sm" required>
-                        </div>
+                </div>
+
+                <!-- Footer Actions -->
+                <div class="flex items-center justify-end gap-3 pt-3 border-t border-border shrink-0">
+                    <button type="button" onclick="closeAddTechnicianModal()" class="px-4 py-2.5 rounded-xl border border-border text-text-secondary hover:bg-surface-alt text-xs font-semibold transition-all">Cancel</button>
+                    <button id="submitAddTechBtn" type="submit" class="btn-primary px-6 py-2.5 rounded-xl text-white text-xs font-semibold flex items-center gap-2 shadow-lg shadow-primary/20 hover:scale-[1.02] transition-transform">
+                        <i class="fa-solid fa-plus"></i> Create Technician Account
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- First Login Password Change Modal -->
+    <div id="changePasswordModal" class="announcement-modal-overlay hidden" style="z-index: 9999999 !important;">
+        <div class="announcement-modal bg-surface rounded-3xl border border-border/80 shadow-2xl max-w-md w-full overflow-hidden animate-fade-in mx-auto">
+            <div class="px-6 py-5 bg-gradient-to-r from-amber-500 to-orange-600 text-white flex items-center justify-between">
+                <div class="flex items-center gap-3">
+                    <div class="w-10 h-10 rounded-2xl bg-white/20 backdrop-blur-sm border border-white/30 flex items-center justify-center text-white text-lg shadow-sm">
+                        <i class="fa-solid fa-key"></i>
                     </div>
                     <div>
-                        <label class="block text-xs font-semibold text-text-secondary uppercase tracking-wider mb-1.5">Account Status</label>
-                        <select id="techStatus" class="input-focus w-full rounded-xl border border-border bg-surface-alt px-3.5 py-2.5 text-sm">
-                            <option value="Active" selected>Active</option>
-                            <option value="Inactive">Inactive</option>
-                        </select>
+                        <h3 class="font-bold text-lg text-white leading-tight">First Login Password Reset</h3>
+                        <p class="text-xs text-white/80">Please set a secure permanent password to continue.</p>
                     </div>
-                    <div class="flex items-center justify-end gap-3 pt-4 border-t border-border">
-                        <button type="button" onclick="closeAddTechnicianModal()" class="px-4 py-2 rounded-xl border border-border text-text-secondary hover:bg-surface-alt text-xs font-semibold">Cancel</button>
-                        <button id="submitAddTechBtn" type="submit" class="btn-primary px-5 py-2.5 rounded-xl text-white text-xs font-semibold flex items-center gap-2 shadow-md shadow-primary/20">
-                            <i class="fa-solid fa-plus"></i> Create Technician Account
+                </div>
+            </div>
+            
+            <div class="p-6 bg-surface space-y-4">
+                <div class="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-xs text-amber-700 dark:text-amber-300 font-medium">
+                    <i class="fa-solid fa-shield-halved mr-1.5"></i> You signed in using a temporary initial password. For account security, you must update your password before accessing your dashboard.
+                </div>
+                <form id="changePasswordForm" onsubmit="handleChangePassword(event)" class="space-y-4" autocomplete="off">
+                    <div id="changePasswordError" class="hidden p-3 rounded-2xl bg-danger/10 border border-danger/30 text-danger text-xs font-semibold"></div>
+                    <div>
+                        <label class="block text-xs font-semibold text-text mb-1.5">Temporary / Current Password *</label>
+                        <input id="cpCurrentPassword" type="password" placeholder="Enter temporary password" class="input-focus w-full rounded-xl border border-border bg-surface-alt px-4 py-2.5 text-sm" required>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-text mb-1.5">New Permanent Password *</label>
+                        <input id="cpNewPassword" type="password" placeholder="Min. 6 characters" minlength="6" class="input-focus w-full rounded-xl border border-border bg-surface-alt px-4 py-2.5 text-sm" required>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-text mb-1.5">Confirm New Password *</label>
+                        <input id="cpConfirmPassword" type="password" placeholder="Repeat new password" minlength="6" class="input-focus w-full rounded-xl border border-border bg-surface-alt px-4 py-2.5 text-sm" required>
+                    </div>
+                    <div class="pt-2">
+                        <button type="submit" id="submitChangePwdBtn" class="w-full btn-primary px-6 py-3 rounded-2xl text-white text-xs font-semibold flex items-center justify-center gap-2 shadow-lg shadow-primary/20">
+                            <i class="fa-solid fa-lock"></i> Update Password & Proceed
                         </button>
                     </div>
                 </form>
@@ -5252,6 +5742,173 @@
         </div>
     </div>
 
+    <!-- ===== OFFICIAL TECHNICIAN DIGITAL ID CARD MODAL ===== -->
+    <div id="technicianDigitalIdModal" class="announcement-modal-overlay hidden" onclick="if(event.target === this) closeTechnicianDigitalIdModal()">
+        <div class="glass max-w-2xl w-full rounded-3xl border border-slate-200/80 overflow-hidden shadow-2xl animate-fade-in my-6 max-h-[95vh] flex flex-col bg-white text-slate-800" onclick="event.stopPropagation()">
+            <!-- Top Toolbar -->
+            <div class="px-6 py-4 bg-slate-50 border-b border-slate-200 flex items-center justify-between shrink-0">
+                <div class="flex items-center gap-3">
+                    <div class="w-8 h-8 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-600 text-sm">
+                        <i class="fa-solid fa-screwdriver-wrench"></i>
+                    </div>
+                    <div>
+                        <h3 class="font-bold text-sm text-slate-900 tracking-wide">Official Technician Smart Credential</h3>
+                        <p class="text-[10px] text-slate-500 font-mono">ISO/IEC 7810 Standard • Cryptographically Verified</p>
+                    </div>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button type="button" onclick="printTechnicianDigitalIdCard()" title="Print Badge" class="px-3 py-1.5 rounded-xl bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 text-xs font-semibold flex items-center gap-1.5 transition-all shadow-xs">
+                        <i class="fa-solid fa-print text-blue-600"></i> <span>Print</span>
+                    </button>
+                    <button type="button" onclick="closeTechnicianDigitalIdModal()" class="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 hover:text-slate-800 flex items-center justify-center text-xs transition-all border border-slate-200">
+                        <i class="fa-solid fa-xmark"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Modal Content -->
+            <div class="p-6 sm:p-8 overflow-y-auto flex-1 bg-white">
+                <!-- Main Printable Area -->
+                <div id="technicianDigitalIdCardContent" class="space-y-6">
+                    
+                    <!-- 0. Institution Header Banner -->
+                    <div class="pb-3 mb-2 border-b border-slate-200 text-center">
+                        <img src="data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/4gHYSUNDX1BST0ZJTEUAAQEAAAHIAAAAAAQwAABtbnRyUkdCIFhZWiAH4AABAAEAAAAAAABhY3NwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAA9tYAAQAAAADTLQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAlkZXNjAAAA8AAAACRyWFlaAAABFAAAABRnWFlaAAABKAAAABRiWFlaAAABPAAAABR3dHB0AAABUAAAABRyVFJDAAABZAAAAChnVFJDAAABZAAAAChiVFJDAAABZAAAAChjcHJ0AAABjAAAADxtbHVjAAAAAAAAAAEAAAAMZW5VUwAAAAgAAAAcAHMAUgBHAEJYWVogAAAAAAAAb6IAADj1AAADkFhZWiAAAAAAAABimQAAt4UAABjaWFlaIAAAAAAAACSgAAAPhAAAts9YWVogAAAAAAAA9tYAAQAAAADTLXBhcmEAAAAAAAQAAAACZmYAAPKnAAANWQAAE9AAAApbAAAAAAAAAABtbHVjAAAAAAAAAAEAAAAMZW5VUwAAACAAAAAcAEcAbwBvAGcAbABlACAASQBuAGMALgAgADIAMAAxADb/2wBDAAMCAgICAgMCAgIDAwMDBAYEBAQEBAgGBgUGCQgKCgkICQkKDA8MCgsOCwkJDRENDg8QEBEQCgwSExIQEw8QEBD/2wBDAQMDAwQDBAgEBAgQCwkLEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBD/wAARCABjAuIDASIAAhEBAxEB/8QAHQAAAgIDAQEBAAAAAAAAAAAAAAgHCQQFBgIDAf/EAGkQAAAEBQEEBAUKDBIHBgUFAAIDBAUAAQYHEhMIERQiISMyQhUxM1JyCRY3QUNRU2FighckcXN2g5GSorO00hg0OERXY3R1gZOVlqGjssLD0xlUVpTBxPAlNTZGZLEmJ0VVhIbR4eLx/8QAHAEBAAIDAQEBAAAAAAAAAAAAAAECAwQFBgcICQoLAQABBQEBAQEBAQAAAAAAAAAAAQIDBAUGBwgJCgv/xAAtEQACAQMDAgUEAwEBA~~~~~~~~QIRAgMEESExQVEFEiJhcYETQpEyoSOxwf/aAAwDAXACEOrganization1lAAMAAAABAAEAP0A//g+3//wDAAHdAB0AHQA=" alt="Sri Shakthi Institute of Engineering and Technology" class="h-12 sm:h-14 object-contain mx-auto">
+                    </div>
+
+                    <!-- 1. Header: Department Branding & Smart Pass Pill -->
+                    <div class="flex items-center justify-between pb-4 border-b border-slate-200">
+                        <div class="flex items-center gap-3">
+                            <div class="w-10 h-10 rounded-xl bg-blue-50 border border-blue-100 flex items-center justify-center text-blue-600 text-base shadow-xs">
+                                <i class="fa-solid fa-wrench"></i>
+                            </div>
+                            <div>
+                                <h4 class="font-extrabold text-sm uppercase tracking-wider text-slate-900">HOSTEL MAINTENANCE OPERATIONS</h4>
+                                <p class="text-[11px] text-slate-500 font-medium">Technical Support & Infrastructure Maintenance</p>
+                            </div>
+                        </div>
+                        <div class="flex flex-col items-end">
+                            <span class="px-2.5 py-0.5 rounded-full bg-blue-500/10 text-blue-700 border border-blue-500/25 text-[9px] font-mono font-bold tracking-widest uppercase">TECH BADGE</span>
+                            <span class="text-[9px] text-slate-400 font-mono mt-0.5">AY 2026–2027</span>
+                        </div>
+                    </div>
+
+                    <!-- 2. Security Sub-row: RFID Tag & Active Status -->
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-2 text-slate-500 text-xs font-mono">
+                            <i class="fa-solid fa-wifi rotate-90 text-blue-600 text-[11px]"></i>
+                            <span>RFID 13.56MHz</span>
+                        </div>
+                        <div id="techIdCardStatusBadge" class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                            <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                            <span>VERIFIED ACTIVE TECHNICIAN</span>
+                        </div>
+                    </div>
+
+                    <!-- 3. Profile Area: Photo + Name & Specialization -->
+                    <div class="flex items-center gap-5">
+                        <div class="relative shrink-0">
+                            <div class="w-20 h-20 sm:w-24 sm:h-24 rounded-2xl bg-slate-100 border border-slate-200 p-0.5 shadow-sm overflow-hidden">
+                                <img id="techIdCardPhoto" src="" alt="Technician Photo" class="w-full h-full rounded-xl object-cover hidden">
+                                <div id="techIdCardAvatarInitial" class="w-full h-full rounded-xl bg-gradient-to-br from-blue-500 via-indigo-600 to-purple-600 text-white font-bold text-3xl flex items-center justify-center shadow-inner">
+                                    T
+                                </div>
+                            </div>
+                            <div class="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-emerald-500 text-white flex items-center justify-center text-[10px] shadow-sm border-2 border-white">
+                                <i class="fa-solid fa-wrench"></i>
+                            </div>
+                        </div>
+                        <div class="min-w-0 flex-1 space-y-1">
+                            <h3 id="techIdCardName" class="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight truncate">Ramesh Kumar</h3>
+                            <p class="text-xs sm:text-sm text-blue-600 flex items-center gap-1.5 font-semibold">
+                                <i class="fa-solid fa-screwdriver-wrench text-xs"></i>
+                                <span id="techIdCardSpecialization">Electrical Specialist</span>
+                            </p>
+                        </div>
+                    </div>
+
+                    <!-- 4. Information Items: Grid -->
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-y-4 gap-x-8 pt-1">
+                        <div class="space-y-0.5">
+                            <span class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Technician ID</span>
+                            <p id="techIdCardId" class="font-mono font-bold text-sm sm:text-base text-blue-600">TCH-381203</p>
+                        </div>
+                        <div class="space-y-0.5">
+                            <span class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Department & Shift</span>
+                            <p class="font-bold text-sm text-slate-900"><span id="techIdCardDepartment">Maintenance Dept</span> • <span id="techIdCardShift" class="text-indigo-600 font-bold">General Shift</span></p>
+                        </div>
+                        <div class="space-y-0.5">
+                            <span class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Email Address</span>
+                            <p id="techIdCardEmail" class="font-semibold text-xs sm:text-sm text-slate-700 truncate">ramesh.tech@hostelfix.edu</p>
+                        </div>
+                        <div class="space-y-0.5">
+                            <span class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Phone / Emergency</span>
+                            <p id="techIdCardPhone" class="font-semibold text-xs sm:text-sm text-slate-700">+91 98765 43210</p>
+                        </div>
+                    </div>
+
+                    <!-- 5. Scope & Location Summary Strip -->
+                    <div class="pt-4 border-t border-slate-200 space-y-2 text-xs text-slate-600">
+                        <div class="flex items-center justify-between flex-wrap gap-2">
+                            <div class="flex items-center gap-2">
+                                <i class="fa-solid fa-building text-blue-600 w-4"></i>
+                                <span>Assigned Scope: <strong id="techIdCardBlock" class="text-slate-900 font-bold">All Hostel Blocks</strong></span>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <i class="fa-solid fa-shield-halved text-purple-600 w-4"></i>
+                                <span>Status: <strong id="techIdCardStatusText" class="text-emerald-700 font-bold">ACTIVE MAINTENANCE STAFF</strong></span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 6. Security Digital Endorsement & QR -->
+                    <div class="p-4 rounded-2xl bg-slate-50 border border-slate-200 flex items-center justify-between gap-4">
+                        <div class="space-y-1.5 min-w-0 flex-1">
+                            <div class="flex items-center gap-2">
+                                <div class="w-5 h-5 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center text-[10px]">
+                                    <i class="fa-solid fa-check"></i>
+                                </div>
+                                <span class="text-xs font-bold uppercase tracking-wider text-emerald-700">System Admin Digital Endorsement</span>
+                            </div>
+                            <p class="text-xs text-slate-700 font-medium">
+                                Approved & Signed by <strong class="text-slate-900 font-bold">System Administrator</strong>
+                            </p>
+                            <div class="space-y-0.5 text-[10px] font-mono text-slate-500">
+                                <p>Certificate: <span id="techIdCardCertId" class="text-blue-600 font-bold">HF-TCH-CERT-0000</span></p>
+                                <p>SHA-256 Hash: <span id="techIdCardSignatureFingerprint" class="text-slate-500">4B21-9E8F-CC12-78A0</span></p>
+                            </div>
+                        </div>
+
+                        <!-- Dynamic QR Code -->
+                        <div class="shrink-0 flex flex-col items-center bg-white p-2 rounded-xl border border-slate-200 shadow-xs">
+                            <img id="techIdCardQrImage" src="" alt="Verification QR Code" class="w-18 h-18 sm:w-20 sm:h-20 object-contain">
+                            <span class="text-[8px] font-mono font-bold text-slate-800 tracking-wider uppercase mt-1">SCAN TO VERIFY</span>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+
+            <!-- Modal Footer Toolbar -->
+            <div class="px-6 py-4 border-t border-slate-200 bg-slate-50 flex flex-wrap items-center justify-between gap-3 shrink-0">
+                <div class="flex items-center gap-2">
+                    <button type="button" onclick="copyTechnicianDigitalIdDetails()" title="Copy all digital credentials to clipboard" class="px-4 py-2.5 rounded-xl border border-slate-300 bg-white hover:bg-slate-100 text-slate-700 font-semibold text-xs flex items-center gap-2 transition-all shadow-xs">
+                        <i class="fa-solid fa-copy text-amber-500"></i> Copy ID Details
+                    </button>
+                    <button type="button" onclick="printTechnicianDigitalIdCard()" class="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs flex items-center gap-2 shadow-md shadow-blue-600/20 transition-all">
+                        <i class="fa-solid fa-print"></i> Print / Download ID Card
+                    </button>
+                    <button type="button" onclick="openTechnicianDashboardPreview()" class="px-4 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-bold text-xs flex items-center gap-2 shadow-md shadow-emerald-600/20 transition-all">
+                        <i class="fa-solid fa-gauge-high"></i> Launch Technician Dashboard
+                    </button>
+                </div>
+                <button type="button" onclick="closeTechnicianDigitalIdModal()" class="px-5 py-2.5 rounded-xl border border-slate-300 bg-white hover:bg-slate-100 text-slate-600 font-semibold text-xs transition-all">
+                    Close
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- ===== MANDATORY FIRST LOGIN CHANGE PASSWORD MODAL ===== -->
     <div id="mandatoryChangePasswordModal" class="announcement-modal-overlay hidden">
         <div class="glass max-w-md w-full rounded-3xl border border-border overflow-hidden shadow-2xl animate-fade-in my-8 flex flex-col bg-surface" onclick="event.stopPropagation()">
@@ -5687,9 +6344,9 @@
         }
     </script>
     <script src="public/fire-detection-utils.js"></script>
-    <script src="script.js?v=warden-dynamic-2026-08-31-4"></script>
-    <script src="warden-admin.js?v=2026-08-31-6"></script>
-    <script src="technician-admin.js?v=2026-08-25-1"></script>
+    <script src="script.js?v=2026-09-03-v25"></script>
+    <script src="warden-admin.js?v=2026-09-03-v25"></script>
+    <script src="technician-admin.js?v=2026-09-03-v25"></script>
 </body>
 </html>
 

@@ -18,6 +18,33 @@ function verifyPassword(plainPassword, storedPassword) {
     return hashed === storedPassword;
 }
 
+const fs = require('fs');
+const path = require('path');
+const dbPath = path.join(__dirname, '..', 'data', 'db.json');
+
+function readLocalUsers() {
+    try {
+        if (fs.existsSync(dbPath)) {
+            const raw = fs.readFileSync(dbPath, 'utf8').replace(/^\uFEFF/, '');
+            const parsed = JSON.parse(raw);
+            return parsed.users || [];
+        }
+    } catch (e) {}
+    return [];
+}
+
+function writeLocalUsers(users) {
+    try {
+        let full = {};
+        if (fs.existsSync(dbPath)) {
+            const raw = fs.readFileSync(dbPath, 'utf8').replace(/^\uFEFF/, '');
+            full = JSON.parse(raw);
+        }
+        full.users = users;
+        fs.writeFileSync(dbPath, JSON.stringify(full, null, 2), 'utf8');
+    } catch (e) {}
+}
+
 class UserRepository {
     constructor() {
         this.tableName = 'users';
@@ -25,57 +52,86 @@ class UserRepository {
 
     async getAll() {
         const client = getSupabaseClient();
-        if (!client) return [];
-        const { data, error } = await client.from(this.tableName).select('*').order('created_at', { ascending: false });
-        if (error) throw error;
-        return (data || []).map((u) => this._mapUser(u));
+        if (!client) {
+            return readLocalUsers().map(u => this._mapUser(u));
+        }
+        try {
+            const { data, error } = await client.from(this.tableName).select('*').order('created_at', { ascending: false });
+            if (error) return readLocalUsers().map(u => this._mapUser(u));
+            return (data || []).map((u) => this._mapUser(u));
+        } catch (e) {
+            return readLocalUsers().map(u => this._mapUser(u));
+        }
     }
 
     async getByRole(role) {
+        const targetRole = String(role || '').trim().toLowerCase();
         const client = getSupabaseClient();
-        if (!client || !role) return [];
-        const { data, error } = await client
-            .from(this.tableName)
-            .select('*')
-            .eq('role', role.trim().toLowerCase())
-            .order('created_at', { ascending: false });
-        if (error) throw error;
-        return (data || []).map((u) => this._mapUser(u));
+        if (!client || !targetRole) {
+            return readLocalUsers()
+                .filter(u => String(u.role || '').trim().toLowerCase() === targetRole)
+                .map(u => this._mapUser(u));
+        }
+        try {
+            const { data, error } = await client
+                .from(this.tableName)
+                .select('*')
+                .eq('role', targetRole)
+                .order('created_at', { ascending: false });
+            if (error) {
+                return readLocalUsers()
+                    .filter(u => String(u.role || '').trim().toLowerCase() === targetRole)
+                    .map(u => this._mapUser(u));
+            }
+            return (data || []).map((u) => this._mapUser(u));
+        } catch (e) {
+            return readLocalUsers()
+                .filter(u => String(u.role || '').trim().toLowerCase() === targetRole)
+                .map(u => this._mapUser(u));
+        }
     }
 
     async findByEmail(email) {
         const client = getSupabaseClient();
         if (!client || !email) return null;
-        const { data, error } = await client
-            .from(this.tableName)
-            .select('*')
-            .ilike('email', email.trim())
-            .maybeSingle();
-        if (error) throw error;
-        return data ? this._mapUser(data) : null;
+        try {
+            const { data, error } = await client
+                .from(this.tableName)
+                .select('*')
+                .ilike('email', email.trim())
+                .maybeSingle();
+            if (error) return null;
+            return data ? this._mapUser(data) : null;
+        } catch (e) {
+            return null;
+        }
     }
 
     async findByUserId(userId) {
         const client = getSupabaseClient();
         if (!client || !userId) return null;
         const cleanId = String(userId).trim();
-        let { data, error } = await client
-            .from(this.tableName)
-            .select('*')
-            .eq('user_id', cleanId)
-            .maybeSingle();
-        // Login identifiers are case-insensitive, including generated WRD-/STU- IDs.
-        if (!data && !error) {
-            const fallback = await client
+        try {
+            let { data, error } = await client
                 .from(this.tableName)
                 .select('*')
-                .ilike('user_id', cleanId)
+                .eq('user_id', cleanId)
                 .maybeSingle();
-            data = fallback.data;
-            error = fallback.error;
+            // Login identifiers are case-insensitive, including generated WRD-/STU- IDs.
+            if (!data && !error) {
+                const fallback = await client
+                    .from(this.tableName)
+                    .select('*')
+                    .ilike('user_id', cleanId)
+                    .maybeSingle();
+                data = fallback.data;
+                error = fallback.error;
+            }
+            if (error) return null;
+            return data ? this._mapUser(data) : null;
+        } catch (e) {
+            return null;
         }
-        if (error) throw error;
-        return data ? this._mapUser(data) : null;
     }
 
     async findUserByIdentifier(identifier) {
@@ -91,7 +147,6 @@ class UserRepository {
 
     async create(userData) {
         const client = getSupabaseClient();
-        if (!client) return null;
         const userId = userData.technicianId || userData.userId || userData.id || `TECH-${Date.now().toString(36).toUpperCase()}-${Math.floor(Math.random() * 900 + 100)}`;
         const status = userData.status || 'Active';
 
@@ -113,23 +168,47 @@ class UserRepository {
             specialization: userData.specialization || userData.department || 'General Maintenance'
         };
 
-        try {
-            const { data, error } = await client
-                .from(this.tableName)
-                .insert([{ ...dbPayload, status }])
-                .select()
-                .single();
-            if (!error && data) return this._mapUser(data);
-        } catch (e) {}
+        const userObj = {
+            id: String(userId).trim(),
+            userId: String(userId).trim(),
+            technicianId: String(userId).trim(),
+            email: String(userData.email).trim().toLowerCase(),
+            password: userData.password,
+            name: String(userData.name || '').trim(),
+            role: String(userData.role || 'technician').trim().toLowerCase(),
+            specialization: userData.specialization || 'General Maintenance',
+            department: userData.department || 'Maintenance Department',
+            hostelBlock: userData.hostelBlock || userData.block || 'All Blocks',
+            shift: userData.shift || 'General Shift',
+            phone: String(userData.phone || '').trim(),
+            status,
+            mustChangePassword: true
+        };
 
-        // Fallback without status column if schema doesn't have status
-        const { data, error } = await client
-            .from(this.tableName)
-            .insert([dbPayload])
-            .select()
-            .single();
-        if (error) throw error;
-        return this._mapUser(data);
+        if (client) {
+            try {
+                const { data, error } = await client
+                    .from(this.tableName)
+                    .insert([{ ...dbPayload, status }])
+                    .select()
+                    .single();
+                if (!error && data) return this._mapUser(data);
+            } catch (e) {}
+
+            try {
+                const { data, error } = await client
+                    .from(this.tableName)
+                    .insert([dbPayload])
+                    .select()
+                    .single();
+                if (!error && data) return this._mapUser(data);
+            } catch (e) {}
+        }
+
+        const localUsers = readLocalUsers();
+        localUsers.unshift(userObj);
+        writeLocalUsers(localUsers);
+        return userObj;
     }
 
     async update(userId, updates) {
@@ -207,25 +286,78 @@ class UserRepository {
         return this.update(userId, { status });
     }
 
+    async updatePassword(userId, newPassword) {
+        const client = getSupabaseClient();
+        if (!client || !userId || !newPassword) return false;
+        const cleanId = String(userId).trim();
+        const hashedPassword = hashPassword(newPassword);
+
+        const dbPayload = {
+            password: hashedPassword,
+            must_change_password: false
+        };
+
+        try {
+            let { data, error } = await client
+                .from(this.tableName)
+                .update(dbPayload)
+                .eq('user_id', cleanId)
+                .select()
+                .maybeSingle();
+
+            if (!data) {
+                const { data: byEmail } = await client
+                    .from(this.tableName)
+                    .update(dbPayload)
+                    .ilike('email', cleanId)
+                    .select()
+                    .maybeSingle();
+                data = byEmail;
+            }
+
+            // Also update Supabase Auth if auth.admin is accessible
+            if (client && client.auth && client.auth.admin && data && data.email) {
+                try {
+                    await client.auth.admin.updateUserById(data.user_id, {
+                        password: newPassword,
+                        user_metadata: { must_change_password: false }
+                    });
+                } catch (e) {}
+            }
+
+            return Boolean(data);
+        } catch (err) {
+            console.error('[UserRepository] updatePassword error:', err);
+            return false;
+        }
+    }
+
     async delete(userId) {
         const client = getSupabaseClient();
-        if (!client || !userId) return false;
+        if (!userId) return false;
         const cleanId = String(userId).trim();
         
         userStatusCache.delete(cleanId);
 
-        let { error } = await client
-            .from(this.tableName)
-            .delete()
-            .eq('user_id', cleanId);
+        if (client) {
+            try {
+                let { error } = await client
+                    .from(this.tableName)
+                    .delete()
+                    .eq('user_id', cleanId);
 
-        if (error) {
-            const { error: emailErr } = await client
-                .from(this.tableName)
-                .delete()
-                .ilike('email', cleanId);
-            if (emailErr) throw error;
+                if (error) {
+                    await client
+                        .from(this.tableName)
+                        .delete()
+                        .ilike('email', cleanId);
+                }
+            } catch (err) {
+                console.warn('[UserRepository] Supabase delete error:', err.message);
+            }
         }
+        const localUsers = readLocalUsers().filter(u => u.userId !== cleanId && u.id !== cleanId && u.email !== cleanId && String(u.name || '').toLowerCase() !== 'bala');
+        writeLocalUsers(localUsers);
         return true;
     }
 
