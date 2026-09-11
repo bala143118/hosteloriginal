@@ -3,6 +3,7 @@ const { getSupabaseClient } = require('./supabaseClient');
 const wardenScopeRepository = require('./wardenScopeRepository');
 const wardenPermissionRepository = require('./wardenPermissionRepository');
 const studentRepository = require('./studentRepository');
+const db = require('../db');
 
 const wardenStatusCache = new Map();
 const wardenAdminCache = new Map();
@@ -99,30 +100,28 @@ class WardenRepository {
     }
 
     async getAllWardens() {
-        const client = getSupabaseClient();
-        if (!client) return [];
-
         let data = null;
-        try {
-            const { data: queryData, error } = await client
-                .from(this.tableName)
-                .select('*')
-                .ilike('role', 'warden')
-                .order('created_at', { ascending: false });
 
-            if (!error && queryData) {
-                data = queryData;
-            } else if (error) {
-                console.warn('[WardenRepository] ilike query failed, trying exact eq query:', error.message);
-                const { data: eqData, error: eqErr } = await client
-                    .from(this.tableName)
-                    .select('*')
-                    .eq('role', 'warden')
-                    .order('created_at', { ascending: false });
-                if (!eqErr && eqData) data = eqData;
+        try {
+            const res = await db.query("SELECT * FROM users WHERE LOWER(role) = 'warden' ORDER BY created_at DESC");
+            if (res.rows && res.rows.length > 0) {
+                data = res.rows;
             }
-        } catch (err) {
-            console.error('[WardenRepository] Fetch error:', err);
+        } catch (e) {}
+
+        if (!data) {
+            const client = getSupabaseClient();
+            if (client) {
+                try {
+                    const { data: queryData, error } = await client
+                        .from(this.tableName)
+                        .select('*')
+                        .ilike('role', 'warden')
+                        .order('created_at', { ascending: false });
+
+                    if (!error && queryData) data = queryData;
+                } catch (err) {}
+            }
         }
 
         if (!data) data = [];
@@ -156,26 +155,44 @@ class WardenRepository {
     }
 
     async getWardenById(id) {
-        const client = getSupabaseClient();
-        if (!client || !id) return null;
-
+        if (!id) return null;
         const cleanId = String(id).trim();
-        let query = client.from(this.tableName).select('*').eq('role', 'warden');
 
-        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cleanId);
-        if (cleanId.includes('@')) {
-            query = query.ilike('email', cleanId);
-        } else if (isUuid) {
-            query = query.or(`user_id.eq.${cleanId},id.eq.${cleanId}`);
-        } else {
-            query = query.eq('user_id', cleanId);
+        let rowData = null;
+
+        try {
+            const res = await db.query(
+                `SELECT * FROM users WHERE LOWER(role) = 'warden' AND (LOWER("userId") = LOWER($1) OR LOWER(email) = LOWER($1)) LIMIT 1`,
+                [cleanId]
+            );
+            if (res.rows && res.rows.length > 0) {
+                rowData = res.rows[0];
+            }
+        } catch (e) {}
+
+        if (!rowData) {
+            const client = getSupabaseClient();
+            if (client) {
+                let query = client.from(this.tableName).select('*').eq('role', 'warden');
+                const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cleanId);
+                if (cleanId.includes('@')) {
+                    query = query.ilike('email', cleanId);
+                } else if (isUuid) {
+                    query = query.or(`user_id.eq.${cleanId},id.eq.${cleanId}`);
+                } else {
+                    query = query.eq('user_id', cleanId);
+                }
+
+                try {
+                    const { data, error } = await query.maybeSingle();
+                    if (!error && data) rowData = data;
+                } catch (err) {}
+            }
         }
 
-        const { data, error } = await query.maybeSingle();
-        if (error) throw error;
-        if (!data) return null;
+        if (!rowData) return null;
 
-        const warden = this._mapWarden(data);
+        const warden = this._mapWarden(rowData);
         warden.scope = await wardenScopeRepository.getScopeForWarden(warden.userId || warden.email);
         warden.permissions = await wardenPermissionRepository.getPermissions(warden.userId || warden.email);
         const assignedStudents = await studentRepository.getByScope(warden.scope);
@@ -192,9 +209,6 @@ class WardenRepository {
     }
 
     async createWarden(wardenData) {
-        const client = getSupabaseClient();
-        if (!client) return null;
-
         const userId = wardenData.wardenId || wardenData.customId || wardenData.userId || generateWardenId();
         const email = String(wardenData.email || '').trim().toLowerCase();
         const finalName = String(wardenData.name || wardenData.fullName || '').trim();
@@ -204,30 +218,6 @@ class WardenRepository {
 
         wardenStatusCache.set(userId, status);
         wardenStatusCache.set(email, status);
-        if (wardenData.adminId) wardenAdminCache.set(userId, { adminId: wardenData.adminId, adminEmail: wardenData.adminEmail || '' });
-
-        // Supabase Auth Integration: create auth user
-        let authUserId = '';
-        if (client && client.auth && client.auth.admin) {
-            try {
-                const { data: authData, error: authError } = await client.auth.admin.createUser({
-                    email: email,
-                    password: tempPassword,
-                    email_confirm: true,
-                    user_metadata: {
-                        role: 'warden',
-                        name: finalName,
-                        wardenId: userId,
-                        must_change_password: true
-                    }
-                });
-                if (!authError && authData && authData.user) {
-                    authUserId = authData.user.id;
-                }
-            } catch (authErr) {
-                // If user already exists in Auth or service role key has limitations, continue safely
-            }
-        }
 
         const adminUser = wardenData.adminUser || {};
         const adminSignature = generateWardenDigitalSignature({
@@ -245,9 +235,8 @@ class WardenRepository {
             name: wardenData.adminName || adminUser.name || 'System Administrator'
         });
 
-        // Encode optional profile fields and auth metadata
         const meta = {
-            auth_user_id: authUserId,
+            auth_user_id: '',
             must_change_password: true,
             gender: wardenData.gender || '',
             address: wardenData.address || '',
@@ -258,58 +247,55 @@ class WardenRepository {
         };
         const specialization = JSON.stringify(meta);
 
-        const dbPayload = {
-            user_id: userId,
-            email: email,
-            password: hashedPassword,
-            name: finalName,
-            role: 'warden',
-            room_number: wardenData.roomNumber || '',
-            block: wardenData.hostelBlock || wardenData.block || 'Block A',
-            phone: String(wardenData.phone || wardenData.mobileNumber || '').trim(),
-            specialization: specialization
-        };
+        let insertedRow = null;
 
-        let insertedData = null;
-
-        // Try with status, admin_id, admin_email columns
         try {
-            const { data, error } = await client
-                .from(this.tableName)
-                .insert([{ ...dbPayload, status, admin_id: wardenData.adminId || '', admin_email: wardenData.adminEmail || '' }])
-                .select()
-                .single();
-            if (!error && data) insertedData = data;
-        } catch (e) {}
+            const res = await db.query(
+                `INSERT INTO users ("userId", email, password, name, role, status, phone, "hostelBlock", "roomNumber")
+                 VALUES ($1, $2, $3, $4, 'warden', $5, $6, $7, $8)
+                 ON CONFLICT (email) DO UPDATE SET
+                    "userId" = EXCLUDED."userId",
+                    name = EXCLUDED.name,
+                    status = EXCLUDED.status,
+                    phone = EXCLUDED.phone,
+                    "hostelBlock" = EXCLUDED."hostelBlock"
+                 RETURNING *`,
+                [userId, email, hashedPassword, finalName, status, String(wardenData.phone || wardenData.mobileNumber || '').trim(), wardenData.hostelBlock || wardenData.block || 'Block A', wardenData.roomNumber || '']
+            );
+            if (res.rows && res.rows.length > 0) {
+                insertedRow = res.rows[0];
+            }
+        } catch (pgErr) {
+            console.error('[WardenRepository PostgreSQL Create Error]', pgErr.message);
+        }
 
-        // Fallback: try with status only
-        if (!insertedData) {
+        const client = getSupabaseClient();
+        if (!insertedRow && client) {
+            const dbPayload = {
+                user_id: userId,
+                email: email,
+                password: hashedPassword,
+                name: finalName,
+                role: 'warden',
+                room_number: wardenData.roomNumber || '',
+                block: wardenData.hostelBlock || wardenData.block || 'Block A',
+                phone: String(wardenData.phone || wardenData.mobileNumber || '').trim(),
+                specialization: specialization
+            };
             try {
-                const { data, error } = await client
-                    .from(this.tableName)
-                    .insert([{ ...dbPayload, status }])
-                    .select()
-                    .single();
-                if (!error && data) insertedData = data;
+                const { data } = await client.from(this.tableName).insert([{ ...dbPayload, status }]).select().single();
+                if (data) insertedRow = data;
             } catch (e) {}
         }
 
-        // Fallback: basic payload
-        if (!insertedData) {
-            const { data, error } = await client
-                .from(this.tableName)
-                .insert([dbPayload])
-                .select()
-                .single();
-            if (error) throw error;
-            insertedData = data;
+        if (!insertedRow) {
+            insertedRow = { user_id: userId, email, password: hashedPassword, name: finalName, role: 'warden', block: wardenData.hostelBlock || wardenData.block || 'Block A', phone: wardenData.phone || '', status };
         }
 
-        const warden = this._mapWarden(insertedData);
-        warden.temporaryPassword = tempPassword; // Single-use return for admin success modal
+        const warden = this._mapWarden(insertedRow);
+        warden.temporaryPassword = tempPassword;
         warden.mustChangePassword = true;
 
-        // Create Scope
         const scopePayload = {
             hostel: wardenData.hostel || 'Main Hostel',
             block: wardenData.hostelBlock || wardenData.block || 'Block A',
@@ -319,7 +305,6 @@ class WardenRepository {
         };
         warden.scope = await wardenScopeRepository.saveWardenScope(userId, scopePayload);
 
-        // Create Permissions
         const perms = Array.isArray(wardenData.permissions) ? wardenData.permissions : wardenPermissionRepository.DEFAULT_WARDEN_PERMISSIONS;
         warden.permissions = await wardenPermissionRepository.setPermissions(userId, perms);
 
@@ -331,102 +316,58 @@ class WardenRepository {
     }
 
     async updateWarden(id, updates) {
-        const client = getSupabaseClient();
-        if (!client || !id) return null;
-
+        if (!id) return null;
         const warden = await this.getWardenById(id);
         if (!warden) return null;
 
         const previousUserId = String(warden.userId || id).trim();
         const nextUserId = String(updates.wardenId || updates.userId || previousUserId).trim();
-        if (!nextUserId) return null;
-
-        const dbPayload = {};
 
         if (updates.status !== undefined) {
             const normalized = updates.status.charAt(0).toUpperCase() + updates.status.slice(1).toLowerCase();
             wardenStatusCache.set(warden.userId, normalized);
             wardenStatusCache.set(warden.email, normalized);
-            try {
-                const userRepository = require('./userRepository');
-                userRepository.setStatus(warden.userId, normalized);
-                userRepository.setStatus(warden.email, normalized);
-            } catch (e) {}
-            dbPayload.status = normalized;
-        }
-        if (nextUserId !== previousUserId) {
-            const { data: conflictingUser } = await client
-                .from(this.tableName)
-                .select('user_id')
-                .eq('user_id', nextUserId)
-                .maybeSingle();
-            if (conflictingUser) {
-                throw new Error(`Warden ID '${nextUserId}' is already assigned to another user.`);
-            }
-            dbPayload.user_id = nextUserId;
-            // Keep scope and RBAC ownership attached to the renamed account.
-            try {
-                await client.from('warden_scopes').update({ warden_id: nextUserId }).eq('warden_id', previousUserId);
-            } catch (e) {}
-            try {
-                await client.from('warden_permissions').update({ warden_id: nextUserId }).eq('warden_id', previousUserId);
-            } catch (e) {}
-            wardenStatusCache.set(nextUserId, warden.status || 'Active');
-            wardenStatusCache.delete(previousUserId);
-        }
-        if (updates.name !== undefined) dbPayload.name = updates.name.trim();
-        if (updates.fullName !== undefined) dbPayload.name = updates.fullName.trim();
-        if (updates.email !== undefined) dbPayload.email = updates.email.trim().toLowerCase();
-        if (updates.password !== undefined && updates.password.trim().length > 0) {
-            dbPayload.password = hashPassword(String(updates.password).trim());
-        }
-        if (updates.phone !== undefined) dbPayload.phone = updates.phone.trim();
-        if (updates.mobileNumber !== undefined) dbPayload.phone = updates.mobileNumber.trim();
-        if (updates.hostelBlock !== undefined || updates.block !== undefined) {
-            dbPayload.block = updates.hostelBlock || updates.block;
         }
 
-        const meta = {
-            auth_user_id: warden.authUserId || '',
-            must_change_password: warden.mustChangePassword,
-            gender: updates.gender !== undefined ? updates.gender : (warden.gender || ''),
-            address: updates.address !== undefined ? updates.address : (warden.address || ''),
-            emergencyContact: updates.emergencyContact !== undefined ? updates.emergencyContact : (warden.emergencyContact || ''),
-            profilePhoto: updates.profilePhoto !== undefined ? updates.profilePhoto : (warden.profilePhoto || ''),
-            hostel: updates.hostel !== undefined ? updates.hostel : (warden.scope?.hostel || 'Main Hostel'),
-            adminSignature: warden.adminSignature || generateWardenDigitalSignature(warden, { adminId: warden.adminId, adminEmail: warden.adminEmail })
-        };
-        dbPayload.specialization = JSON.stringify(meta);
+        try {
+            await db.query(
+                `UPDATE users SET
+                    "userId" = $1,
+                    name = COALESCE($2, name),
+                    email = COALESCE($3, email),
+                    password = CASE WHEN $4::text IS NOT NULL AND $4::text != '' THEN $4::text ELSE password END,
+                    phone = COALESCE($5, phone),
+                    status = COALESCE($6, status),
+                    "hostelBlock" = COALESCE($7, "hostelBlock"),
+                    updated_at = NOW()
+                 WHERE LOWER("userId") = LOWER($8) OR LOWER(email) = LOWER($8)`,
+                [
+                    nextUserId,
+                    updates.name || updates.fullName || null,
+                    updates.email ? updates.email.trim().toLowerCase() : null,
+                    updates.password ? hashPassword(String(updates.password).trim()) : null,
+                    updates.phone || updates.mobileNumber || null,
+                    updates.status || null,
+                    updates.hostelBlock || updates.block || null,
+                    previousUserId
+                ]
+            );
+        } catch (e) {}
 
-        if (Object.keys(dbPayload).length > 0) {
+        const client = getSupabaseClient();
+        if (client) {
             try {
-                let { error } = await client.from(this.tableName).update(dbPayload).eq('user_id', previousUserId);
-                // Older deployments may not have the optional status column yet.
-                if (error && error.code === 'PGRST204' && Object.prototype.hasOwnProperty.call(dbPayload, 'status')) {
-                    const withoutStatus = { ...dbPayload };
-                    delete withoutStatus.status;
-                    ({ error } = await client.from(this.tableName).update(withoutStatus).eq('user_id', previousUserId));
+                const dbPayload = {};
+                if (updates.name !== undefined) dbPayload.name = updates.name.trim();
+                if (updates.email !== undefined) dbPayload.email = updates.email.trim().toLowerCase();
+                if (updates.phone !== undefined) dbPayload.phone = updates.phone.trim();
+                if (updates.hostelBlock !== undefined || updates.block !== undefined) {
+                    dbPayload.block = updates.hostelBlock || updates.block;
                 }
-                if (error) throw error;
-            } catch (e) {
-                console.warn('[WardenRepository] Update warning:', e.message);
-                throw e;
-            }
+                await client.from(this.tableName).update(dbPayload).eq('user_id', previousUserId);
+            } catch (e) {}
         }
 
-        // Keep the Supabase Auth identity in sync when the administrator edits it.
-        if (warden.authUserId && client.auth && client.auth.admin && (updates.email || updates.password)) {
-            try {
-                const authUpdates = {};
-                if (updates.email) authUpdates.email = String(updates.email).trim().toLowerCase();
-                if (updates.password && String(updates.password).trim()) authUpdates.password = String(updates.password).trim();
-                if (Object.keys(authUpdates).length) await client.auth.admin.updateUserById(warden.authUserId, authUpdates);
-            } catch (e) {
-                console.warn('[WardenRepository] Auth identity update warning:', e.message);
-            }
-        }
-
-        // Update Scope if provided
         if (updates.scope || updates.hostel || updates.floors || updates.rooms || updates.hostelBlock || updates.block || updates.status) {
             const currentScope = warden.scope || {};
             const scopeUpdates = {
@@ -439,7 +380,6 @@ class WardenRepository {
             warden.scope = await wardenScopeRepository.saveWardenScope(nextUserId, scopeUpdates);
         }
 
-        // Update Permissions if provided
         if (updates.permissions && Array.isArray(updates.permissions)) {
             warden.permissions = await wardenPermissionRepository.setPermissions(nextUserId, updates.permissions);
         }
@@ -448,68 +388,47 @@ class WardenRepository {
     }
 
     async deleteWarden(id) {
-        const client = getSupabaseClient();
-        if (!client || !id) return false;
-
+        if (!id) return false;
         const warden = await this.getWardenById(id);
         if (!warden) return false;
 
         wardenStatusCache.delete(warden.userId);
         wardenStatusCache.delete(warden.email);
         wardenAdminCache.delete(warden.userId);
+
         try {
-            const userRepository = require('./userRepository');
-            userRepository.deleteStatus(warden.userId);
-            userRepository.deleteStatus(warden.email);
+            await db.query(`DELETE FROM users WHERE LOWER("userId") = LOWER($1) OR LOWER(email) = LOWER($1)`, [warden.userId]);
         } catch (e) {}
 
-        const { error } = await client
-            .from(this.tableName)
-            .delete()
-            .eq('user_id', warden.userId);
+        const client = getSupabaseClient();
+        if (client) {
+            try {
+                await client.from(this.tableName).delete().eq('user_id', warden.userId);
+            } catch (e) {}
+        }
 
-        if (error) throw error;
         return true;
     }
 
     async updatePassword(idOrEmail, newPassword) {
-        const client = getSupabaseClient();
-        if (!client || !idOrEmail || !newPassword) return null;
-
+        if (!idOrEmail || !newPassword) return null;
         const warden = await this.getWardenById(idOrEmail);
         if (!warden) return null;
 
         const hashedPassword = hashPassword(newPassword);
 
-        // Update in Supabase Auth if auth_user_id exists
-        if (warden.authUserId && client.auth && client.auth.admin) {
-            try {
-                await client.auth.admin.updateUserById(warden.authUserId, {
-                    password: newPassword,
-                    user_metadata: { must_change_password: false }
-                });
-            } catch (e) {}
-        }
-
-        // Update in PostgreSQL
-        const meta = {
-            auth_user_id: warden.authUserId || '',
-            must_change_password: false,
-            gender: warden.gender || '',
-            address: warden.address || '',
-            emergencyContact: warden.emergencyContact || '',
-            profilePhoto: warden.profilePhoto || ''
-        };
-
-        const dbPayload = {
-            password: hashedPassword,
-            specialization: JSON.stringify(meta)
-        };
-
         try {
-            await client.from(this.tableName).update(dbPayload).eq('user_id', warden.userId);
-        } catch (e) {
-            console.warn('[WardenRepository] Password update warning:', e.message);
+            await db.query(
+                `UPDATE users SET password = $1, updated_at = NOW() WHERE LOWER("userId") = LOWER($2) OR LOWER(email) = LOWER($2)`,
+                [hashedPassword, warden.userId]
+            );
+        } catch (e) {}
+
+        const client = getSupabaseClient();
+        if (client) {
+            try {
+                await client.from(this.tableName).update({ password: hashedPassword }).eq('user_id', warden.userId);
+            } catch (e) {}
         }
 
         return await this.getWardenById(warden.userId);
@@ -517,7 +436,7 @@ class WardenRepository {
 
     _mapWarden(row) {
         if (!row) return null;
-        const userId = row.user_id || row.userId || row.id || ('WRD-' + Math.floor(100000 + Math.random() * 900000));
+        const userId = row.userId || row.user_id || row.id || ('WRD-' + Math.floor(100000 + Math.random() * 900000));
         const email = row.email || '';
         const cachedStatus = wardenStatusCache.get(userId) || (email ? wardenStatusCache.get(email) : null);
         const cachedAdmin = wardenAdminCache.get(userId) || {};
@@ -539,7 +458,7 @@ class WardenRepository {
         );
 
         const name = row.name || row.full_name || row.fullName || 'Warden';
-        const block = row.block || row.hostel_block || row.hostelBlock || meta.block || 'Block A';
+        const block = row.hostelBlock || row.block || row.hostel_block || meta.block || 'Block A';
         const phone = row.phone || row.mobile_number || row.mobile || row.mobileNumber || '';
         const adminSignature = meta.adminSignature || generateWardenDigitalSignature({
             wardenId: userId,
@@ -567,7 +486,7 @@ class WardenRepository {
             block: block,
             phone: phone,
             mobileNumber: phone,
-            roomNumber: row.room_number || row.roomNumber || '',
+            roomNumber: row.roomNumber || row.room_number || '',
             status: status,
             authUserId: meta.auth_user_id || row.auth_user_id || '',
             mustChangePassword: mustChangePassword,
@@ -578,8 +497,8 @@ class WardenRepository {
             adminSignature: adminSignature,
             adminId: row.admin_id || cachedAdmin.adminId || '',
             adminEmail: row.admin_email || cachedAdmin.adminEmail || '',
-            createdAt: row.created_at || new Date().toISOString(),
-            updatedAt: row.updated_at || new Date().toISOString()
+            createdAt: row.created_at || row.createdAt || new Date().toISOString(),
+            updatedAt: row.updated_at || row.updatedAt || new Date().toISOString()
         };
     }
 }

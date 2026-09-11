@@ -1,4 +1,5 @@
 const { getSupabaseClient } = require('./supabaseClient');
+const db = require('../db');
 
 const WARDEN_PERMISSION_CATALOG = [
     { id: 'view_students', label: 'View Students', group: 'Students', description: 'View student directory and profiles in assigned scope' },
@@ -32,37 +33,78 @@ class WardenPermissionRepository {
     }
 
     async getPermissions(wardenId) {
+        if (!wardenId) return DEFAULT_WARDEN_PERMISSIONS;
+        const cleanId = String(wardenId).trim();
+
+        try {
+            const res = await db.query(
+                `SELECT * FROM warden_permissions WHERE LOWER("wardenId") = LOWER($1) LIMIT 1`,
+                [cleanId]
+            );
+            if (res.rows && res.rows.length > 0) {
+                const row = res.rows[0];
+                const perms = [];
+                if (row.canApproveComplaints) perms.push('view_complaints', 'manage_complaints');
+                if (row.canIssuePasses) perms.push('view_gatepasses', 'approve_gatepasses');
+                if (row.canManageInventory) perms.push('view_inventory', 'manage_inventory');
+                if (row.canManageStudents) perms.push('view_students', 'manage_students');
+                const fullPerms = Array.from(new Set([...perms, ...DEFAULT_WARDEN_PERMISSIONS]));
+                permissionCache.set(cleanId, fullPerms);
+                return fullPerms;
+            }
+        } catch (e) {}
+
         const client = getSupabaseClient();
-        if (!client || !wardenId) {
-            return permissionCache.get(wardenId) || DEFAULT_WARDEN_PERMISSIONS;
+        if (!client) {
+            return permissionCache.get(cleanId) || DEFAULT_WARDEN_PERMISSIONS;
         }
 
         try {
             const { data, error } = await client
                 .from(this.tableName)
                 .select('permissions')
-                .eq('warden_id', String(wardenId).trim())
+                .eq('warden_id', cleanId)
                 .maybeSingle();
 
             if (error || !data) {
-                return permissionCache.get(wardenId) || DEFAULT_WARDEN_PERMISSIONS;
+                return permissionCache.get(cleanId) || DEFAULT_WARDEN_PERMISSIONS;
             }
 
             const perms = Array.isArray(data.permissions) ? data.permissions : DEFAULT_WARDEN_PERMISSIONS;
-            permissionCache.set(wardenId, perms);
+            permissionCache.set(cleanId, perms);
             return perms;
         } catch (err) {
-            return permissionCache.get(wardenId) || DEFAULT_WARDEN_PERMISSIONS;
+            return permissionCache.get(cleanId) || DEFAULT_WARDEN_PERMISSIONS;
         }
     }
 
     async setPermissions(wardenId, permissionsArray) {
-        const client = getSupabaseClient();
         const perms = Array.isArray(permissionsArray) ? permissionsArray : DEFAULT_WARDEN_PERMISSIONS;
         const cleanWardenId = String(wardenId).trim();
 
         permissionCache.set(cleanWardenId, perms);
 
+        try {
+            await db.query(
+                `INSERT INTO warden_permissions ("wardenId", "canApproveComplaints", "canIssuePasses", "canManageInventory", "canManageStudents", "updatedAt")
+                 VALUES ($1, $2, $3, $4, $5, NOW())
+                 ON CONFLICT ("wardenId") DO UPDATE SET
+                    "canApproveComplaints" = EXCLUDED."canApproveComplaints",
+                    "canIssuePasses" = EXCLUDED."canIssuePasses",
+                    "canManageInventory" = EXCLUDED."canManageInventory",
+                    "canManageStudents" = EXCLUDED."canManageStudents",
+                    "updatedAt" = NOW()`,
+                [
+                    cleanWardenId,
+                    perms.includes('manage_complaints') || perms.includes('view_complaints'),
+                    perms.includes('approve_gatepasses') || perms.includes('view_gatepasses'),
+                    perms.includes('manage_inventory') || perms.includes('view_inventory'),
+                    perms.includes('manage_students') || perms.includes('view_students')
+                ]
+            );
+        } catch (e) {}
+
+        const client = getSupabaseClient();
         if (!client) return perms;
 
         try {
@@ -73,20 +115,12 @@ class WardenPermissionRepository {
                 .maybeSingle();
 
             if (existing) {
-                const { error } = await client
-                    .from(this.tableName)
-                    .update({ permissions: perms, updated_at: new Date().toISOString() })
-                    .eq('id', existing.id);
-                if (error) throw error;
+                await client.from(this.tableName).update({ permissions: perms, updated_at: new Date().toISOString() }).eq('id', existing.id);
             } else {
-                const { error } = await client
-                    .from(this.tableName)
-                    .insert([{ warden_id: cleanWardenId, permissions: perms }]);
-                if (error) throw error;
+                await client.from(this.tableName).insert([{ warden_id: cleanWardenId, permissions: perms }]);
             }
             return perms;
         } catch (err) {
-            console.warn('[WardenPermissionRepository] Supabase save fallback to cache:', err.message);
             return perms;
         }
     }

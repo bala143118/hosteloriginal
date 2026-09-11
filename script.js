@@ -757,8 +757,26 @@ function navigateTo(pageId, options = {}) {
         loadTechniciansList().catch((error) => console.error(error));
     }
 
-    if (pageId.startsWith('admin-') || pageId.startsWith('technician-') || pageId === 'warden-dashboard' || pageId === 'warden-students' || pageId === 'security-dashboard') {
+    if (pageId === 'admin-reports') {
+        renderAdminReportsPage();
+    }
+
+    if (pageId === 'student-dashboard') {
+        renderStudentDashboard();
+    }
+
+    if (pageId === 'student-complaints') {
+        renderStudentComplaintsPage();
+    }
+
+    if (pageId.startsWith('admin-') || pageId.startsWith('technician-') || pageId === 'warden-dashboard' || pageId === 'warden-students' || pageId === 'security-dashboard' || pageId === 'student-dashboard' || pageId === 'student-complaints') {
         loadDashboardData().then(() => {
+            if (pageId === 'student-dashboard') {
+                renderStudentDashboard();
+            }
+            if (pageId === 'student-complaints') {
+                renderStudentComplaintsPage();
+            }
             if (pageId === 'warden-dashboard') {
                 renderWardenDashboard();
             }
@@ -766,6 +784,7 @@ function navigateTo(pageId, options = {}) {
             if (pageId === 'security-dashboard') renderSecurityDashboard();
             if (pageId === 'admin-gate-passes') renderAdminGatePassLogsPage();
             if (pageId === 'admin-laundry') renderAdminLaundryRequests();
+            if (pageId === 'admin-reports') renderAdminReportsPage();
         }).catch((error) => console.error(error));
     }
 
@@ -914,13 +933,24 @@ function isGatePassForCurrentUser(entry) {
     const currentEmail = normalizeText(currentUser.email);
     const currentName = normalizeText(currentUser.name);
     const currentRegistrationNumber = normalizeText(currentUser.registrationNumber);
-    const currentUserId = normalizeText(currentUser.userId);
+    const currentUserId = normalizeText(currentUser.userId || currentUser.id);
 
-    return (
-        (currentEmail && normalizeText(entry.email) === currentEmail)
-        || (currentName && normalizeText(entry.student) === currentName)
+    return Boolean(
+        (currentEmail && (
+            normalizeText(entry.email) === currentEmail ||
+            normalizeText(entry.studentEmail) === currentEmail ||
+            normalizeText(entry.userEmail) === currentEmail
+        ))
+        || (currentName && (
+            normalizeText(entry.student) === currentName ||
+            normalizeText(entry.studentName) === currentName ||
+            normalizeText(entry.name) === currentName
+        ))
         || (currentRegistrationNumber && normalizeText(entry.registrationNumber) === currentRegistrationNumber)
-        || (currentUserId && normalizeText(entry.userId) === currentUserId)
+        || (currentUserId && (
+            normalizeText(entry.userId) === currentUserId ||
+            normalizeText(entry.studentId) === currentUserId
+        ))
     );
 }
 
@@ -943,7 +973,11 @@ function isComplaintForCurrentUser(entry) {
             normalizeText(entry.userId) === currentUserId
         ))
         || (currentRegistrationNumber && normalizeText(entry.registrationNumber) === currentRegistrationNumber)
-        || (currentName && (normalizeText(entry.studentName) === currentName || normalizeText(entry.student) === currentName))
+        || (currentName && (
+            normalizeText(entry.studentName) === currentName ||
+            normalizeText(entry.student) === currentName ||
+            normalizeText(entry.name) === currentName
+        ))
     );
 
     return Boolean(belongsToStudent);
@@ -1721,10 +1755,15 @@ async function fetchStudentNotifications() {
     }
 }
 
+let announcementSocketRetryCount = 0;
+
 function setupAnnouncementSocket() {
     try {
         if (typeof io !== 'function') {
-            console.warn('Socket.IO client not loaded. Live announcements will not update automatically.');
+            if (announcementSocketRetryCount < 5) {
+                announcementSocketRetryCount++;
+                setTimeout(setupAnnouncementSocket, 1000);
+            }
             return;
         }
         const socketUrl = (typeof API_BASE_URL !== 'undefined' && API_BASE_URL) ? API_BASE_URL : window.location.origin;
@@ -1732,8 +1771,11 @@ function setupAnnouncementSocket() {
             path: '/socket.io',
             transports: ['polling', 'websocket'],
             upgrade: true,
-            reconnectionAttempts: 10,
-            timeout: 10000,
+            extraHeaders: {
+                'ngrok-skip-browser-warning': 'true'
+            },
+            reconnectionAttempts: 5,
+            timeout: 8000,
             autoConnect: true
         });
         announcementSocket.on('connect', () => {
@@ -2018,7 +2060,9 @@ function renderStudentGatePassQr() {
         if (idEl) {
             idEl.innerHTML = `ID: <span class="font-mono font-bold">${pass.id || 'N/A'}</span>${pass.certificateId ? ` • <span class="text-xs text-primary font-mono">${pass.certificateId}</span>` : ''}`;
         }
-        if (datesEl) datesEl.textContent = `Valid: ${formatGatePassDate(pass.gateDate)} ➔ ${formatGatePassDate(pass.returnDate)}`;
+        const depDate = pass.departureDate || pass.gateDate;
+        const retDate = pass.expectedReturnDate || pass.returnDate;
+        if (datesEl) datesEl.textContent = `Valid: ${formatGatePassDate(depDate)} ➔ ${formatGatePassDate(retDate)}`;
         if (roomEl) roomEl.textContent = `${pass.hostelBlock || 'Block A'} • Room ${pass.roomNumber || 'N/A'}`;
         if (sessionEl) sessionEl.textContent = pass.session || 'General';
         if (wardenEl) wardenEl.textContent = pass.approvedBy ? `Approved by ${pass.approvedBy}` : 'Warden Review Pending';
@@ -2537,20 +2581,46 @@ async function downloadGatePassPdf(gatePassId) {
     }
 }
 
+function trackStudentComplaint(complaintId) {
+    if (!complaintId) return;
+    navigateTo('complaint-tracking');
+    setTimeout(() => {
+        if (typeof searchComplaint === 'function') {
+            searchComplaint(complaintId);
+        }
+    }, 150);
+}
+
 function renderComplaintRow(complaint) {
     const icon = getCategoryIcon(complaint.category);
     const statusClass = getStatusBadgeClass(complaint.status);
     const priorityClass = getPriorityBadgeClass(complaint.priority);
+    const loc = `${complaint.block || complaint.hostelBlock || 'Hostel'} · Room ${complaint.roomNumber || '—'}`;
+    const title = complaint.title || complaint.issue || complaint.description || 'Maintenance Issue';
 
     return `
-        <tr class="table-row">
-            <td class="px-6 py-4 text-sm font-medium">${complaint.id || 'N/A'}</td>
-            <td class="px-6 py-4 text-sm">${complaint.student || 'Anonymous'}</td>
-            <td class="px-6 py-4 text-sm">${complaint.roomNumber || 'N/A'}</td>
-            <td class="px-6 py-4 text-sm"><span class="flex items-center gap-2"><i class="fa-solid ${icon} text-primary"></i> ${complaint.category || 'General'}</span></td>
-            <td class="px-6 py-4"><span class="${priorityClass} px-2.5 py-1 rounded-full text-xs font-medium">${complaint.priority || 'Medium'}</span></td>
-            <td class="px-6 py-4"><span class="${statusClass} px-2.5 py-1 rounded-full text-xs font-medium">${complaint.status || 'Pending'}</span></td>
-            <td class="px-6 py-4 text-sm text-text-secondary">${formatComplaintDate(complaint.createdAt)}</td>
+        <tr class="table-row hover:bg-surface-alt/40 transition-colors">
+            <td class="px-6 py-4 text-xs font-mono font-bold text-primary">#${escapeHtml(complaint.id || 'N/A')}</td>
+            <td class="px-6 py-4">
+                <div class="flex items-center gap-2.5">
+                    <div class="w-8 h-8 rounded-lg bg-primary/10 text-primary flex items-center justify-center text-sm shrink-0">
+                        <i class="fa-solid ${icon}"></i>
+                    </div>
+                    <div>
+                        <p class="text-xs font-bold text-text line-clamp-1">${escapeHtml(title)}</p>
+                        <p class="text-[11px] text-text-secondary">${escapeHtml(complaint.category || 'General')}</p>
+                    </div>
+                </div>
+            </td>
+            <td class="px-6 py-4 text-xs text-text font-medium whitespace-nowrap">${escapeHtml(loc)}</td>
+            <td class="px-6 py-4 whitespace-nowrap"><span class="${priorityClass} px-2.5 py-1 rounded-full text-[11px] font-semibold">${escapeHtml(complaint.priority || 'Medium')}</span></td>
+            <td class="px-6 py-4 whitespace-nowrap"><span class="${statusClass} px-2.5 py-1 rounded-full text-[11px] font-semibold">${escapeHtml(complaint.status || 'Pending')}</span></td>
+            <td class="px-6 py-4 text-xs text-text-secondary whitespace-nowrap">${formatComplaintDate(complaint.createdAt)}</td>
+            <td class="px-6 py-4 whitespace-nowrap">
+                <button onclick="trackStudentComplaint('${escapeHtml(complaint.id)}')" class="px-3 py-1.5 rounded-lg border border-primary/30 text-primary hover:bg-primary hover:text-white transition-all text-xs font-semibold flex items-center gap-1.5 shadow-xs">
+                    <i class="fa-solid fa-location-crosshairs text-[10px]"></i> Track
+                </button>
+            </td>
         </tr>
     `;
 }
@@ -2559,16 +2629,335 @@ function updateStudentRecentComplaints(complaints) {
     const tableBody = document.getElementById('studentRecentComplaintsTableBody');
     if (!tableBody) return;
 
-    const visibleComplaints = complaints
+    const visibleComplaints = (complaints || [])
         .filter((complaint) => normalizeText(currentUser?.role) === 'student' ? isComplaintForCurrentUser(complaint) : true)
-        .slice(0, 4);
+        .slice(0, 5);
 
     if (!visibleComplaints.length) {
-        tableBody.innerHTML = '<tr><td colspan="6" class="px-6 py-8 text-sm text-text-secondary text-center">No complaints yet. Submit your first complaint to see it here.</td></tr>';
+        tableBody.innerHTML = `
+            <tr>
+                <td colspan="7" class="px-6 py-10 text-center text-text-secondary">
+                    <div class="flex flex-col items-center justify-center space-y-2">
+                        <div class="w-12 h-12 rounded-2xl bg-surface-alt border border-border flex items-center justify-center text-text-muted">
+                            <i class="fa-solid fa-clipboard-check text-xl"></i>
+                        </div>
+                        <p class="font-semibold text-sm text-text">No Complaints Raised Yet</p>
+                        <p class="text-xs text-text-secondary max-w-xs">Have an issue in your room or hostel? Submit a quick complaint to get it resolved.</p>
+                        <button onclick="navigateTo('complaint-registration')" class="mt-2 px-4 py-2 rounded-xl btn-primary text-white text-xs font-semibold shadow-sm">
+                            <i class="fa-solid fa-plus mr-1"></i> Report Issue
+                        </button>
+                    </div>
+                </td>
+            </tr>
+        `;
         return;
     }
 
     tableBody.innerHTML = visibleComplaints.map(renderComplaintRow).join('');
+}
+
+function renderStudentGatePassesTable() {
+    const tbody = document.getElementById('studentGatePassesTableBody');
+    if (!tbody) return;
+
+    const myPasses = (latestGatePasses || []).filter(isGatePassForCurrentUser);
+
+    if (!myPasses.length) {
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="7" class="px-6 py-10 text-center text-text-secondary">
+                    <div class="flex flex-col items-center justify-center space-y-2">
+                        <div class="w-12 h-12 rounded-2xl bg-surface-alt border border-border flex items-center justify-center text-text-muted">
+                            <i class="fa-solid fa-passport text-xl"></i>
+                        </div>
+                        <p class="font-semibold text-sm text-text">No Gate Passes Applied Yet</p>
+                        <p class="text-xs text-text-secondary max-w-xs">Need to leave campus for home or an event? Submit an online gate pass for approval.</p>
+                        <button onclick="navigateTo('gate-pass')" class="mt-2 px-4 py-2 rounded-xl btn-primary text-white text-xs font-semibold shadow-sm">
+                            <i class="fa-solid fa-plus mr-1"></i> Apply Gate Pass
+                        </button>
+                    </div>
+                </td>
+            </tr>
+        `;
+        return;
+    }
+
+    tbody.innerHTML = myPasses.map((pass) => {
+        const rawStatus = String(pass.status || 'PENDING_WARDEN').toUpperCase();
+        const isPendingWarden = ['PENDING_WARDEN', 'PENDING_ADMIN', 'REQUESTED', 'PENDING'].includes(rawStatus);
+        const isSecurityPending = rawStatus === 'SECURITY_PENDING' || rawStatus === 'QR GENERATED' || rawStatus === 'APPROVED';
+        const isOutside = rawStatus === 'OUTSIDE' || rawStatus === 'OUT';
+        const isOutsideNotReturned = rawStatus === 'OUTSIDE_NOT_RETURNED';
+        const isCompleted = rawStatus === 'COMPLETED';
+        const isRejected = rawStatus.includes('REJECTED');
+
+        let badgeClass = 'bg-amber-100 text-amber-800 border border-amber-200';
+        let badgeText = 'Pending Warden Approval';
+
+        if (isSecurityPending) {
+            badgeClass = 'bg-emerald/10 text-emerald border border-emerald/20';
+            badgeText = 'Approved • Ready for Exit';
+        } else if (isOutside) {
+            badgeClass = 'bg-blue-100 text-blue-800 border border-blue-200';
+            badgeText = 'Outside Campus';
+        } else if (isOutsideNotReturned) {
+            badgeClass = 'bg-amber-100 text-amber-900 border border-amber-300';
+            badgeText = '⚠️ Outside — Not Returned';
+        } else if (isCompleted) {
+            badgeClass = 'bg-emerald-100 text-emerald-800 border border-emerald-200';
+            badgeText = '✅ Completed & Returned';
+        } else if (isRejected) {
+            badgeClass = 'bg-danger/10 text-danger border border-danger/20';
+            badgeText = '❌ Rejected';
+        }
+
+        const depDate = pass.departureDate || pass.gateDate;
+        const retDate = pass.expectedReturnDate || pass.returnDate;
+        const dateRangeStr = `${formatGatePassDate(depDate)} ➔ ${formatGatePassDate(retDate)}`;
+        const authBy = pass.approvedBy ? `By ${escapeHtml(pass.approvedBy)}` : 'Warden Review Pending';
+
+        return `
+            <tr class="table-row hover:bg-surface-alt/40 transition-colors">
+                <td class="px-6 py-4 whitespace-nowrap">
+                    <span class="font-mono font-bold text-xs text-primary">#${escapeHtml(pass.id || 'N/A')}</span>
+                    ${pass.certificateId ? `<span class="block text-[10px] font-mono text-text-muted">${escapeHtml(pass.certificateId)}</span>` : ''}
+                </td>
+                <td class="px-6 py-4 whitespace-nowrap">
+                    <span class="text-xs font-semibold text-text flex items-center gap-1.5">
+                        <i class="fa-regular fa-calendar text-primary text-[11px]"></i> ${dateRangeStr}
+                    </span>
+                </td>
+                <td class="px-6 py-4">
+                    <p class="text-xs text-text font-medium max-w-[200px] truncate" title="${escapeHtml(pass.reason || '')}">
+                        ${escapeHtml(pass.reason || 'General Leave')}
+                    </p>
+                </td>
+                <td class="px-6 py-4 whitespace-nowrap text-xs text-text-secondary">
+                    <span class="px-2 py-0.5 rounded-md bg-surface-alt border border-border text-[11px] font-medium">${escapeHtml(pass.session || 'General')}</span>
+                </td>
+                <td class="px-6 py-4 whitespace-nowrap">
+                    <span class="px-2.5 py-1 rounded-full text-xs font-bold ${badgeClass}">
+                        ${badgeText}
+                    </span>
+                </td>
+                <td class="px-6 py-4 whitespace-nowrap text-xs text-text-secondary">
+                    ${authBy}
+                </td>
+                <td class="px-6 py-4 whitespace-nowrap">
+                    <div class="flex items-center gap-2">
+                        <button onclick="viewGatePassModal('${escapeHtml(pass.id)}')" class="px-2.5 py-1.5 rounded-lg border border-border bg-surface-alt hover:bg-surface text-text text-xs font-medium transition-all flex items-center gap-1 shadow-xs" title="View details & QR">
+                            <i class="fa-solid fa-eye text-text-secondary"></i> View
+                        </button>
+                        <button onclick="downloadGatePassPdf('${escapeHtml(pass.id)}')" class="px-2.5 py-1.5 rounded-lg bg-primary/10 text-primary hover:bg-primary hover:text-white transition-all text-xs font-semibold flex items-center gap-1 shadow-xs" title="Download Official PDF">
+                            <i class="fa-solid fa-file-pdf"></i> PDF
+                        </button>
+                    </div>
+                </td>
+            </tr>
+        `;
+    }).join('');
+}
+
+function viewGatePassModal(gatePassId) {
+    const pass = (latestGatePasses || []).find((p) => String(p.id) === String(gatePassId));
+    if (!pass) return;
+    const depDate = pass.departureDate || pass.gateDate;
+    const retDate = pass.expectedReturnDate || pass.returnDate;
+    const modalHtml = `
+        <div class="p-6 space-y-4 max-w-md mx-auto">
+            <div class="text-center pb-3 border-b border-border">
+                <div class="w-12 h-12 rounded-2xl bg-primary/10 text-primary flex items-center justify-center mx-auto text-xl mb-2">
+                    <i class="fa-solid fa-passport"></i>
+                </div>
+                <h3 class="font-bold text-lg text-text">Gate Pass #${escapeHtml(pass.id)}</h3>
+                <span class="inline-block mt-1 px-3 py-1 rounded-full text-xs font-bold ${getGatePassStatusClass(pass.status)}">${escapeHtml(pass.status || 'Pending')}</span>
+            </div>
+            <div class="space-y-2.5 text-xs">
+                <div class="flex justify-between py-1 border-b border-border/50">
+                    <span class="text-text-secondary">Student Name:</span>
+                    <span class="font-bold text-text">${escapeHtml(pass.student || pass.studentName || currentUser?.name || '—')}</span>
+                </div>
+                <div class="flex justify-between py-1 border-b border-border/50">
+                    <span class="text-text-secondary">Reg Number:</span>
+                    <span class="font-mono font-bold text-text">${escapeHtml(pass.registrationNumber || '—')}</span>
+                </div>
+                <div class="flex justify-between py-1 border-b border-border/50">
+                    <span class="text-text-secondary">Hostel & Room:</span>
+                    <span class="font-bold text-text">${escapeHtml(pass.hostelBlock || 'Block A')} / Room ${escapeHtml(pass.roomNumber || '—')}</span>
+                </div>
+                <div class="flex justify-between py-1 border-b border-border/50">
+                    <span class="text-text-secondary">Departure:</span>
+                    <span class="font-bold text-text">${formatGatePassDate(depDate)}</span>
+                </div>
+                <div class="flex justify-between py-1 border-b border-border/50">
+                    <span class="text-text-secondary">Expected Return:</span>
+                    <span class="font-bold text-text">${formatGatePassDate(retDate)}</span>
+                </div>
+                <div class="flex justify-between py-1 border-b border-border/50">
+                    <span class="text-text-secondary">Purpose / Reason:</span>
+                    <span class="font-medium text-text text-right max-w-[200px] truncate" title="${escapeHtml(pass.reason || '')}">${escapeHtml(pass.reason || 'General Leave')}</span>
+                </div>
+                <div class="flex justify-between py-1 border-b border-border/50">
+                    <span class="text-text-secondary">Approved By:</span>
+                    <span class="font-bold text-text">${escapeHtml(pass.approvedBy || 'Pending Review')}</span>
+                </div>
+            </div>
+            ${pass.qrImage ? `
+                <div class="pt-2 text-center">
+                    <div class="w-36 h-36 mx-auto bg-white p-2 rounded-xl border border-border shadow-sm flex items-center justify-center">
+                        <img src="${pass.qrImage}" alt="Gate Pass QR" class="w-full h-full object-contain">
+                    </div>
+                    <p class="text-[10px] text-text-muted mt-1.5">Official Gate Pass QR for Security Check</p>
+                </div>
+            ` : ''}
+            <div class="flex gap-2 pt-2">
+                <button onclick="downloadGatePassPdf('${escapeHtml(pass.id)}')" class="flex-1 py-2.5 rounded-xl btn-primary text-white text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm">
+                    <i class="fa-solid fa-file-pdf"></i> Download PDF
+                </button>
+            </div>
+        </div>
+    `;
+    showModal('Gate Pass Details', modalHtml);
+}
+
+function renderStudentDashboard() {
+    if (!currentUser || normalizeText(currentUser.role) !== 'student') return;
+
+    const welcomeText = document.getElementById('studentWelcomeText');
+    if (welcomeText) {
+        welcomeText.textContent = `Welcome back, ${currentUser.name || 'Student'}! Here is your overview.`;
+    }
+
+    const studentComplaints = (latestComplaints || []).filter(isComplaintForCurrentUser);
+    const summary = getStudentDashboardSummary(studentComplaints);
+    updateStudentDashboardStats(summary);
+
+    updateStudentRecentComplaints(studentComplaints);
+    renderStudentGatePassQr();
+    renderStudentGatePassesTable();
+    if (typeof renderDashboardAnnouncements === 'function') {
+        renderDashboardAnnouncements();
+    }
+}
+
+let studentComplaintFilter = 'all';
+let studentComplaintSearchQuery = '';
+
+function setStudentComplaintFilter(filter) {
+    studentComplaintFilter = filter;
+    document.querySelectorAll('#studentComplaintStatusTabs .student-status-tab').forEach((btn) => {
+        if (btn.dataset.status === filter) {
+            btn.className = 'student-status-tab px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-primary text-white transition-all';
+        } else {
+            btn.className = 'student-status-tab px-3.5 py-1.5 rounded-xl text-xs font-medium border border-border text-text-secondary hover:text-text hover:bg-surface-alt transition-all';
+        }
+    });
+    renderStudentComplaintsPage();
+}
+
+function handleStudentComplaintSearch(query) {
+    studentComplaintSearchQuery = String(query || '').trim().toLowerCase();
+    renderStudentComplaintsPage();
+}
+
+function renderStudentComplaintsPage() {
+    if (!currentUser || normalizeText(currentUser.role) !== 'student') return;
+
+    const tbody = document.getElementById('studentAllComplaintsTableBody');
+    if (!tbody) return;
+
+    const allMyComplaints = (latestComplaints || []).filter(isComplaintForCurrentUser);
+
+    const countAll = allMyComplaints.length;
+    const countPending = allMyComplaints.filter((c) => ['pending', 'new', 'requested'].includes(normalizeText(c.status))).length;
+    const countInProgress = allMyComplaints.filter((c) => ['in progress', 'in-progress', 'assigned'].includes(normalizeText(c.status))).length;
+    const countResolved = allMyComplaints.filter((c) => ['completed', 'resolved', 'closed'].includes(normalizeText(c.status))).length;
+
+    const setTabCount = (id, val) => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = val;
+    };
+    setTabCount('countStudentAllComplaints', countAll);
+    setTabCount('countStudentPendingComplaints', countPending);
+    setTabCount('countStudentInProgressComplaints', countInProgress);
+    setTabCount('countStudentResolvedComplaints', countResolved);
+
+    let filtered = allMyComplaints.filter((complaint) => {
+        const s = normalizeText(complaint.status);
+        if (studentComplaintFilter === 'pending') return ['pending', 'new', 'requested'].includes(s);
+        if (studentComplaintFilter === 'in-progress') return ['in progress', 'in-progress', 'assigned'].includes(s);
+        if (studentComplaintFilter === 'resolved') return ['completed', 'resolved', 'closed'].includes(s);
+        return true;
+    });
+
+    if (studentComplaintSearchQuery) {
+        filtered = filtered.filter((complaint) => {
+            const matchId = String(complaint.id || '').toLowerCase().includes(studentComplaintSearchQuery);
+            const matchTitle = String(complaint.title || '').toLowerCase().includes(studentComplaintSearchQuery);
+            const matchDesc = String(complaint.description || '').toLowerCase().includes(studentComplaintSearchQuery);
+            const matchCat = String(complaint.category || '').toLowerCase().includes(studentComplaintSearchQuery);
+            const matchRoom = String(complaint.roomNumber || '').toLowerCase().includes(studentComplaintSearchQuery);
+            const matchStatus = String(complaint.status || '').toLowerCase().includes(studentComplaintSearchQuery);
+            return matchId || matchTitle || matchDesc || matchCat || matchRoom || matchStatus;
+        });
+    }
+
+    if (!filtered.length) {
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="8" class="px-6 py-12 text-center text-text-secondary">
+                    <div class="flex flex-col items-center justify-center space-y-2">
+                        <div class="w-12 h-12 rounded-2xl bg-surface-alt border border-border flex items-center justify-center text-text-muted">
+                            <i class="fa-solid fa-clipboard-question text-xl"></i>
+                        </div>
+                        <p class="font-semibold text-sm text-text">No Complaints Found</p>
+                        <p class="text-xs text-text-secondary max-w-sm">No complaints match your current status filter or search criteria.</p>
+                    </div>
+                </td>
+            </tr>
+        `;
+        return;
+    }
+
+    tbody.innerHTML = filtered.map((complaint) => {
+        const icon = getCategoryIcon(complaint.category);
+        const statusClass = getStatusBadgeClass(complaint.status);
+        const priorityClass = getPriorityBadgeClass(complaint.priority);
+        const loc = `${complaint.block || complaint.hostelBlock || 'Hostel'} · Room ${complaint.roomNumber || '—'}`;
+        const title = complaint.title || complaint.issue || complaint.description || 'Maintenance Issue';
+        const assigned = complaint.assignedTo || complaint.technicianName || 'Pending Assignment';
+
+        return `
+            <tr class="table-row hover:bg-surface-alt/40 transition-colors">
+                <td class="px-6 py-4 whitespace-nowrap">
+                    <span class="font-mono font-bold text-xs text-primary">#${escapeHtml(complaint.id || 'N/A')}</span>
+                </td>
+                <td class="px-6 py-4">
+                    <div class="flex items-center gap-3">
+                        <div class="w-9 h-9 rounded-xl bg-primary/10 text-primary flex items-center justify-center text-sm shrink-0">
+                            <i class="fa-solid ${icon}"></i>
+                        </div>
+                        <div>
+                            <p class="text-xs font-bold text-text line-clamp-1">${escapeHtml(title)}</p>
+                            <p class="text-[11px] text-text-secondary line-clamp-1">${escapeHtml(complaint.category || 'General')}${complaint.description ? ` · ${escapeHtml(complaint.description)}` : ''}</p>
+                        </div>
+                    </div>
+                </td>
+                <td class="px-6 py-4 whitespace-nowrap text-xs font-medium text-text">${escapeHtml(loc)}</td>
+                <td class="px-6 py-4 whitespace-nowrap"><span class="${priorityClass} px-2.5 py-1 rounded-full text-[11px] font-semibold">${escapeHtml(complaint.priority || 'Medium')}</span></td>
+                <td class="px-6 py-4 whitespace-nowrap"><span class="${statusClass} px-2.5 py-1 rounded-full text-[11px] font-semibold">${escapeHtml(complaint.status || 'Pending')}</span></td>
+                <td class="px-6 py-4 whitespace-nowrap text-xs text-text-secondary">
+                    <span class="flex items-center gap-1.5"><i class="fa-solid fa-user-gear text-text-muted text-[10px]"></i> ${escapeHtml(assigned)}</span>
+                </td>
+                <td class="px-6 py-4 whitespace-nowrap text-xs text-text-secondary">${formatComplaintDate(complaint.createdAt)}</td>
+                <td class="px-6 py-4 whitespace-nowrap">
+                    <button onclick="trackStudentComplaint('${escapeHtml(complaint.id)}')" class="px-3 py-1.5 rounded-lg border border-primary/30 text-primary hover:bg-primary hover:text-white transition-all text-xs font-semibold flex items-center gap-1.5 shadow-xs">
+                        <i class="fa-solid fa-location-crosshairs text-[10px]"></i> Track
+                    </button>
+                </td>
+            </tr>
+        `;
+    }).join('');
 }
 
 function populateTechnicianDropdown(technicianList = []) {
@@ -5336,6 +5725,7 @@ async function handleComplaintSubmit(e) {
         }
 
         showToast(`Complaint submitted successfully! Ticket ID: ${data.id}`, 'success');
+        latestComplaints = [data, ...latestComplaints.filter((c) => c.id !== data.id)];
         form.reset();
         clearComplaintPhotoSelection();
         prepareComplaintForm();
@@ -5514,7 +5904,7 @@ async function handleLaundrySubmit(e) {
     }
 }
 
-async function approveGatePass(gatePassId, status, actorRole = 'Admin') {
+async function approveGatePass(gatePassId, status, actorRole = 'Admin', remarks = '') {
     if (!gatePassId) return;
     showLoading();
     try {
@@ -5526,7 +5916,9 @@ async function approveGatePass(gatePassId, status, actorRole = 'Admin') {
                 role: currentUser?.role || actorRole.toLowerCase(),
                 approvedBy: currentUser?.name || actorRole,
                 wardenEmail: currentUser?.email || '',
-                wardenId: currentUser?.userId || currentUser?.id || ''
+                wardenId: currentUser?.userId || currentUser?.id || '',
+                wardenName: currentUser?.name || actorRole,
+                remarks
             })
         });
         const data = await parseJsonResponse(response);
@@ -5542,6 +5934,7 @@ async function approveGatePass(gatePassId, status, actorRole = 'Admin') {
         const activePage = getActivePageId();
         if (activePage === 'warden-dashboard') {
             renderWardenDashboard();
+            renderWardenReturnSchedule(latestGatePasses);
         } else if (activePage === 'security-dashboard') {
             renderSecurityDashboard();
         } else {
@@ -6670,6 +7063,10 @@ async function loadDashboardData() {
         if (isStudent) {
             updateStudentDashboardStats(studentDashboard || { total: 0, pending: 0, inProgress: 0, completed: 0 });
             updateStudentRecentComplaints(studentDashboard ? studentDashboard.complaints : []);
+            renderStudentDashboard();
+            if (getActivePageId() === 'student-complaints') {
+                renderStudentComplaintsPage();
+            }
         } else {
             updateStudentDashboardStats(summary);
         }
@@ -6891,7 +7288,7 @@ function handleSecurityPassSearch(query) {
 
 function calculateGatePassReturnInfo(pass) {
     const todayStr = new Date().toISOString().split('T')[0];
-    const returnStr = String(pass.returnDate || '').slice(0, 10);
+    const returnStr = String(pass.expectedReturnDate || pass.returnDate || '').slice(0, 10);
     const rawStatus = String(pass.status || 'REQUESTED').toUpperCase();
 
     if (rawStatus === 'COMPLETED') {
@@ -7119,11 +7516,11 @@ function renderWardenReturnSchedule(passes) {
                         <div class="flex flex-wrap items-center gap-3 text-xs">
                             <div class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-surface-alt border border-border/80">
                                 <i class="fa-solid fa-arrow-right-from-bracket text-text-muted"></i>
-                                <span class="text-text-secondary font-medium">Out: <strong>${formatGatePassDate(pass.gateDate)}</strong></span>
+                                <span class="text-text-secondary font-medium">Out: <strong>${formatGatePassDate(pass.departureDate || pass.gateDate)}</strong></span>
                             </div>
                             <div class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg ${returnInfo.isToday ? 'bg-emerald/10 text-emerald font-bold border border-emerald/30' : returnInfo.isOverdue ? 'bg-danger/10 text-danger font-bold border border-danger/30' : 'bg-surface-alt border border-border/80'}">
                                 <i class="fa-solid fa-calendar-check ${returnInfo.isToday ? 'text-emerald' : returnInfo.isOverdue ? 'text-danger' : 'text-primary'}"></i>
-                                <span>Expected Return: <strong>${formatGatePassDate(pass.returnDate)}</strong></span>
+                                <span>Expected Return: <strong>${formatGatePassDate(pass.expectedReturnDate || pass.returnDate)}</strong></span>
                             </div>
                         </div>
                         <p class="text-xs text-text-muted italic bg-surface-alt/70 px-2.5 py-1 rounded-lg">
@@ -7133,8 +7530,11 @@ function renderWardenReturnSchedule(passes) {
                 </div>
                 <div class="flex flex-wrap items-center gap-2 shrink-0 self-end lg:self-center">
                     ${isPending ? `
-                        <button onclick="updateGatePassStatus('${pass.id}', 'Approved')" class="px-3.5 py-2 rounded-xl bg-emerald hover:bg-emerald/90 text-white text-xs font-semibold shadow-xs transition-all flex items-center gap-1.5">
+                        <button onclick="updateGatePassStatus('${pass.id}', 'Approved')" class="px-3.5 py-2 rounded-xl bg-emerald hover:bg-emerald/90 text-white text-xs font-semibold shadow-xs transition-all flex items-center gap-1.5" title="Approve Gate Pass">
                             <i class="fa-solid fa-check"></i> Approve Departure
+                        </button>
+                        <button onclick="promptRejectGatePass('${pass.id}')" class="px-3.5 py-2 rounded-xl bg-danger/10 hover:bg-danger hover:text-white text-danger text-xs font-semibold border border-danger/20 transition-all flex items-center gap-1.5" title="Reject Gate Pass">
+                            <i class="fa-solid fa-xmark"></i> Reject
                         </button>
                     ` : ''}
                     ${(rawStatus === 'OUTSIDE' || rawStatus === 'OUT' || rawStatus === 'RETURNED' || rawStatus === 'OUTSIDE_NOT_RETURNED') && !pass.wardenVerified ? `
@@ -7165,6 +7565,43 @@ function renderWardenReturnSchedule(passes) {
     }
 
     list.innerHTML = html;
+}
+
+function promptRejectGatePass(passId) {
+    if (!passId) return;
+    const pass = (latestGatePasses || []).find((p) => String(p.id).toLowerCase() === String(passId).toLowerCase()) || { id: passId };
+    showModal('Reject Gate Pass', `
+        <div class="p-6 space-y-4 max-w-md mx-auto">
+            <div class="text-center pb-2">
+                <div class="w-12 h-12 rounded-2xl bg-danger/10 text-danger flex items-center justify-center mx-auto text-xl mb-2">
+                    <i class="fa-solid fa-ban"></i>
+                </div>
+                <h3 class="font-bold text-lg text-text">Reject Gate Pass</h3>
+                <p class="text-xs text-text-secondary mt-1 font-mono">Pass ID: ${escapeHtml(pass.id || passId)}</p>
+                ${pass.student ? `<p class="text-xs text-text mt-1">Student: <strong>${escapeHtml(pass.student)}</strong></p>` : ''}
+                <p class="text-xs text-text-secondary mt-2">Are you sure you want to reject this campus departure request?</p>
+            </div>
+            <div>
+                <label class="block text-xs font-semibold text-text mb-1.5">Reason for Rejection (Optional)</label>
+                <textarea id="wardenGatePassRejectReason" rows="3" placeholder="E.g., Disciplinary hold, exams scheduled, parental permission required..." class="w-full px-3 py-2 text-xs rounded-xl bg-surface-alt border border-border text-text focus:outline-none focus:border-danger"></textarea>
+            </div>
+            <div class="flex gap-2.5 pt-2">
+                <button onclick="closeModal()" class="flex-1 py-2.5 rounded-xl border border-border text-text text-xs font-medium hover:bg-surface-alt transition-all">
+                    Cancel
+                </button>
+                <button onclick="confirmRejectGatePass('${escapeHtml(pass.id || passId)}')" class="flex-1 py-2.5 rounded-xl bg-danger text-white text-xs font-bold hover:bg-danger/90 transition-all flex items-center justify-center gap-1.5 shadow-sm">
+                    <i class="fa-solid fa-xmark"></i> Reject Pass
+                </button>
+            </div>
+        </div>
+    `);
+}
+
+async function confirmRejectGatePass(passId) {
+    const reasonInput = document.getElementById('wardenGatePassRejectReason');
+    const remarks = reasonInput ? reasonInput.value.trim() : '';
+    closeModal();
+    return approveGatePass(passId, 'Rejected', 'Warden', remarks || 'Declined by Warden');
 }
 
 function viewGatePassDetailsModal(passId) {
@@ -7655,14 +8092,107 @@ function handleSecurityQuickLookup() {
 
 async function handleQrScannedToken(rawToken, role = 'warden') {
     let token = String(rawToken || '').trim();
-    // Extract token from full URLs (e.g. /qr/TOKEN or /gatepass/verify/TOKEN)
-    const qrMatch = token.match(/\/qr\/([^\s/?#]+)/i) || token.match(/\/verify\/([^\s/?#]+)/i);
-    if (qrMatch && qrMatch[1]) token = decodeURIComponent(qrMatch[1]);
-
     const resultBox = document.getElementById('qrScanVerificationResultBox');
     if (!resultBox) return;
 
     resultBox.classList.remove('hidden');
+
+    // 1. Check if scanned token is a Warden Digital Credential (URL, JSON, or ID)
+    let wardenId = null;
+    let isWardenScan = false;
+    let isTechScan = false;
+
+    if (token.startsWith('{') && token.endsWith('}')) {
+        try {
+            const parsed = JSON.parse(token);
+            if (parsed.doc === 'WARDEN_DIGITAL_ID' || (parsed.system === 'HostelFix' && parsed.id)) {
+                wardenId = parsed.id;
+                isWardenScan = true;
+            }
+        } catch (e) {}
+    }
+
+    if (!isWardenScan && (token.includes('verify-warden') || token.includes('/verify/warden'))) {
+        isWardenScan = true;
+        const match = token.match(/[?&]id=([^&#]+)/i);
+        if (match) wardenId = decodeURIComponent(match[1]);
+    } else if (token.includes('verify-technician') || token.includes('verify-tech')) {
+        isTechScan = true;
+        const match = token.match(/[?&]id=([^&#]+)/i);
+        if (match) wardenId = decodeURIComponent(match[1]);
+    }
+
+    if (isWardenScan && wardenId) {
+        resultBox.innerHTML = `
+            <div class="p-6 rounded-2xl bg-surface border border-border text-center space-y-2">
+                <i class="fa-solid fa-circle-notch fa-spin text-2xl text-indigo-600"></i>
+                <p class="text-xs font-semibold text-text">Validating Warden Smart Credential (${escapeHtml(wardenId)})...</p>
+            </div>
+        `;
+        try {
+            const res = await apiRequest(`/api/admin/wardens/${encodeURIComponent(wardenId)}/digital-id`);
+            const data = await parseJsonResponse(res);
+            if (res.ok && data && data.warden) {
+                const w = data.warden;
+                const d = data.digitalId || {};
+                resultBox.innerHTML = `
+                    <div class="p-5 rounded-2xl bg-surface border-2 border-emerald-500/60 space-y-4 shadow-xl">
+                        <div class="flex items-center justify-between pb-3 border-b border-border">
+                            <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800">
+                                <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                                VERIFIED ACTIVE WARDEN
+                            </span>
+                            <span class="font-mono text-xs text-text-secondary font-bold">${escapeHtml(w.userId || wardenId)}</span>
+                        </div>
+                        <div class="flex items-center gap-4">
+                            <div class="w-14 h-14 rounded-2xl bg-indigo-600 text-white flex items-center justify-center text-2xl font-extrabold shadow-md shrink-0">
+                                ${(w.name || 'W').charAt(0).toUpperCase()}
+                            </div>
+                            <div class="min-w-0 flex-1">
+                                <h4 class="font-bold text-base text-text truncate">${escapeHtml(w.name)}</h4>
+                                <p class="text-xs font-semibold text-indigo-600">Residential Warden &amp; Housing Officer</p>
+                                <p class="text-[11px] text-text-muted mt-0.5">${escapeHtml(w.hostelBlock || 'Block A')} • ${escapeHtml(w.email || '')}</p>
+                            </div>
+                        </div>
+                        <div class="p-3 rounded-xl bg-surface-alt border border-border/70 text-xs font-mono text-text-secondary space-y-1">
+                            <div>Cert ID: <strong class="text-text">${escapeHtml(d.certificateId || '')}</strong></div>
+                            <div>Endorsed: <span class="text-indigo-600 font-semibold">${escapeHtml(d.signedBy || 'System Administrator')}</span></div>
+                        </div>
+                        <div class="flex gap-2">
+                            <a href="/verify-warden?id=${encodeURIComponent(wardenId)}" target="_blank" class="flex-1 py-2.5 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold text-center shadow-md transition-all">
+                                <i class="fa-solid fa-arrow-up-right-from-square mr-1"></i> Open Official Certificate
+                            </a>
+                        </div>
+                    </div>
+                `;
+                return;
+            }
+        } catch (e) {}
+    }
+
+    if (isTechScan && wardenId) {
+        resultBox.innerHTML = `
+            <div class="p-5 rounded-2xl bg-surface border-2 border-indigo-500/60 space-y-4 shadow-xl">
+                <div class="flex items-center justify-between pb-3 border-b border-border">
+                    <span class="px-3 py-1 rounded-full text-xs font-bold bg-indigo-100 text-indigo-800">VERIFIED MAINTENANCE STAFF</span>
+                    <span class="font-mono text-xs text-text-secondary font-bold">${escapeHtml(wardenId)}</span>
+                </div>
+                <div class="flex gap-2">
+                    <a href="/verify-technician?id=${encodeURIComponent(wardenId)}" target="_blank" class="flex-1 py-2.5 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold text-center shadow-md transition-all">
+                        <i class="fa-solid fa-arrow-up-right-from-square mr-1"></i> Open Staff Certificate
+                    </a>
+                </div>
+            </div>
+        `;
+        return;
+    }
+
+    // 2. Extract gate pass token from URLs (e.g. /qr/TOKEN or /gatepass/verify/TOKEN or /verify/TOKEN)
+    const qrMatch = token.match(/\/(?:qr|gatepass\/verify|verify-gatepass|verify)\/([^\s/?#]+)/i);
+    if (qrMatch && qrMatch[1]) token = decodeURIComponent(qrMatch[1]);
+    const tokenParamMatch = token.match(/[?&]token=([^&#]+)/i);
+    if (tokenParamMatch && tokenParamMatch[1]) token = decodeURIComponent(tokenParamMatch[1]);
+
     resultBox.innerHTML = `
         <div class="p-6 rounded-2xl bg-surface border border-border text-center space-y-2">
             <i class="fa-solid fa-circle-notch fa-spin text-2xl text-indigo-600"></i>
@@ -7781,15 +8311,19 @@ function renderScanPreviewCard(pass, role, token) {
                 </div>
             ` : isSecurity ? `
                 <div class="space-y-2 pt-2 border-t border-border">
-                    ${String(pass.status || '').toUpperCase() === 'OUTSIDE' || String(pass.status || '').toUpperCase() === 'OUT' || (pass.securityVerified && !pass.wardenVerified) ? `
-                        <button onclick="submitSecurityVerificationAction('${token}', 'APPROVE')" class="w-full py-3.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm shadow-md flex items-center justify-center gap-2 transition-all transform hover:-translate-y-0.5">
+                    ${isCompleted ? `
+                        <div class="p-3.5 rounded-xl bg-purple-50 text-purple-800 text-xs font-bold text-center border border-purple-200 flex items-center justify-center gap-2">
+                            <i class="fa-solid fa-circle-check text-emerald-600 text-base"></i> Gate Pass Already Completed (Student Safely Returned)
+                        </div>
+                    ` : (String(pass.status || '').toUpperCase() === 'OUTSIDE' || String(pass.status || '').toUpperCase() === 'OUT') ? `
+                        <button onclick="submitSecurityVerificationAction('${token}', 'APPROVE', '', this)" class="w-full py-3.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm shadow-md flex items-center justify-center gap-2 transition-all transform hover:-translate-y-0.5">
                             <i class="fa-solid fa-plane-arrival text-base"></i> ACCEPT RETURN (Student Entering Gate)
                         </button>
                         <button onclick="promptSecurityRejection('${token}')" class="w-full py-2.5 rounded-xl bg-rose-600/10 hover:bg-rose-600 hover:text-white text-rose-600 font-semibold text-xs transition-all flex items-center justify-center gap-2">
                             <i class="fa-solid fa-ban"></i> REJECT RETURN
                         </button>
                     ` : `
-                        <button onclick="submitSecurityVerificationAction('${token}', 'APPROVE')" class="w-full py-3.5 rounded-xl bg-emerald hover:bg-emerald/90 text-white font-bold text-sm shadow-md flex items-center justify-center gap-2 transition-all transform hover:-translate-y-0.5">
+                        <button onclick="submitSecurityVerificationAction('${token}', 'APPROVE', '', this)" class="w-full py-3.5 rounded-xl bg-emerald hover:bg-emerald/90 text-white font-bold text-sm shadow-md flex items-center justify-center gap-2 transition-all transform hover:-translate-y-0.5">
                             <i class="fa-solid fa-door-open text-base"></i> APPROVE EXIT (Student Crossing Gate)
                         </button>
                         <button onclick="promptSecurityRejection('${token}')" class="w-full py-2.5 rounded-xl bg-rose-600/10 hover:bg-rose-600 hover:text-white text-rose-600 font-semibold text-xs transition-all flex items-center justify-center gap-2">
@@ -7831,7 +8365,14 @@ async function executeWardenVerification(tokenOrId, action, reason = '') {
     submitWardenVerificationAction(tokenOrId, action, reason);
 }
 
-async function submitSecurityVerificationAction(token, action, reason = '') {
+async function submitSecurityVerificationAction(token, action, reason = '', btnElement = null) {
+    const btn = btnElement || document.getElementById('btnAction-' + token) || document.getElementById('btnExit-' + token) || document.getElementById('btnReturn-' + token);
+    if (btn) {
+        btn.disabled = true;
+        btn.classList.add('opacity-50', 'pointer-events-none');
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1"></i> Processing...';
+    }
+
     try {
         const res = await apiRequest('/api/gatepass/security/verify', {
             method: 'POST',
@@ -7848,16 +8389,36 @@ async function submitSecurityVerificationAction(token, action, reason = '') {
         });
         const data = await parseJsonResponse(res);
         if (!res.ok) {
+            if (btn) {
+                btn.disabled = false;
+                btn.classList.remove('opacity-50', 'pointer-events-none');
+                btn.innerHTML = action === 'APPROVE' ? 'Accept' : 'Reject';
+            }
             alert('Error: ' + (data.message || data.error || 'Security verification failed.'));
             return;
+        }
+
+        // Immediately update local cache with updated pass
+        if (data.gatePass) {
+            const pId = data.gatePass.id || token;
+            const targetIdx = latestGatePasses.findIndex(p => p.id === pId || p.qrToken === token);
+            if (targetIdx !== -1) {
+                latestGatePasses[targetIdx] = { ...latestGatePasses[targetIdx], ...data.gatePass };
+            }
         }
 
         playChimeSound();
         showToast(data.message || 'Security verification updated successfully in database!', action === 'APPROVE' ? 'success' : 'warning');
         closeModal();
+        renderSecurityDashboard();
         await loadDashboardData();
         renderSecurityDashboard();
     } catch (err) {
+        if (btn) {
+            btn.disabled = false;
+            btn.classList.remove('opacity-50', 'pointer-events-none');
+            btn.innerHTML = action === 'APPROVE' ? 'Accept' : 'Reject';
+        }
         console.error('Security verification error:', err);
         showToast('Network error processing security verification: ' + (err.message || 'Server unreachable'), 'error');
     }
@@ -8170,22 +8731,27 @@ function renderSecurityDashboard() {
 
     const pendingList = latestGatePasses.filter(p => {
         const raw = String(p.status || '').toUpperCase();
-        return (raw === 'SECURITY_PENDING' || raw === 'APPROVED' || raw === 'QR GENERATED') && !p.securityVerified;
+        return !['COMPLETED', 'RETURNED', 'SECURITY_REJECTED', 'REJECTED', 'OUT', 'OUTSIDE'].includes(raw) && (raw === 'SECURITY_PENDING' || raw === 'APPROVED' || raw === 'QR GENERATED');
     });
 
     const outsideList = latestGatePasses.filter(p => {
         const raw = String(p.status || '').toUpperCase();
-        return raw === 'OUTSIDE' || raw === 'OUT' || (p.securityVerified && !p.wardenVerified);
+        return !['COMPLETED', 'RETURNED', 'SECURITY_REJECTED', 'REJECTED'].includes(raw) && (raw === 'OUTSIDE' || raw === 'OUT');
     });
 
     const todayExits = latestGatePasses.filter(p => {
         const exit = p.exitTime || p.outTime;
-        return exit && exit.startsWith(todayStr) && p.securityVerified;
+        return exit && exit.startsWith(todayStr);
     });
 
     const rejectedList = latestGatePasses.filter(p => {
         const raw = String(p.status || '').toUpperCase();
-        return raw === 'SECURITY_REJECTED';
+        return raw === 'SECURITY_REJECTED' || raw === 'REJECTED';
+    });
+
+    const completedList = latestGatePasses.filter(p => {
+        const raw = String(p.status || '').toUpperCase();
+        return raw === 'COMPLETED' || raw === 'RETURNED';
     });
 
     if (pendingEl) pendingEl.textContent = pendingList.length;
@@ -8207,7 +8773,7 @@ function renderSecurityDashboard() {
     } else if (currentSecurityFilter === 'rejected') {
         filtered = rejectedList;
     } else if (currentSecurityFilter === 'completed') {
-        filtered = latestGatePasses.filter(p => String(p.status).toUpperCase() === 'COMPLETED');
+        filtered = completedList;
     }
 
     if (!filtered.length) {
@@ -8217,27 +8783,27 @@ function renderSecurityDashboard() {
 
     list.innerHTML = filtered.map((pass) => {
         const rawStatus = String(pass.status || 'SECURITY_PENDING').toUpperCase();
-        const isReadyForExit = (rawStatus === 'SECURITY_PENDING' || rawStatus === 'APPROVED' || rawStatus === 'QR GENERATED') && !pass.securityVerified;
-        const isOut = rawStatus === 'OUTSIDE' || rawStatus === 'OUT' || (pass.securityVerified && !pass.wardenVerified);
-        const isCompleted = rawStatus === 'COMPLETED';
-        const isSecRejected = rawStatus === 'SECURITY_REJECTED';
+        const isCompleted = rawStatus === 'COMPLETED' || rawStatus === 'RETURNED';
+        const isSecRejected = rawStatus === 'SECURITY_REJECTED' || rawStatus === 'REJECTED';
+        const isOut = !isCompleted && !isSecRejected && (rawStatus === 'OUTSIDE' || rawStatus === 'OUT');
+        const isReadyForExit = !isCompleted && !isSecRejected && !isOut && (rawStatus === 'SECURITY_PENDING' || rawStatus === 'APPROVED' || rawStatus === 'QR GENERATED');
         const returnDue = !pass.returnDate || String(pass.returnDate).slice(0, 10) <= todayStr;
 
         let badgeClass = 'bg-amber-100 text-amber-800 border border-amber-200';
         let badgeLabel = pass.status || 'Pending';
 
-        if (isReadyForExit) {
-            badgeClass = 'bg-emerald/10 text-emerald border border-emerald/20';
-            badgeLabel = 'Ready for Exit';
-        } else if (isOut) {
-            badgeClass = 'bg-blue-100 text-blue-800 border border-blue-200';
-            badgeLabel = 'Outside (Gate Crossed)';
-        } else if (isCompleted) {
+        if (isCompleted) {
             badgeClass = 'bg-purple-100 text-purple-800 border border-purple-200';
             badgeLabel = 'Completed';
         } else if (isSecRejected) {
             badgeClass = 'bg-danger/10 text-danger border border-danger/20';
             badgeLabel = 'Exit Rejected';
+        } else if (isOut) {
+            badgeClass = 'bg-blue-100 text-blue-800 border border-blue-200';
+            badgeLabel = 'Outside (Gate Crossed)';
+        } else if (isReadyForExit) {
+            badgeClass = 'bg-emerald/10 text-emerald border border-emerald/20';
+            badgeLabel = 'Ready for Exit';
         }
 
         return `
@@ -8263,19 +8829,20 @@ function renderSecurityDashboard() {
                         <p class="text-[11px] font-mono text-text-muted">
                             Pass ID: <strong class="text-primary">${pass.id}</strong> ${pass.certificateId ? `• Cert: <strong class="text-emerald-600">${pass.certificateId}</strong>` : ''}
                             ${pass.exitTime ? ` • <span class="text-blue-600 font-sans font-medium">Exit: ${new Date(pass.exitTime).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</span>` : ''}
+                            ${pass.hostelArrivalTime ? ` • <span class="text-emerald-600 font-sans font-medium">Returned: ${new Date(pass.hostelArrivalTime).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</span>` : ''}
                         </p>
                     </div>
                 </div>
                 <div class="flex flex-wrap items-center gap-2 shrink-0">
                     ${isReadyForExit ? `
-                        <button onclick="submitSecurityVerificationAction('${pass.id}', 'APPROVE')" class="px-4 py-2 rounded-xl bg-emerald hover:bg-emerald/90 text-white text-xs font-bold shadow-xs transition-all flex items-center gap-1.5">
+                        <button id="btnExit-${pass.id}" onclick="submitSecurityVerificationAction('${pass.id}', 'APPROVE', '', this)" class="px-4 py-2 rounded-xl bg-emerald hover:bg-emerald/90 text-white text-xs font-bold shadow-xs transition-all flex items-center gap-1.5">
                             <i class="fa-solid fa-door-open"></i> Approve Exit
                         </button>
                         <button onclick="promptSecurityRejection('${pass.id}')" class="px-3 py-2 rounded-xl bg-rose-600/10 hover:bg-rose-600 hover:text-white text-rose-600 text-xs font-semibold transition-all">
                             Reject
                         </button>
                     ` : isOut ? `
-                        ${returnDue ? `<button onclick="submitSecurityVerificationAction('${pass.id}', 'APPROVE')" class="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-xs transition-all flex items-center gap-1.5"><i class="fa-solid fa-plane-arrival"></i> Accept Return</button>` : `<span class="px-3 py-2 rounded-xl bg-surface-alt border border-border text-text-secondary text-xs font-semibold">Return on ${formatGatePassDate(pass.returnDate)}</span>`}
+                        ${returnDue ? `<button id="btnReturn-${pass.id}" onclick="submitSecurityVerificationAction('${pass.id}', 'APPROVE', '', this)" class="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-xs transition-all flex items-center gap-1.5"><i class="fa-solid fa-plane-arrival"></i> Accept Return</button>` : `<span class="px-3 py-2 rounded-xl bg-surface-alt border border-border text-text-secondary text-xs font-semibold">Return on ${formatGatePassDate(pass.returnDate)}</span>`}
                         <button onclick="promptSecurityRejection('${pass.id}')" class="px-3 py-2 rounded-xl bg-rose-600/10 hover:bg-rose-600 hover:text-white text-rose-600 text-xs font-semibold transition-all">
                             Reject
                         </button>
@@ -8479,6 +9046,148 @@ function exportGatePassesCsv() {
     link.click();
     document.body.removeChild(link);
     showToast('Gate pass movement logs exported as CSV successfully.', 'success');
+}
+
+function openGatePassExportModal() {
+    const modal = document.getElementById('gatePassExportModal');
+    if (modal) {
+        modal.classList.add('active');
+    }
+}
+
+function closeGatePassExportModal() {
+    const modal = document.getElementById('gatePassExportModal');
+    if (modal) {
+        modal.classList.remove('active');
+    }
+}
+
+function confirmGatePassExport(format) {
+    closeGatePassExportModal();
+    if (format === 'pdf') {
+        exportGatePassesPdf();
+    } else if (format === 'csv') {
+        exportGatePassesCsv();
+    }
+}
+
+function exportGatePassesPdf() {
+    if (!latestGatePasses.length) {
+        showToast('No gate pass movement logs available to export.', 'warning');
+        return;
+    }
+
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+        showToast('Please allow popups to download/print the PDF report.', 'warning');
+        return;
+    }
+
+    const generatedDate = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    const totalPasses = latestGatePasses.length;
+    const pendingCount = latestGatePasses.filter(p => (p.status || '').toLowerCase() === 'pending').length;
+    const outCount = latestGatePasses.filter(p => (p.status || '').toLowerCase() === 'approved' || (p.status || '').toLowerCase() === 'out').length;
+    const completedCount = latestGatePasses.filter(p => (p.status || '').toLowerCase() === 'completed').length;
+
+    const rowsHtml = latestGatePasses.map((p, idx) => `
+        <tr>
+            <td style="padding: 10px; border-bottom: 1px solid #E2E8F0; text-align: center; font-size: 11px;">${idx + 1}</td>
+            <td style="padding: 10px; border-bottom: 1px solid #E2E8F0; font-family: monospace; font-size: 11px; font-weight: bold; color: #2563EB;">${p.id || ''}</td>
+            <td style="padding: 10px; border-bottom: 1px solid #E2E8F0; font-size: 12px; font-weight: bold;">${p.student || 'Student'}</td>
+            <td style="padding: 10px; border-bottom: 1px solid #E2E8F0; font-size: 11px;">${p.hostelBlock || ''} - ${p.roomNumber || ''}</td>
+            <td style="padding: 10px; border-bottom: 1px solid #E2E8F0; font-size: 11px;">${p.gateDate || '-'}</td>
+            <td style="padding: 10px; border-bottom: 1px solid #E2E8F0; font-size: 11px;">${p.returnDate || '-'}</td>
+            <td style="padding: 10px; border-bottom: 1px solid #E2E8F0; font-size: 11px;">${p.reason || '-'}</td>
+            <td style="padding: 10px; border-bottom: 1px solid #E2E8F0; font-size: 11px; font-weight: bold; color: ${p.status === 'Completed' ? '#059669' : p.status === 'Pending' ? '#D97706' : '#2563EB'};">${p.status || 'Approved'}</td>
+        </tr>
+    `).join('');
+
+    const htmlContent = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Gate Pass Movement Logs Report - Sri Shakthi HostelFix</title>
+        <style>
+            body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; color: #0F172A; margin: 0; padding: 30px; background: #fff; }
+            .header { display: flex; align-items: center; justify-content: space-between; border-bottom: 3px solid #2563EB; padding-bottom: 15px; margin-bottom: 25px; }
+            .logo-section { display: flex; align-items: center; gap: 15px; }
+            .logo-img { width: 60px; height: 60px; object-fit: contain; }
+            .title-area h1 { margin: 0; font-size: 18px; color: #0F172A; font-weight: 800; letter-spacing: -0.5px; }
+            .title-area p { margin: 2px 0 0 0; font-size: 12px; color: #64748B; font-weight: 600; }
+            .badge-official { background: #EEF2FF; color: #1D4ED8; border: 1px solid #C7D2FE; padding: 6px 12px; border-radius: 8px; font-size: 10px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; }
+            .meta-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 25px; background: #F8FAFC; border: 1px solid #E2E8F0; padding: 15px; border-radius: 12px; }
+            .meta-card { text-align: center; }
+            .meta-card .label { font-size: 10px; text-transform: uppercase; color: #64748B; font-weight: bold; margin-bottom: 4px; }
+            .meta-card .value { font-size: 18px; font-weight: 800; color: #0F172A; }
+            table { width: 100%; border-collapse: collapse; margin-bottom: 40px; }
+            th { background: #F1F5F9; color: #475569; font-size: 10px; text-transform: uppercase; font-weight: 700; padding: 10px; border-bottom: 2px solid #E2E8F0; text-align: left; }
+            .signatures { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-top: 60px; text-align: center; }
+            .sig-line { border-top: 1px dashed #94A3B8; padding-top: 8px; font-size: 11px; font-weight: bold; color: #475569; }
+            @media print {
+                body { padding: 0; }
+                @page { size: A4 landscape; margin: 1.5cm; }
+            }
+        </style>
+    </head>
+    <body>
+        <div class="header">
+            <div class="logo-section">
+                <img src="${window.location.origin}/public/siet-logo.png" class="logo-img" alt="SIET Logo">
+                <div class="title-area">
+                    <h1>SRI SHAKTHI INSTITUTE OF ENGINEERING & TECHNOLOGY</h1>
+                    <p>Smart HostelFix — Official Student Gate Pass & Movement Register</p>
+                </div>
+            </div>
+            <div class="badge-official">Official Campus Record</div>
+        </div>
+
+        <div class="meta-grid">
+            <div class="meta-card"><div class="label">Total Records</div><div class="value">${totalPasses}</div></div>
+            <div class="meta-card"><div class="label">Pending Approval</div><div class="value" style="color:#D97706;">${pendingCount}</div></div>
+            <div class="meta-card"><div class="label">Currently Out</div><div class="value" style="color:#2563EB;">${outCount}</div></div>
+            <div class="meta-card"><div class="label">Completed</div><div class="value" style="color:#059669;">${completedCount}</div></div>
+        </div>
+
+        <table>
+            <thead>
+                <tr>
+                    <th style="text-align:center;">#</th>
+                    <th>Pass ID</th>
+                    <th>Student Name</th>
+                    <th>Block & Room</th>
+                    <th>Out Date</th>
+                    <th>Return Date</th>
+                    <th>Reason</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${rowsHtml}
+            </tbody>
+        </table>
+
+        <p style="font-size: 10px; color: #94A3B8; margin-bottom: 40px;">Report Generated: ${generatedDate} • System Verification ID: HF-GP-${Date.now()}</p>
+
+        <div class="signatures">
+            <div class="sig-line">Hostel Warden Signature</div>
+            <div class="sig-line">Security In-Charge Signature</div>
+            <div class="sig-line">Chief Warden / Principal</div>
+        </div>
+
+        <script>
+            window.onload = function() {
+                setTimeout(function() {
+                    window.print();
+                }, 500);
+            };
+        </script>
+    </body>
+    </html>
+    `;
+
+    printWindow.document.write(htmlContent);
+    printWindow.document.close();
+    showToast('Gate pass PDF report generated. Print or Save as PDF.', 'success');
 }
 
 function handleSecurityScanSubmit(targetStatus) {
@@ -11925,7 +12634,13 @@ async function handleAdminStudentSubmit(event) {
 function initRealtimeComplaintSync() {
     if (typeof io === 'undefined') return;
     try {
-        const socket = announcementSocket || io({ transports: ['polling', 'websocket'], upgrade: true });
+        const socket = announcementSocket || io({
+            transports: ['polling', 'websocket'],
+            upgrade: true,
+            extraHeaders: {
+                'ngrok-skip-browser-warning': 'true'
+            }
+        });
 
         socket.on('new-complaint', (complaint) => {
             console.log('[Realtime] New complaint received:', complaint);
@@ -11982,6 +12697,623 @@ if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', initRealtimeComplaintSync);
 } else {
     initRealtimeComplaintSync();
+}
+
+// ============================================================================
+// ADMIN REPORTS & ANALYTICS MODULE
+// ============================================================================
+
+let reportSelectedYear = new Date().getFullYear();
+let reportSelectedMonth = 'all'; // 'all' or 1..12
+let reportFilteredComplaints = [];
+
+const REPORT_MONTH_NAMES_LIST = [
+    'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December'
+];
+
+const REPORT_MONTH_SHORT_NAMES = [
+    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+];
+
+function getReportPeriodTitle() {
+    if (reportSelectedMonth === 'all') {
+        return `Entire Year ${reportSelectedYear}`;
+    }
+    const idx = parseInt(reportSelectedMonth, 10) - 1;
+    return `${REPORT_MONTH_NAMES_LIST[idx] || 'Month'} ${reportSelectedYear}`;
+}
+
+function onReportYearChange(year) {
+    reportSelectedYear = parseInt(year, 10) || new Date().getFullYear();
+    renderAdminReportsPage();
+}
+
+function selectReportMonth(month) {
+    reportSelectedMonth = month;
+    renderAdminReportsPage();
+}
+
+function renderAdminReportsPage() {
+    const complaints = Array.isArray(latestComplaints) ? latestComplaints : [];
+
+    // 1. Discover available years from complaints, ensure current year is included
+    const yearsSet = new Set([new Date().getFullYear()]);
+    complaints.forEach((c) => {
+        if (c.createdAt) {
+            const d = new Date(c.createdAt);
+            if (!isNaN(d.getTime())) {
+                yearsSet.add(d.getFullYear());
+            }
+        }
+    });
+    const availableYears = Array.from(yearsSet).sort((a, b) => b - a);
+
+    // 2. Populate Year Dropdown
+    const yearSelect = document.getElementById('reportYearSelect');
+    if (yearSelect) {
+        yearSelect.innerHTML = availableYears.map(y => `<option value="${y}" ${y === reportSelectedYear ? 'selected' : ''}>${y}</option>`).join('');
+    }
+
+    // 3. Calculate monthly complaint counts for this year
+    const yearComplaints = complaints.filter(c => {
+        if (!c.createdAt) return false;
+        const d = new Date(c.createdAt);
+        return !isNaN(d.getTime()) && d.getFullYear() === reportSelectedYear;
+    });
+
+    const monthCounts = {};
+    for (let m = 1; m <= 12; m++) {
+        monthCounts[m] = 0;
+    }
+    yearComplaints.forEach(c => {
+        const m = new Date(c.createdAt).getMonth() + 1;
+        if (monthCounts[m] !== undefined) {
+            monthCounts[m]++;
+        }
+    });
+
+    // 4. Render Month Selection Buttons
+    const monthContainer = document.getElementById('reportMonthButtonsContainer');
+    if (monthContainer) {
+        const isAllActive = reportSelectedMonth === 'all';
+        let buttonsHtml = `
+            <button type="button" onclick="selectReportMonth('all')" class="px-3 py-2 rounded-xl text-xs font-semibold flex items-center justify-between gap-1.5 transition-all cursor-pointer ${
+                isAllActive
+                    ? 'bg-primary text-white shadow-sm ring-2 ring-primary/30'
+                    : 'border border-border bg-surface text-text-secondary hover:text-text hover:bg-surface-alt'
+            }">
+                <span>All Months</span>
+                <span class="text-[10px] px-1.5 py-0.5 rounded-full ${isAllActive ? 'bg-white/20 text-white' : 'bg-surface-alt text-text-secondary'} font-bold">${yearComplaints.length}</span>
+            </button>
+        `;
+
+        for (let m = 1; m <= 12; m++) {
+            const isActive = reportSelectedMonth === m;
+            const count = monthCounts[m] || 0;
+            const shortName = REPORT_MONTH_SHORT_NAMES[m - 1];
+            buttonsHtml += `
+                <button type="button" onclick="selectReportMonth(${m})" class="px-2.5 py-2 rounded-xl text-xs font-semibold flex items-center justify-between gap-1 transition-all cursor-pointer ${
+                    isActive
+                        ? 'bg-primary text-white shadow-sm ring-2 ring-primary/30'
+                        : 'border border-border bg-surface text-text-secondary hover:text-text hover:bg-surface-alt'
+                }">
+                    <span>${shortName}</span>
+                    <span class="text-[10px] px-1.5 py-0.5 rounded-full ${isActive ? 'bg-white/20 text-white' : (count > 0 ? 'bg-primary/10 text-primary font-bold' : 'bg-surface-alt text-text-muted')}">${count}</span>
+                </button>
+            `;
+        }
+        monthContainer.innerHTML = buttonsHtml;
+    }
+
+    // 5. Filter complaints for current period
+    if (reportSelectedMonth === 'all') {
+        reportFilteredComplaints = yearComplaints.slice();
+    } else {
+        const targetMonth = parseInt(reportSelectedMonth, 10);
+        reportFilteredComplaints = yearComplaints.filter(c => {
+            const m = new Date(c.createdAt).getMonth() + 1;
+            return m === targetMonth;
+        });
+    }
+
+    const periodTitle = getReportPeriodTitle();
+
+    // 6. Update UI Text & Tags
+    const periodBadge = document.getElementById('reportPeriodBadge');
+    if (periodBadge) periodBadge.textContent = `Period: ${periodTitle}`;
+
+    const countText = document.getElementById('reportComplaintsCountText');
+    if (countText) countText.textContent = reportFilteredComplaints.length;
+
+    const previewPeriodName = document.getElementById('reportPreviewPeriodName');
+    if (previewPeriodName) previewPeriodName.textContent = periodTitle;
+
+    const previewCount = document.getElementById('reportPreviewCount');
+    if (previewCount) previewCount.textContent = reportFilteredComplaints.length;
+
+    const card1Tag = document.getElementById('reportCard1Tag');
+    if (card1Tag) card1Tag.textContent = periodTitle;
+
+    const card2Tag = document.getElementById('reportCard2Tag');
+    if (card2Tag) card2Tag.textContent = periodTitle;
+
+    const card3Tag = document.getElementById('reportCard3Tag');
+    if (card3Tag) card3Tag.textContent = periodTitle;
+
+    const card1Title = document.getElementById('reportCard1Title');
+    if (card1Title) {
+        card1Title.textContent = reportSelectedMonth === 'all' ? 'Annual Maintenance Summary' : 'Monthly Maintenance Summary';
+    }
+
+    const card1Desc = document.getElementById('reportCard1Desc');
+    if (card1Desc) card1Desc.textContent = `Overview of all complaints, resolutions, priority levels, and turnaround status for ${periodTitle}.`;
+
+    const card2Desc = document.getElementById('reportCard2Desc');
+    if (card2Desc) card2Desc.textContent = `Detailed performance metrics for all technicians for ${periodTitle}.`;
+
+    const card3Desc = document.getElementById('reportCard3Desc');
+    if (card3Desc) card3Desc.textContent = `Breakdown of complaints by category and block for ${periodTitle}.`;
+
+    // 7. Compute Period Metric Cards
+    const total = reportFilteredComplaints.length;
+    const resolved = reportFilteredComplaints.filter(c => ['resolved', 'closed', 'verified'].includes(String(c.status || '').toLowerCase())).length;
+    const inProgress = reportFilteredComplaints.filter(c => ['in progress', 'assigned', 'in-progress'].includes(String(c.status || '').toLowerCase())).length;
+    const pending = reportFilteredComplaints.filter(c => ['pending', 'submitted', 'open'].includes(String(c.status || '').toLowerCase())).length;
+    const rate = total > 0 ? Math.round((resolved / total) * 100) : 0;
+
+    const statTotal = document.getElementById('reportStatTotal');
+    if (statTotal) statTotal.textContent = total;
+
+    const statResolved = document.getElementById('reportStatResolved');
+    if (statResolved) statResolved.textContent = resolved;
+
+    const statPending = document.getElementById('reportStatPending');
+    if (statPending) statPending.textContent = pending + inProgress;
+
+    const statRate = document.getElementById('reportStatRate');
+    if (statRate) statRate.textContent = `${rate}%`;
+
+    // 8. Populate Preview Table
+    populateReportPreviewTable(reportFilteredComplaints);
+}
+
+function populateReportPreviewTable(complaintsList) {
+    const tbody = document.getElementById('reportPreviewTableBody');
+    const emptyDiv = document.getElementById('reportPreviewEmpty');
+    if (!tbody) return;
+
+    if (!complaintsList || complaintsList.length === 0) {
+        tbody.innerHTML = '';
+        if (emptyDiv) emptyDiv.classList.remove('hidden');
+        return;
+    }
+
+    if (emptyDiv) emptyDiv.classList.add('hidden');
+
+    tbody.innerHTML = complaintsList.map(c => {
+        const dateStr = c.createdAt ? new Date(c.createdAt).toLocaleDateString('en-GB') : '-';
+        const status = c.status || 'Pending';
+        const normStatus = status.toLowerCase();
+        
+        let statusBadge = 'bg-amber-500/10 text-amber-600 border border-amber-500/20';
+        if (['resolved', 'closed', 'verified'].includes(normStatus)) {
+            statusBadge = 'bg-emerald/10 text-emerald border border-emerald/20';
+        } else if (['in progress', 'assigned', 'in-progress'].includes(normStatus)) {
+            statusBadge = 'bg-blue-500/10 text-blue-600 border border-blue-500/20';
+        }
+
+        let priorityBadge = 'bg-slate-100 text-slate-700';
+        const pNorm = String(c.priority || '').toLowerCase();
+        if (pNorm === 'emergency') priorityBadge = 'bg-danger/10 text-danger font-bold';
+        else if (pNorm === 'high') priorityBadge = 'bg-orange-500/10 text-orange-600 font-semibold';
+        else if (pNorm === 'medium') priorityBadge = 'bg-amber-500/10 text-amber-600';
+
+        const block = c.hostelBlock || c.block || 'Block A';
+        const room = c.roomNumber || c.room || 'N/A';
+        const student = c.student || c.studentName || 'Student';
+        const staff = c.assignedTo || c.technicianName || 'Unassigned';
+
+        return `
+            <tr class="hover:bg-surface-alt/50 transition-colors">
+                <td class="py-3 px-4 font-mono font-semibold text-text">${c.id || '-'}</td>
+                <td class="py-3 px-4 text-text-secondary">${dateStr}</td>
+                <td class="py-3 px-4 font-medium text-text">${student}</td>
+                <td class="py-3 px-4 text-text-secondary">${block} - Rm ${room}</td>
+                <td class="py-3 px-4 capitalize">${c.category || 'General'}</td>
+                <td class="py-3 px-4"><span class="px-2 py-0.5 rounded-full text-[10px] ${priorityBadge}">${c.priority || 'Medium'}</span></td>
+                <td class="py-3 px-4"><span class="px-2 py-0.5 rounded-full text-[10px] font-medium ${statusBadge}">${status}</span></td>
+                <td class="py-3 px-4 text-text-secondary">${staff}</td>
+            </tr>
+        `;
+    }).join('');
+}
+
+function filterReportPreviewTable(query) {
+    const q = (query || '').toLowerCase().trim();
+    if (!q) {
+        populateReportPreviewTable(reportFilteredComplaints);
+        return;
+    }
+    const filtered = reportFilteredComplaints.filter(c => {
+        return (
+            (c.id && c.id.toLowerCase().includes(q)) ||
+            (c.student && c.student.toLowerCase().includes(q)) ||
+            (c.category && c.category.toLowerCase().includes(q)) ||
+            (c.status && c.status.toLowerCase().includes(q)) ||
+            (c.hostelBlock && c.hostelBlock.toLowerCase().includes(q)) ||
+            (c.roomNumber && String(c.roomNumber).toLowerCase().includes(q)) ||
+            (c.assignedTo && c.assignedTo.toLowerCase().includes(q))
+        );
+    });
+    populateReportPreviewTable(filtered);
+}
+
+function triggerBrowserDownload(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+async function downloadReportPdf() {
+    const periodTitle = getReportPeriodTitle();
+    const safePeriod = periodTitle.replace(/[^a-zA-Z0-9_-]/g, '_');
+    showToast(`Generating ${periodTitle} PDF report...`, 'info');
+
+    try {
+        const response = await fetch('/api/reports/summary-pdf', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                year: reportSelectedYear,
+                month: reportSelectedMonth,
+                complaints: reportFilteredComplaints
+            })
+        });
+
+        if (response.ok) {
+            const blob = await response.blob();
+            triggerBrowserDownload(blob, `HostelFix-Report-${safePeriod}.pdf`);
+            showToast(`${periodTitle} PDF report downloaded successfully!`, 'success');
+            return;
+        }
+        throw new Error('Server PDF endpoint returned error');
+    } catch (err) {
+        console.warn('[PDF Server Download Error, generating client fallback]', err);
+        downloadReportCsv();
+        showToast(`Server PDF error, downloaded CSV report for ${periodTitle} instead.`, 'warning');
+    }
+}
+
+function downloadReportCsv() {
+    const periodTitle = getReportPeriodTitle();
+    const safePeriod = periodTitle.replace(/[^a-zA-Z0-9_-]/g, '_');
+
+    const headers = [
+        'Complaint ID',
+        'Date Submitted',
+        'Student Name',
+        'Roll / Reg Number',
+        'Email',
+        'Hostel Block',
+        'Room Number',
+        'Floor',
+        'Category',
+        'Priority',
+        'Status',
+        'Assigned Technician',
+        'Resolution Notes',
+        'Created At'
+    ];
+
+    const rows = reportFilteredComplaints.map(c => [
+        `"${c.id || ''}"`,
+        `"${c.createdAt ? new Date(c.createdAt).toLocaleDateString('en-GB') : ''}"`,
+        `"${(c.student || c.studentName || '').replace(/"/g, '""')}"`,
+        `"${(c.registrationNumber || c.rollNumber || '').replace(/"/g, '""')}"`,
+        `"${(c.email || c.studentEmail || '').replace(/"/g, '""')}"`,
+        `"${(c.hostelBlock || c.block || '').replace(/"/g, '""')}"`,
+        `"${(c.roomNumber || c.room || '').replace(/"/g, '""')}"`,
+        `"${(c.floor || '').replace(/"/g, '""')}"`,
+        `"${(c.category || '').replace(/"/g, '""')}"`,
+        `"${(c.priority || '').replace(/"/g, '""')}"`,
+        `"${(c.status || '').replace(/"/g, '""')}"`,
+        `"${(c.assignedTo || c.technicianName || '').replace(/"/g, '""')}"`,
+        `"${(c.resolutionNotes || c.resolutionRemarks || c.description || '').replace(/"/g, '""')}"`,
+        `"${c.createdAt || ''}"`
+    ]);
+
+    const csvContent = '\uFEFF' + [headers.join(','), ...rows.map(r => r.join(','))].join('\r\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    triggerBrowserDownload(blob, `HostelFix-Complaints-${safePeriod}.csv`);
+    showToast(`${periodTitle} Complaints CSV downloaded successfully!`, 'success');
+}
+
+function downloadTechnicianExcel() {
+    const periodTitle = getReportPeriodTitle();
+    const safePeriod = periodTitle.replace(/[^a-zA-Z0-9_-]/g, '_');
+
+    const techStats = {};
+    const techSourceList = Array.isArray(technicians) && technicians.length > 0
+        ? technicians
+        : [{ name: 'bala', specialization: 'General Maintenance' }];
+
+    techSourceList.forEach(t => {
+        const name = t.name || t.fullName || 'Technician';
+        techStats[name.toLowerCase()] = {
+            name: name,
+            specialization: t.specialization || t.category || 'Maintenance',
+            assigned: 0,
+            resolved: 0,
+            pending: 0
+        };
+    });
+
+    reportFilteredComplaints.forEach(c => {
+        const staff = (c.assignedTo || c.technicianName || 'Unassigned').trim();
+        const key = staff.toLowerCase();
+        if (!techStats[key]) {
+            techStats[key] = {
+                name: staff,
+                specialization: c.category || 'General',
+                assigned: 0,
+                resolved: 0,
+                pending: 0
+            };
+        }
+        techStats[key].assigned++;
+        if (['resolved', 'closed', 'verified'].includes(String(c.status || '').toLowerCase())) {
+            techStats[key].resolved++;
+        } else {
+            techStats[key].pending++;
+        }
+    });
+
+    const rows = Object.values(techStats);
+
+    let tableHtml = `
+        <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
+        <head>
+            <meta charset="utf-8">
+            <style>
+                body { font-family: Arial, sans-serif; }
+                table { border-collapse: collapse; width: 100%; }
+                th { background-color: #059669; color: white; border: 1px solid #cbd5e1; padding: 10px; font-weight: bold; }
+                td { border: 1px solid #cbd5e1; padding: 8px; text-align: left; }
+                .center { text-align: center; }
+                .title { font-size: 16pt; font-weight: bold; color: #065f46; text-align: center; padding: 10px; }
+                .subtitle { font-size: 11pt; color: #475569; text-align: center; padding-bottom: 12px; }
+            </style>
+        </head>
+        <body>
+            <table>
+                <tr><td colspan="6" class="title">SRI SHAKTHI INSTITUTE OF ENGINEERING AND TECHNOLOGY</td></tr>
+                <tr><td colspan="6" class="subtitle">HostelFix Technician Performance Report — ${periodTitle}</td></tr>
+                <tr>
+                    <th>Technician Name</th>
+                    <th>Trade / Specialization</th>
+                    <th>Total Assigned Jobs</th>
+                    <th>Completed / Resolved</th>
+                    <th>Pending Jobs</th>
+                    <th>Resolution Rate (%)</th>
+                </tr>
+    `;
+
+    rows.forEach(r => {
+        const rate = r.assigned > 0 ? Math.round((r.resolved / r.assigned) * 100) : 0;
+        tableHtml += `
+            <tr>
+                <td><b>${r.name}</b></td>
+                <td>${r.specialization}</td>
+                <td class="center">${r.assigned}</td>
+                <td class="center" style="color: #059669; font-weight: bold;">${r.resolved}</td>
+                <td class="center" style="color: #d97706;">${r.pending}</td>
+                <td class="center"><b>${rate}%</b></td>
+            </tr>
+        `;
+    });
+
+    tableHtml += `
+            </table>
+        </body>
+        </html>
+    `;
+
+    const blob = new Blob([tableHtml], { type: 'application/vnd.ms-excel;charset=utf-8;' });
+    triggerBrowserDownload(blob, `HostelFix-Technicians-${safePeriod}.xls`);
+    showToast(`${periodTitle} Technician Excel report downloaded!`, 'success');
+}
+
+function downloadTechnicianCsv() {
+    const periodTitle = getReportPeriodTitle();
+    const safePeriod = periodTitle.replace(/[^a-zA-Z0-9_-]/g, '_');
+
+    const techStats = {};
+    const techSourceList = Array.isArray(technicians) && technicians.length > 0 ? technicians : [];
+    techSourceList.forEach(t => {
+        const name = t.name || t.fullName || 'Technician';
+        techStats[name.toLowerCase()] = { name, specialization: t.specialization || 'Maintenance', assigned: 0, resolved: 0, pending: 0 };
+    });
+
+    reportFilteredComplaints.forEach(c => {
+        const staff = (c.assignedTo || c.technicianName || 'Unassigned').trim();
+        const key = staff.toLowerCase();
+        if (!techStats[key]) {
+            techStats[key] = { name: staff, specialization: c.category || 'General', assigned: 0, resolved: 0, pending: 0 };
+        }
+        techStats[key].assigned++;
+        if (['resolved', 'closed', 'verified'].includes(String(c.status || '').toLowerCase())) {
+            techStats[key].resolved++;
+        } else {
+            techStats[key].pending++;
+        }
+    });
+
+    const headers = ['Technician Name', 'Specialization', 'Total Assigned', 'Resolved', 'Pending', 'Resolution Rate (%)'];
+    const rows = Object.values(techStats).map(r => {
+        const rate = r.assigned > 0 ? Math.round((r.resolved / r.assigned) * 100) : 0;
+        return [`"${r.name}"`, `"${r.specialization}"`, r.assigned, r.resolved, r.pending, `"${rate}%"`];
+    });
+
+    const csvContent = '\uFEFF' + [headers.join(','), ...rows.map(r => r.join(','))].join('\r\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    triggerBrowserDownload(blob, `HostelFix-Technicians-${safePeriod}.csv`);
+    showToast(`${periodTitle} Technician CSV downloaded!`, 'success');
+}
+
+function downloadCategoryCsv() {
+    const periodTitle = getReportPeriodTitle();
+    const safePeriod = periodTitle.replace(/[^a-zA-Z0-9_-]/g, '_');
+
+    const catCounts = {};
+    const blockCounts = {};
+
+    reportFilteredComplaints.forEach(c => {
+        const cat = c.category || 'General';
+        const blk = c.hostelBlock || c.block || 'General Block';
+        const isResolved = ['resolved', 'closed', 'verified'].includes(String(c.status || '').toLowerCase());
+
+        if (!catCounts[cat]) catCounts[cat] = { total: 0, resolved: 0, pending: 0 };
+        catCounts[cat].total++;
+        if (isResolved) catCounts[cat].resolved++; else catCounts[cat].pending++;
+
+        if (!blockCounts[blk]) blockCounts[blk] = { total: 0, resolved: 0, pending: 0 };
+        blockCounts[blk].total++;
+        if (isResolved) blockCounts[blk].resolved++; else blockCounts[blk].pending++;
+    });
+
+    let lines = [
+        `"CATEGORY & BLOCK ANALYSIS REPORT - ${periodTitle}"`,
+        '',
+        'Category,Total Complaints,Resolved,Pending,Resolution Rate (%)'
+    ];
+
+    Object.entries(catCounts).forEach(([cat, s]) => {
+        const rate = s.total > 0 ? Math.round((s.resolved / s.total) * 100) : 0;
+        lines.push(`"${cat}",${s.total},${s.resolved},${s.pending},"${rate}%"`);
+    });
+
+    lines.push('');
+    lines.push('Hostel Block,Total Complaints,Resolved,Pending,Resolution Rate (%)');
+    Object.entries(blockCounts).forEach(([blk, s]) => {
+        const rate = s.total > 0 ? Math.round((s.resolved / s.total) * 100) : 0;
+        lines.push(`"${blk}",${s.total},${s.resolved},${s.pending},"${rate}%"`);
+    });
+
+    const csvContent = '\uFEFF' + lines.join('\r\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    triggerBrowserDownload(blob, `HostelFix-Category-Analysis-${safePeriod}.csv`);
+    showToast(`${periodTitle} Category Analysis CSV downloaded!`, 'success');
+}
+
+function downloadCategoryExcel() {
+    const periodTitle = getReportPeriodTitle();
+    const safePeriod = periodTitle.replace(/[^a-zA-Z0-9_-]/g, '_');
+
+    const catCounts = {};
+    const blockCounts = {};
+
+    reportFilteredComplaints.forEach(c => {
+        const cat = c.category || 'General';
+        const blk = c.hostelBlock || c.block || 'General Block';
+        const isResolved = ['resolved', 'closed', 'verified'].includes(String(c.status || '').toLowerCase());
+
+        if (!catCounts[cat]) catCounts[cat] = { total: 0, resolved: 0, pending: 0 };
+        catCounts[cat].total++;
+        if (isResolved) catCounts[cat].resolved++; else catCounts[cat].pending++;
+
+        if (!blockCounts[blk]) blockCounts[blk] = { total: 0, resolved: 0, pending: 0 };
+        blockCounts[blk].total++;
+        if (isResolved) blockCounts[blk].resolved++; else blockCounts[blk].pending++;
+    });
+
+    let html = `
+        <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
+        <head>
+            <meta charset="utf-8">
+            <style>
+                body { font-family: Arial, sans-serif; }
+                table { border-collapse: collapse; width: 100%; margin-bottom: 25px; }
+                th { background-color: #d97706; color: white; border: 1px solid #cbd5e1; padding: 10px; font-weight: bold; }
+                td { border: 1px solid #cbd5e1; padding: 8px; }
+                .center { text-align: center; }
+                .title { font-size: 16pt; font-weight: bold; color: #b45309; text-align: center; padding: 10px; }
+                .subtitle { font-size: 11pt; color: #475569; text-align: center; padding-bottom: 12px; }
+                .section-header { font-size: 13pt; font-weight: bold; color: #1e293b; padding-top: 15px; }
+            </style>
+        </head>
+        <body>
+            <table>
+                <tr><td colspan="5" class="title">SRI SHAKTHI INSTITUTE OF ENGINEERING AND TECHNOLOGY</td></tr>
+                <tr><td colspan="5" class="subtitle">Category &amp; Block Maintenance Distribution — ${periodTitle}</td></tr>
+            </table>
+
+            <table>
+                <tr><td colspan="5" class="section-header">1. Maintenance Distribution by Category</td></tr>
+                <tr>
+                    <th>Category</th>
+                    <th>Total Complaints</th>
+                    <th>Resolved</th>
+                    <th>Pending</th>
+                    <th>Resolution Rate (%)</th>
+                </tr>
+    `;
+
+    Object.entries(catCounts).forEach(([cat, s]) => {
+        const rate = s.total > 0 ? Math.round((s.resolved / s.total) * 100) : 0;
+        html += `
+            <tr>
+                <td><b>${cat}</b></td>
+                <td class="center">${s.total}</td>
+                <td class="center" style="color: #059669; font-weight: bold;">${s.resolved}</td>
+                <td class="center" style="color: #d97706;">${s.pending}</td>
+                <td class="center"><b>${rate}%</b></td>
+            </tr>
+        `;
+    });
+
+    html += `
+            </table>
+
+            <table>
+                <tr><td colspan="5" class="section-header">2. Maintenance Distribution by Hostel Block</td></tr>
+                <tr>
+                    <th>Hostel Block</th>
+                    <th>Total Complaints</th>
+                    <th>Resolved</th>
+                    <th>Pending</th>
+                    <th>Resolution Rate (%)</th>
+                </tr>
+    `;
+
+    Object.entries(blockCounts).forEach(([blk, s]) => {
+        const rate = s.total > 0 ? Math.round((s.resolved / s.total) * 100) : 0;
+        html += `
+            <tr>
+                <td><b>${blk}</b></td>
+                <td class="center">${s.total}</td>
+                <td class="center" style="color: #059669; font-weight: bold;">${s.resolved}</td>
+                <td class="center" style="color: #d97706;">${s.pending}</td>
+                <td class="center"><b>${rate}%</b></td>
+            </tr>
+        `;
+    });
+
+    html += `
+            </table>
+        </body>
+        </html>
+    `;
+
+    const blob = new Blob([html], { type: 'application/vnd.ms-excel;charset=utf-8;' });
+    triggerBrowserDownload(blob, `HostelFix-Category-Analysis-${safePeriod}.xls`);
+    showToast(`${periodTitle} Category Analysis Excel downloaded!`, 'success');
 }
 
 // Explicit safe global exports for inline event handlers across all browsers
@@ -12044,7 +13376,32 @@ const globalExports = {
     checkResetPasswordStrength: typeof checkResetPasswordStrength !== 'undefined' ? checkResetPasswordStrength : undefined,
     handleResetPasswordSubmit: typeof handleResetPasswordSubmit !== 'undefined' ? handleResetPasswordSubmit : undefined,
     selectLoginRole: typeof selectLoginRole !== 'undefined' ? selectLoginRole : undefined,
-    selectRegisterRole: typeof selectRegisterRole !== 'undefined' ? selectRegisterRole : undefined
+    selectRegisterRole: typeof selectRegisterRole !== 'undefined' ? selectRegisterRole : undefined,
+    openGatePassExportModal: typeof openGatePassExportModal !== 'undefined' ? openGatePassExportModal : undefined,
+    closeGatePassExportModal: typeof closeGatePassExportModal !== 'undefined' ? closeGatePassExportModal : undefined,
+    confirmGatePassExport: typeof confirmGatePassExport !== 'undefined' ? confirmGatePassExport : undefined,
+    exportGatePassesPdf: typeof exportGatePassesPdf !== 'undefined' ? exportGatePassesPdf : undefined,
+    renderAdminReportsPage: typeof renderAdminReportsPage !== 'undefined' ? renderAdminReportsPage : undefined,
+    onReportYearChange: typeof onReportYearChange !== 'undefined' ? onReportYearChange : undefined,
+    selectReportMonth: typeof selectReportMonth !== 'undefined' ? selectReportMonth : undefined,
+    filterReportPreviewTable: typeof filterReportPreviewTable !== 'undefined' ? filterReportPreviewTable : undefined,
+    downloadReportPdf: typeof downloadReportPdf !== 'undefined' ? downloadReportPdf : undefined,
+    downloadReportCsv: typeof downloadReportCsv !== 'undefined' ? downloadReportCsv : undefined,
+    downloadTechnicianExcel: typeof downloadTechnicianExcel !== 'undefined' ? downloadTechnicianExcel : undefined,
+    downloadTechnicianCsv: typeof downloadTechnicianCsv !== 'undefined' ? downloadTechnicianCsv : undefined,
+    downloadCategoryCsv: typeof downloadCategoryCsv !== 'undefined' ? downloadCategoryCsv : undefined,
+    downloadCategoryExcel: typeof downloadCategoryExcel !== 'undefined' ? downloadCategoryExcel : undefined,
+    renderStudentDashboard: typeof renderStudentDashboard !== 'undefined' ? renderStudentDashboard : undefined,
+    renderStudentRecentComplaints: typeof renderStudentRecentComplaints !== 'undefined' ? renderStudentRecentComplaints : undefined,
+    renderStudentGatePassesTable: typeof renderStudentGatePassesTable !== 'undefined' ? renderStudentGatePassesTable : undefined,
+    viewGatePassModal: typeof viewGatePassModal !== 'undefined' ? viewGatePassModal : undefined,
+    trackStudentComplaint: typeof trackStudentComplaint !== 'undefined' ? trackStudentComplaint : undefined,
+    setStudentComplaintFilter: typeof setStudentComplaintFilter !== 'undefined' ? setStudentComplaintFilter : undefined,
+    handleStudentComplaintSearch: typeof handleStudentComplaintSearch !== 'undefined' ? handleStudentComplaintSearch : undefined,
+    renderStudentComplaintsPage: typeof renderStudentComplaintsPage !== 'undefined' ? renderStudentComplaintsPage : undefined,
+    downloadCurrentUserGatePassPdf: typeof downloadCurrentUserGatePassPdf !== 'undefined' ? downloadCurrentUserGatePassPdf : undefined,
+    promptRejectGatePass: typeof promptRejectGatePass !== 'undefined' ? promptRejectGatePass : undefined,
+    confirmRejectGatePass: typeof confirmRejectGatePass !== 'undefined' ? confirmRejectGatePass : undefined
 };
 
 Object.entries(globalExports).forEach(([key, fn]) => {

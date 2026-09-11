@@ -751,8 +751,9 @@
         if (get('techIdCardSignatureFingerprint')) get('techIdCardSignatureFingerprint').textContent = fingerprint;
 
         if (get('techIdCardQrImage')) {
-            const qrData = encodeURIComponent(`https://hostelfix.edu/verify-tech?id=${cleanId}&cert=${certId}`);
-            get('techIdCardQrImage').src = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${qrData}`;
+            const origin = window.location.origin;
+            const verifyUrl = `${origin}/verify-technician?id=${encodeURIComponent(cleanId)}&cert=${encodeURIComponent(certId)}`;
+            get('techIdCardQrImage').src = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(verifyUrl)}`;
         }
     }
 

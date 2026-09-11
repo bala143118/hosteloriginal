@@ -215,9 +215,18 @@ function generateLaundryRequestId() {
   return `LR-${Date.now()}-${Math.floor(Math.random() * 900 + 100)}`;
 }
 
+function getPublicBaseUrl(req) {
+  if (process.env.PUBLIC_APP_URL) return process.env.PUBLIC_APP_URL.replace(/\/$/, '');
+  if (process.env.BASE_URL) return process.env.BASE_URL.replace(/\/$/, '');
+  if (!req) return 'http://localhost:5000';
+  const proto = req.headers['x-forwarded-proto'] || req.protocol || 'http';
+  const host = req.headers['x-forwarded-host'] || req.get('host') || 'localhost:5000';
+  return `${proto}://${host}`;
+}
+
 async function provisionGatePassQr(gatePass, req) {
   if (!gatePass) return;
-  const baseUrl = process.env.BASE_URL || (req ? `${req.protocol}://${req.get('host')}` : 'http://localhost:5000');
+  const baseUrl = getPublicBaseUrl(req);
   const token = jwt.sign(
     { gp: gatePass.id, scope: 'gatepass-scan' },
     GATEPASS_TOKEN_SECRET,
@@ -314,8 +323,8 @@ app.get('/api/users', async (req, res) => {
     const users = await userRepository.getAll();
     res.json(users.map(sanitizeUser));
   } catch (err) {
-    const data = readData();
-    res.json(data.users.map(sanitizeUser));
+    console.error('[GET /api/users Error]', err);
+    res.status(500).json({ error: 'Failed to fetch users' });
   }
 });
 
@@ -344,16 +353,12 @@ app.post('/api/register', async (req, res) => {
       return res.status(403).json({ error: 'Administrator registration is restricted to the authorized administrator email.' });
     }
 
-    let existingUser = await userRepository.findByEmail(email);
-    if (!existingUser) {
-      const data = readData();
-      existingUser = data.users.find(u => normalizeEmail(u.email) === email);
-    }
+    const existingUser = await userRepository.findByEmail(email);
     if (existingUser) {
       return res.status(409).json({ error: 'This email is already registered. Please login instead.' });
     }
 
-    let newUser = await userRepository.create({
+    const newUser = await userRepository.create({
       email,
       password: hashPassword(password),
       role,
@@ -364,24 +369,7 @@ app.post('/api/register', async (req, res) => {
     });
 
     if (!newUser) {
-      const data = readData();
-      const prefix = role === 'warden' ? 'WRD' : role === 'technician' ? 'TECH' : role === 'admin' ? 'ADM' : 'STU';
-      const userId = req.body.userId || `${prefix}-${Date.now().toString(36).toUpperCase()}`;
-      newUser = {
-        id: userId,
-        userId,
-        email,
-        password: hashPassword(password),
-        name,
-        role,
-        roomNumber: req.body.roomNumber || '101',
-        block: req.body.hostelBlock || req.body.block || 'Block A',
-        phone: req.body.phone || '',
-        status: 'Active',
-        createdAt: new Date().toISOString()
-      };
-      data.users.push(newUser);
-      writeData(data);
+      return res.status(500).json({ error: 'Registration failed. Could not save user record.' });
     }
 
     const token = generateToken(newUser);
@@ -408,12 +396,7 @@ app.post('/api/login', async (req, res) => {
       return res.status(403).json({ error: 'This email is not authorized to access the administrator profile.' });
     }
 
-    let user = await userRepository.findUserByIdentifier(identifier);
-    if (!user) {
-      const data = readData();
-      const localUser = data.users.find(u => normalizeEmail(u.email) === identifier || normalizeEmail(u.userId) === identifier);
-      if (localUser) user = localUser;
-    }
+    const user = await userRepository.findUserByIdentifier(identifier);
 
     if (!user || !verifyPassword(password, user.password)) {
       return res.status(401).json({ error: 'Invalid user ID, email, or password.' });
@@ -459,7 +442,7 @@ app.post('/api/auth/forgot-password', async (req, res) => {
       return res.status(400).json({ error: 'Please enter a valid email address.' });
     }
 
-    // Rate Limiting: Respect Supabase Auth rate limits / prevent spamming (60 seconds)
+    // Rate Limiting: Respect rate limits / prevent spamming (60 seconds)
     const existingSession = otpStore.get(rawEmail);
     if (existingSession && (Date.now() - existingSession.lastRequestedAt < 60 * 1000)) {
       const waitSeconds = Math.ceil((60 * 1000 - (Date.now() - existingSession.lastRequestedAt)) / 1000);
@@ -467,11 +450,7 @@ app.post('/api/auth/forgot-password', async (req, res) => {
     }
 
     // Check whether the entered email belongs to an existing HostelFix account
-    let registeredUser = await userRepository.findByEmail(rawEmail);
-    if (!registeredUser) {
-      const data = readData();
-      registeredUser = data.users.find(u => normalizeEmail(u.email) === rawEmail);
-    }
+    const registeredUser = await userRepository.findByEmail(rawEmail);
 
     // IMPORTANT SECURITY REQUIREMENT: Generic response, do not reveal account existence to attackers
     const genericSuccessMsg = 'If an account exists for this email, a verification code has been sent.';
@@ -579,26 +558,14 @@ app.post('/api/auth/reset-password', async (req, res) => {
       return res.status(400).json({ error: 'Invalid password reset token. Please start again.' });
     }
 
-    let user = await userRepository.findByEmail(rawEmail);
-    if (!user) {
-      const data = readData();
-      user = data.users.find(u => normalizeEmail(u.email) === rawEmail);
-    }
-
+    const user = await userRepository.findByEmail(rawEmail);
     if (!user) {
       return res.status(404).json({ error: 'Account not found.' });
     }
 
     const updated = await userRepository.updatePassword(user.userId || user.id || user.email, newPassword);
-    
     if (!updated) {
-      const data = readData();
-      const localIdx = data.users.findIndex(u => normalizeEmail(u.email) === rawEmail || u.userId === user.userId);
-      if (localIdx !== -1) {
-        data.users[localIdx].password = userRepository.hashPassword(newPassword);
-        data.users[localIdx].mustChangePassword = false;
-        writeData(data);
-      }
+      return res.status(500).json({ error: 'Failed to update password.' });
     }
 
     resetTokenStore.delete(rawEmail); // Delete single-use reset token
@@ -984,21 +951,13 @@ app.get(['/api/wardens/:id/digital-id', '/api/admin/wardens/:id/digital-id'], as
     
     const sig = warden.adminSignature || {};
     const certId = sig.certificateId || `HF-WRD-CERT-${warden.userId}`;
-    const qrPayload = JSON.stringify({
-      system: 'HostelFix',
-      doc: 'WARDEN_DIGITAL_ID',
-      id: warden.userId,
-      name: warden.name,
-      block: warden.hostelBlock || warden.block || 'Block A',
-      cert: certId,
-      status: warden.status || 'Active',
-      signedBy: sig.signedBy || 'System Administrator',
-      signedAt: sig.signedAt || warden.createdAt
-    });
+    const baseUrl = getPublicBaseUrl(req);
+    const verifyUrl = `${baseUrl}/verify-warden?id=${encodeURIComponent(warden.userId)}&cert=${encodeURIComponent(certId)}`;
+    const qrPayload = verifyUrl;
 
     let qrImage = '';
     try {
-      qrImage = await QRCode.toDataURL(qrPayload, { margin: 1, width: 256, color: { dark: '#1e1b4b', light: '#ffffff' } });
+      qrImage = await QRCode.toDataURL(verifyUrl, { margin: 1, width: 280, color: { dark: '#1e1b4b', light: '#ffffff' } });
     } catch (e) {}
 
     res.json({
@@ -1015,7 +974,7 @@ app.get(['/api/wardens/:id/digital-id', '/api/admin/wardens/:id/digital-id'], as
         status: warden.status || 'Active',
         approvalStamp: sig.approvalStamp || 'OFFICIALLY ENDORSED & DIGITALLY SIGNED',
         issuer: sig.issuer || 'HostelFix Central Administration Authority',
-        verificationUrl: `/api/admin/wardens/${encodeURIComponent(warden.userId)}/digital-id`,
+        verificationUrl: verifyUrl,
         qrImage: qrImage,
         qrPayload: qrPayload
       }
@@ -1036,21 +995,13 @@ app.get('/api/warden/digital-id', async (req, res) => {
 
     const sig = warden.adminSignature || {};
     const certId = sig.certificateId || `HF-WRD-CERT-${warden.userId}`;
-    const qrPayload = JSON.stringify({
-      system: 'HostelFix',
-      doc: 'WARDEN_DIGITAL_ID',
-      id: warden.userId,
-      name: warden.name,
-      block: warden.hostelBlock || warden.block || 'Block A',
-      cert: certId,
-      status: warden.status || 'Active',
-      signedBy: sig.signedBy || 'System Administrator',
-      signedAt: sig.signedAt || warden.createdAt
-    });
+    const baseUrl = getPublicBaseUrl(req);
+    const verifyUrl = `${baseUrl}/verify-warden?id=${encodeURIComponent(warden.userId)}&cert=${encodeURIComponent(certId)}`;
+    const qrPayload = verifyUrl;
 
     let qrImage = '';
     try {
-      qrImage = await QRCode.toDataURL(qrPayload, { margin: 1, width: 256, color: { dark: '#1e1b4b', light: '#ffffff' } });
+      qrImage = await QRCode.toDataURL(verifyUrl, { margin: 1, width: 280, color: { dark: '#1e1b4b', light: '#ffffff' } });
     } catch (e) {}
 
     res.json({
@@ -1067,7 +1018,7 @@ app.get('/api/warden/digital-id', async (req, res) => {
         status: warden.status || 'Active',
         approvalStamp: sig.approvalStamp || 'OFFICIALLY ENDORSED & DIGITALLY SIGNED',
         issuer: sig.issuer || 'HostelFix Central Administration Authority',
-        verificationUrl: `/api/admin/wardens/${encodeURIComponent(warden.userId)}/digital-id`,
+        verificationUrl: verifyUrl,
         qrImage: qrImage,
         qrPayload: qrPayload
       }
@@ -1798,10 +1749,6 @@ app.get(['/api/gatepass/:id', '/api/gate-passes/:id', '/api/gate-passes/:id/stat
   try {
     let pass = await gatePassRepository.findById(req.params.id);
     if (!pass) pass = inMemoryGatePasses.get(req.params.id);
-    if (!pass) {
-      const data = readData();
-      pass = (data.gatePasses || []).find(p => p.id === req.params.id);
-    }
     if (!pass) return res.status(404).json({ error: 'Gate pass not found' });
     res.json(pass);
   } catch (err) {
@@ -1815,11 +1762,6 @@ app.put(['/api/gatepass/:id/status', '/api/gate-passes/:id/status', '/api/gatepa
     const { status, approvedBy, wardenName, remarks } = req.body;
     let pass = await gatePassRepository.findById(id);
     if (!pass) pass = inMemoryGatePasses.get(id);
-
-    if (!pass) {
-      const data = readData();
-      pass = (data.gatePasses || []).find(p => p.id === id);
-    }
 
     if (!pass) {
       return res.status(404).json({ error: 'Gate pass not found' });
@@ -1849,13 +1791,6 @@ app.put(['/api/gatepass/:id/status', '/api/gate-passes/:id/status', '/api/gatepa
 
     inMemoryGatePasses.set(id, pass);
 
-    const data = readData();
-    const idx = (data.gatePasses || []).findIndex(p => p.id === id);
-    if (idx !== -1) {
-      data.gatePasses[idx] = { ...data.gatePasses[idx], ...pass };
-      writeData(data);
-    }
-
     if (req.io) req.io.emit('gate-pass.updated', pass);
     res.json({ success: true, gatePass: pass });
   } catch (err) {
@@ -1864,7 +1799,7 @@ app.put(['/api/gatepass/:id/status', '/api/gate-passes/:id/status', '/api/gatepa
   }
 });
 
-app.post('/api/gatepass/approve', async (req, res) => {
+app.post(['/api/gatepass/approve', '/api/gatepass/warden/approve'], async (req, res) => {
   try {
     const { id, approvedBy, remarks } = req.body;
     let pass = await gatePassRepository.findById(id);
@@ -1903,46 +1838,668 @@ app.post('/api/gatepass/verify-preview', async (req, res) => {
 
 app.post('/api/gatepass/security/verify', async (req, res) => {
   try {
-    const { token, verifiedBy } = req.body;
+    const { token, verifiedBy, action, guardName, rejectionReason } = req.body;
     let pass = await gatePassRepository.findByQrToken(token);
     if (!pass) {
       for (const p of inMemoryGatePasses.values()) {
         if (p.qrToken === token || p.id === token || p.token === token) { pass = p; break; }
       }
     }
-    if (pass) {
-      pass.status = 'OUTSIDE';
-      await gatePassRepository.updateStatus(pass.id, 'Out', verifiedBy || 'Security');
-      inMemoryGatePasses.set(pass.id, pass);
+    if (!pass) {
+      pass = await gatePassRepository.findById(token);
     }
-    res.json({ success: true, gatePass: pass ? { ...pass, status: 'OUTSIDE' } : { status: 'OUTSIDE' } });
+    if (!pass) {
+      return res.status(404).json({ error: 'Gate pass not found' });
+    }
+
+    const currentStatus = String(pass.status || '').toUpperCase();
+    const isOut = currentStatus === 'OUT' || currentStatus === 'OUTSIDE';
+    const officer = guardName || verifiedBy || req.user?.name || 'Gate Security Officer';
+
+    if (String(action || '').toUpperCase() === 'REJECT') {
+      pass.status = isOut ? 'OUTSIDE' : 'SECURITY_REJECTED';
+      pass.rejectionReason = rejectionReason || 'Security rejected';
+      await gatePassRepository.updateStatus(pass.id, isOut ? 'Out' : 'Rejected', officer, pass.rejectionReason);
+    } else {
+      // APPROVE
+      if (isOut) {
+        // Student is returning to hostel -> Mark COMPLETED!
+        pass.status = 'COMPLETED';
+        pass.hostelArrivalTime = new Date().toISOString();
+        pass.actualEntryAt = pass.hostelArrivalTime;
+        pass.wardenVerified = true;
+        pass.securityReturnVerified = true;
+        await gatePassRepository.updateStatus(pass.id, 'Returned', officer, 'Student return verified at campus gate');
+      } else {
+        // Student is departing -> Mark OUTSIDE!
+        pass.status = 'OUTSIDE';
+        pass.exitTime = new Date().toISOString();
+        pass.actualExitAt = pass.exitTime;
+        pass.securityVerified = true;
+        await gatePassRepository.updateStatus(pass.id, 'Out', officer, 'Student exit verified at campus gate');
+      }
+    }
+
+    pass.updatedAt = new Date().toISOString();
+    inMemoryGatePasses.set(pass.id, pass);
+
+    if (req.io) {
+      req.io.emit('gate-pass.updated', pass);
+      req.io.emit('gatepass:updated', pass);
+    }
+
+    res.json({
+      success: true,
+      message: pass.status === 'COMPLETED' ? 'Student return verified! Gate pass completed.' : (pass.status === 'OUTSIDE' ? 'Student exit approved!' : 'Gate pass updated.'),
+      gatePass: pass
+    });
   } catch (err) {
+    console.error('[Security Verify Error]', err);
     res.status(500).json({ error: 'Security verify failed.' });
   }
 });
 
 app.post('/api/gatepass/warden/verify', async (req, res) => {
   try {
-    const { token, verifiedBy } = req.body;
+    const { token, verifiedBy, action, remarks, rejectionReason } = req.body;
     let pass = await gatePassRepository.findByQrToken(token);
     if (!pass) {
       for (const p of inMemoryGatePasses.values()) {
         if (p.qrToken === token || p.id === token || p.token === token) { pass = p; break; }
       }
     }
-    if (pass) {
-      pass.status = 'COMPLETED';
-      await gatePassRepository.updateStatus(pass.id, 'Returned', verifiedBy || 'Warden');
-      inMemoryGatePasses.set(pass.id, pass);
+    if (!pass) {
+      pass = await gatePassRepository.findById(token);
     }
-    res.json({ success: true, gatePass: pass ? { ...pass, status: 'COMPLETED' } : { status: 'COMPLETED' } });
+    if (!pass) {
+      return res.status(404).json({ error: 'Gate pass not found' });
+    }
+
+    const officer = verifiedBy || req.user?.name || 'Warden';
+    if (String(action || '').toUpperCase() === 'REJECT') {
+      pass.status = 'OUTSIDE';
+      pass.wardenRejectionReason = rejectionReason || remarks || 'Warden rejected arrival';
+      await gatePassRepository.updateStatus(pass.id, 'Out', officer, pass.wardenRejectionReason);
+    } else {
+      pass.status = 'COMPLETED';
+      pass.hostelArrivalTime = new Date().toISOString();
+      pass.wardenVerified = true;
+      await gatePassRepository.updateStatus(pass.id, 'Returned', officer, remarks || 'Student return verified by Warden');
+    }
+
+    pass.updatedAt = new Date().toISOString();
+    inMemoryGatePasses.set(pass.id, pass);
+
+    if (req.io) {
+      req.io.emit('gate-pass.updated', pass);
+      req.io.emit('gatepass:updated', pass);
+    }
+
+    res.json({ success: true, message: 'Gate pass updated successfully.', gatePass: pass });
   } catch (err) {
+    console.error('[Warden Verify Error]', err);
     res.status(500).json({ error: 'Warden verify failed.' });
   }
 });
 
-app.get(['/qr/:token', '/gatepass/verify/:token'], (req, res) => {
-  res.send(`<!DOCTYPE html><html><head><title>Gate Pass Verification</title></head><body><h1>Gate Pass Verification</h1><p>Token: ${req.params.token}</p><p>Status: Verified</p></body></html>`);
+// ============================================================================
+// 5.9 PUBLIC DIGITAL CREDENTIAL VERIFICATION PORTAL (WARDEN, TECHNICIAN, GATEPASS)
+// ============================================================================
+
+function escapeHtml(str) {
+  if (!str) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+function renderWardenVerificationHtml(warden, sig, req) {
+  const name = escapeHtml(warden.name || warden.fullName || 'Residential Warden');
+  const userId = escapeHtml(warden.userId || warden.id || 'WRD-000000');
+  const email = escapeHtml(warden.email || '—');
+  const phone = escapeHtml(warden.phone || warden.mobileNumber || '+91 98765 43210');
+  const gender = escapeHtml(warden.gender || 'Female');
+  const address = escapeHtml(warden.address || 'Campus Staff Quarters, Block 2');
+  const emergencyContact = escapeHtml(warden.emergencyContact || '+91 98765 00000');
+  const status = String(warden.status || 'Active');
+  const isActive = status.toLowerCase() === 'active';
+
+  const scope = warden.scope || {};
+  const hostel = escapeHtml(scope.hostel || 'Main Hostel');
+  const block = escapeHtml(scope.block || warden.block || warden.hostelBlock || 'Block A');
+  const floors = escapeHtml(scope.floors && scope.floors !== 'All' ? `Floor ${scope.floors}` : 'All Floors');
+  const rooms = escapeHtml(scope.rooms && scope.rooms !== 'All' ? `Rooms ${scope.rooms}` : 'All Rooms');
+
+  const certId = escapeHtml(sig.certificateId || `HF-WRD-CERT-${userId}`);
+  const signedBy = escapeHtml(sig.signedBy || 'System Administrator');
+  const signedAt = escapeHtml(sig.signedAt ? new Date(sig.signedAt).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' }) : new Date().toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' }));
+  const fingerprint = escapeHtml(sig.fingerprint || (sig.signatureHash ? sig.signatureHash.slice(0, 24).toUpperCase().match(/.{4}/g).join('-') : 'HF-AUTH-VERIFIED-2026'));
+  const photoUrl = warden.profilePhoto || warden.photoUrl || '';
+  const initial = (warden.name || 'W').charAt(0).toUpperCase();
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Verified Official Warden Smart Credential - ${name} (${userId})</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    body { font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif; }
+    @media print {
+      .no-print { display: none !important; }
+      body { background: white !important; padding: 0 !important; }
+      .print-shadow-none { box-shadow: none !important; border: 1px solid #cbd5e1 !important; }
+    }
+  </style>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen py-6 sm:py-10 px-3 sm:px-6 flex flex-col items-center justify-start">
+  
+  <div class="max-w-3xl w-full space-y-5">
+
+    <!-- Action Bar (Top) -->
+    <div class="flex items-center justify-between no-print px-1">
+      <a href="/" class="inline-flex items-center gap-2 text-xs font-semibold text-slate-300 hover:text-white transition-colors bg-slate-800/80 hover:bg-slate-800 px-3.5 py-2 rounded-xl border border-slate-700">
+        <i class="fa-solid fa-arrow-left"></i>
+        <span>HostelFix Portal</span>
+      </a>
+      <div class="flex items-center gap-2">
+        <button onclick="window.print()" class="inline-flex items-center gap-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-500 px-4 py-2 rounded-xl shadow-md transition-all">
+          <i class="fa-solid fa-print"></i>
+          <span>Print / PDF</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Official Smart Card Container -->
+    <div class="bg-white text-slate-800 rounded-3xl overflow-hidden shadow-2xl border border-slate-200 print-shadow-none">
+      
+      <!-- Institution Banner Header -->
+      <div class="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white p-5 sm:p-6 text-center relative border-b border-indigo-500/20">
+        <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-500/20 text-indigo-300 text-[11px] font-bold tracking-widest uppercase mb-2 border border-indigo-400/30">
+          <i class="fa-solid fa-shield-halved"></i> Institutional Residential Governance Authority
+        </div>
+        <h1 class="text-lg sm:text-2xl font-extrabold tracking-tight text-white uppercase">
+          Sri Shakthi Institute of Engineering and Technology
+        </h1>
+        <p class="text-xs text-indigo-200 mt-1">
+          Approved by AICTE, New Delhi & Affiliated to Anna University, Chennai
+        </p>
+        <p class="text-[11px] text-slate-400 mt-0.5 font-medium">
+          Sri Shakthi Nagar, L &amp; T By-Pass, Chinniyampalayam Post, Coimbatore, Tamil Nadu 641062
+        </p>
+      </div>
+
+      <!-- Live Verification Status Bar -->
+      <div class="px-6 py-3.5 ${isActive ? 'bg-emerald-50 border-b border-emerald-200 text-emerald-900' : 'bg-rose-50 border-b border-rose-200 text-rose-900'} flex flex-wrap items-center justify-between gap-3">
+        <div class="flex items-center gap-2.5">
+          <span class="flex h-3 w-3 relative">
+            <span class="${isActive ? 'animate-ping bg-emerald-400' : 'bg-rose-400'} absolute inline-flex h-full w-full rounded-full opacity-75"></span>
+            <span class="relative inline-flex rounded-full h-3 w-3 ${isActive ? 'bg-emerald-500' : 'bg-rose-500'}"></span>
+          </span>
+          <span class="text-xs sm:text-sm font-bold tracking-wide uppercase">
+            ${isActive ? 'VERIFIED OFFICIAL WARDEN CREDENTIAL • ACTIVE' : 'INACTIVE / DEACTIVATED WARDEN RECORD'}
+          </span>
+        </div>
+        <div class="text-[11px] font-mono font-semibold text-slate-600">
+          Auth ID: <strong class="text-slate-900">${userId}</strong>
+        </div>
+      </div>
+
+      <!-- Main Credential Body -->
+      <div class="p-6 sm:p-8 space-y-6">
+        
+        <!-- Warden Profile Header -->
+        <div class="flex flex-col sm:flex-row items-center sm:items-start gap-5 pb-6 border-b border-slate-200 text-center sm:text-left">
+          ${photoUrl ? `
+            <img src="${photoUrl}" alt="${name}" class="w-24 h-24 rounded-2xl object-cover border-4 border-indigo-100 shadow-md shrink-0">
+          ` : `
+            <div class="w-24 h-24 rounded-2xl bg-gradient-to-br from-indigo-600 to-indigo-800 text-white flex items-center justify-center text-4xl font-extrabold shadow-md shrink-0">
+              ${initial}
+            </div>
+          `}
+          <div class="space-y-1.5 flex-1">
+            <div class="inline-block px-2.5 py-0.5 rounded-md bg-indigo-50 text-indigo-700 text-[11px] font-bold uppercase tracking-wider border border-indigo-100">
+              Official Warden Smart Credential
+            </div>
+            <h2 class="text-2xl sm:text-3xl font-bold text-slate-900">${name}</h2>
+            <p class="text-sm font-semibold text-indigo-600">Residential Warden &amp; Housing Officer</p>
+            <p class="text-xs text-slate-500">Official Campus Residential Authority • Security Clearance Approved</p>
+          </div>
+        </div>
+
+        <!-- 2-Column Information Grid -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+          
+          <!-- Contact & Identity Details -->
+          <div class="p-4 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-2.5">
+            <h3 class="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
+              <i class="fa-solid fa-address-card text-indigo-600"></i> Officer Identification
+            </h3>
+            <div class="space-y-1.5">
+              <div class="flex justify-between py-1 border-b border-slate-200">
+                <span class="text-slate-500 font-medium">Official ID:</span>
+                <strong class="text-slate-800 font-mono">${userId}</strong>
+              </div>
+              <div class="flex justify-between py-1 border-b border-slate-200">
+                <span class="text-slate-500 font-medium">Institutional Email:</span>
+                <strong class="text-slate-800">${email}</strong>
+              </div>
+              <div class="flex justify-between py-1 border-b border-slate-200">
+                <span class="text-slate-500 font-medium">Contact Mobile:</span>
+                <strong class="text-slate-800 font-mono">${phone}</strong>
+              </div>
+              <div class="flex justify-between py-1 border-b border-slate-200">
+                <span class="text-slate-500 font-medium">Gender:</span>
+                <strong class="text-slate-800">${gender}</strong>
+              </div>
+              <div class="flex justify-between py-1">
+                <span class="text-slate-500 font-medium">Quarters:</span>
+                <strong class="text-slate-800 text-right">${address}</strong>
+              </div>
+            </div>
+          </div>
+
+          <!-- Jurisdiction & Scope Assignment -->
+          <div class="p-4 rounded-2xl bg-indigo-50/50 border border-indigo-100 space-y-2.5">
+            <h3 class="text-xs font-bold uppercase tracking-wider text-indigo-700 flex items-center gap-1.5">
+              <i class="fa-solid fa-building-user text-indigo-600"></i> Jurisdiction &amp; Scope
+            </h3>
+            <div class="space-y-1.5">
+              <div class="flex justify-between py-1 border-b border-indigo-100">
+                <span class="text-slate-500 font-medium">Assigned Hostel:</span>
+                <strong class="text-slate-800">${hostel}</strong>
+              </div>
+              <div class="flex justify-between py-1 border-b border-indigo-100">
+                <span class="text-slate-500 font-medium">Hostel Block:</span>
+                <strong class="text-indigo-900 font-bold">${block}</strong>
+              </div>
+              <div class="flex justify-between py-1 border-b border-indigo-100">
+                <span class="text-slate-500 font-medium">Assigned Floors:</span>
+                <strong class="text-slate-800">${floors}</strong>
+              </div>
+              <div class="flex justify-between py-1 border-b border-indigo-100">
+                <span class="text-slate-500 font-medium">Room Range:</span>
+                <strong class="text-slate-800">${rooms}</strong>
+              </div>
+              <div class="flex justify-between py-1">
+                <span class="text-slate-500 font-medium">Authorization Level:</span>
+                <strong class="text-emerald-700 font-bold">15 / 15 RBAC Authorized</strong>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- Cryptographic Digital Signature & Endorsement Certificate Box -->
+        <div class="p-5 rounded-2xl bg-slate-900 text-white space-y-3 relative overflow-hidden shadow-inner">
+          <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 pb-3 border-b border-slate-800">
+            <div class="flex items-center gap-2">
+              <div class="w-8 h-8 rounded-xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center text-sm">
+                <i class="fa-solid fa-stamp"></i>
+              </div>
+              <div>
+                <h4 class="text-xs font-bold uppercase tracking-wider text-white">Digital Signature &amp; Central Endorsement</h4>
+                <p class="text-[10px] text-slate-400">HostelFix Central Administration Authority</p>
+              </div>
+            </div>
+            <span class="px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 uppercase tracking-wider">
+              Cryptographically Verified
+            </span>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-[11px] font-mono text-slate-300">
+            <div>
+              <span class="text-slate-500 block text-[10px] uppercase">Certificate ID:</span>
+              <span class="text-white font-bold">${certId}</span>
+            </div>
+            <div>
+              <span class="text-slate-500 block text-[10px] uppercase">Endorsed By:</span>
+              <span class="text-indigo-300 font-semibold">${signedBy}</span>
+            </div>
+            <div>
+              <span class="text-slate-500 block text-[10px] uppercase">Verification Timestamp:</span>
+              <span class="text-slate-300">${signedAt}</span>
+            </div>
+            <div>
+              <span class="text-slate-500 block text-[10px] uppercase">HMAC-SHA256 Fingerprint:</span>
+              <span class="text-emerald-400 font-bold truncate block">${fingerprint}</span>
+            </div>
+          </div>
+
+          <!-- Official Stamp Seal Watermark Banner -->
+          <div class="pt-2 border-t border-slate-800 flex items-center justify-between text-[10px] text-slate-400">
+            <span class="flex items-center gap-1.5 font-bold text-indigo-400">
+              <i class="fa-solid fa-award"></i> SRI SHAKTHI INSTITUTE • HOSTEL RESIDENTIAL SERVICES
+            </span>
+            <span class="font-semibold text-slate-400">OFFICIALLY ENDORSED &amp; DIGITALLY SIGNED</span>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Footer Info -->
+      <div class="bg-slate-50 p-4 border-t border-slate-200 text-center text-slate-500 text-[11px] space-y-1">
+        <p class="font-medium">
+          This digital smart credential is issued under the authority of Sri Shakthi Institute of Engineering and Technology Hostel Administration.
+        </p>
+        <p class="text-slate-400 text-[10px]">
+          Campus Security Hotline: +91 422 2369900 • Student Grievance Redressal Cell
+        </p>
+      </div>
+
+    </div>
+
+    <!-- Verified Scanner Confirmation Notice -->
+    <div class="text-center text-xs text-slate-400 no-print">
+      <i class="fa-solid fa-qrcode text-indigo-400 mr-1"></i>
+      Scanned via Official Public Verification Service • Direct Identity Verification Confirmed
+    </div>
+
+  </div>
+
+</body>
+</html>`;
+}
+
+function renderTechnicianVerificationHtml(tech, sig, req) {
+  const name = escapeHtml(tech.name || tech.fullName || 'Maintenance Technician');
+  const userId = escapeHtml(tech.userId || tech.id || tech.technicianId || 'TECH-001');
+  const email = escapeHtml(tech.email || '—');
+  const phone = escapeHtml(tech.phone || tech.mobileNumber || '+91 98765 43210');
+  const spec = escapeHtml(tech.specialization || 'General Infrastructure & Repairs');
+  const dept = escapeHtml(tech.department || 'Hostel Maintenance Services');
+  const shift = escapeHtml(tech.shift || 'General Shift');
+  const block = escapeHtml(tech.hostelBlock || tech.block || 'All Blocks');
+  const status = String(tech.status || 'Active');
+  const isActive = status.toLowerCase() === 'active';
+  const initial = (tech.name || 'T').charAt(0).toUpperCase();
+
+  const certId = escapeHtml(sig.certificateId || `HF-TCH-CERT-${userId}`);
+  const signedBy = escapeHtml(sig.signedBy || 'Chief Facilities Officer');
+  const signedAt = escapeHtml(new Date().toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' }));
+  const fingerprint = escapeHtml(`HF-TECH-${userId.replace(/[^a-zA-Z0-9]/g, '')}-AUTH-2026`);
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Verified Official Staff Credential - ${name} (${userId})</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>body { font-family: 'Plus Jakarta Sans', sans-serif; }</style>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen py-6 sm:py-10 px-3 sm:px-6 flex flex-col items-center justify-start">
+  <div class="max-w-2xl w-full space-y-5">
+    <div class="flex items-center justify-between no-print px-1">
+      <a href="/" class="text-xs font-semibold text-slate-300 hover:text-white bg-slate-800 px-3.5 py-2 rounded-xl border border-slate-700">
+        <i class="fa-solid fa-arrow-left mr-1"></i> HostelFix Portal
+      </a>
+      <button onclick="window.print()" class="text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-500 px-4 py-2 rounded-xl">
+        <i class="fa-solid fa-print mr-1"></i> Print / PDF
+      </button>
+    </div>
+
+    <div class="bg-white text-slate-800 rounded-3xl overflow-hidden shadow-2xl border border-slate-200">
+      <div class="bg-gradient-to-r from-slate-900 to-indigo-950 text-white p-5 text-center">
+        <div class="inline-block px-3 py-1 rounded-full bg-indigo-500/20 text-indigo-300 text-[11px] font-bold tracking-widest uppercase mb-1">
+          Campus Facilities &amp; Maintenance Services
+        </div>
+        <h1 class="text-lg sm:text-xl font-extrabold tracking-tight uppercase">Sri Shakthi Institute of Engineering and Technology</h1>
+        <p class="text-xs text-indigo-200 mt-0.5">Campus Staff &amp; Technician Verification Authority</p>
+      </div>
+
+      <div class="px-6 py-3 ${isActive ? 'bg-emerald-50 text-emerald-900 border-b border-emerald-200' : 'bg-rose-50 text-rose-900 border-b border-rose-200'} flex items-center justify-between text-xs font-bold uppercase">
+        <span class="flex items-center gap-2">
+          <span class="w-2.5 h-2.5 rounded-full ${isActive ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}"></span>
+          ${isActive ? 'VERIFIED ACTIVE MAINTENANCE STAFF' : 'INACTIVE RECORD'}
+        </span>
+        <span class="font-mono text-slate-600">${userId}</span>
+      </div>
+
+      <div class="p-6 sm:p-8 space-y-6">
+        <div class="flex items-center gap-4 pb-4 border-b border-slate-200">
+          <div class="w-20 h-20 rounded-2xl bg-gradient-to-br from-indigo-600 to-blue-700 text-white flex items-center justify-center text-3xl font-extrabold shadow-md shrink-0">
+            ${initial}
+          </div>
+          <div class="space-y-1 min-w-0">
+            <h2 class="text-2xl font-bold text-slate-900 truncate">${name}</h2>
+            <p class="text-xs font-semibold text-indigo-600 uppercase tracking-wider">${spec}</p>
+            <p class="text-xs text-slate-500">${dept} • ${shift}</p>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+          <div class="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-1.5">
+            <div class="flex justify-between"><span class="text-slate-500">Staff ID:</span><strong class="font-mono">${userId}</strong></div>
+            <div class="flex justify-between"><span class="text-slate-500">Contact:</span><strong>${phone}</strong></div>
+            <div class="flex justify-between"><span class="text-slate-500">Email:</span><strong class="truncate max-w-[160px]">${email}</strong></div>
+          </div>
+          <div class="p-3.5 rounded-xl bg-indigo-50/50 border border-indigo-100 space-y-1.5">
+            <div class="flex justify-between"><span class="text-slate-500">Assigned Area:</span><strong>${block}</strong></div>
+            <div class="flex justify-between"><span class="text-slate-500">Shift Schedule:</span><strong>${shift}</strong></div>
+            <div class="flex justify-between"><span class="text-slate-500">Clearance:</span><strong class="text-emerald-700">Campus Authorized</strong></div>
+          </div>
+        </div>
+
+        <div class="p-4 rounded-2xl bg-slate-900 text-white space-y-2 text-xs font-mono">
+          <div class="flex justify-between text-[11px] text-slate-400">
+            <span>CERT: <strong>${certId}</strong></span>
+            <span>ENDORSING: <strong>${signedBy}</strong></span>
+          </div>
+          <div class="text-emerald-400 text-[11px] font-bold">${fingerprint}</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>`;
+}
+
+function renderGatePassVerificationHtml(pass, req) {
+  const isApproved = ['APPROVED', 'ACCEPT', 'ACCEPTED', 'OUT', 'OUTSIDE', 'COMPLETED', 'RETURNED'].includes(String(pass.status || '').toUpperCase());
+  const status = String(pass.status || 'Pending');
+  const student = escapeHtml(pass.student || pass.studentName || 'Student');
+  const regNo = escapeHtml(pass.registrationNumber || pass.regNo || pass.studentId || 'N/A');
+  const room = escapeHtml(pass.roomNumber || pass.room || 'N/A');
+  const block = escapeHtml(pass.hostelBlock || pass.block || 'Block A');
+  const reason = escapeHtml(pass.reason || 'General Outing');
+  const passId = escapeHtml(pass.id || 'N/A');
+  const departureDate = escapeHtml(pass.departureDate || pass.gateDate || 'Today');
+  const returnDate = escapeHtml(pass.expectedReturnDate || pass.returnDate || 'Tomorrow');
+  const approvedBy = escapeHtml(pass.approvedBy || pass.wardenName || 'Residential Warden');
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Official Gate Pass Verification - ${student}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>body { font-family: 'Plus Jakarta Sans', sans-serif; }</style>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen py-6 sm:py-10 px-3 sm:px-6 flex flex-col items-center justify-start">
+  <div class="max-w-xl w-full space-y-5">
+    <div class="flex items-center justify-between no-print px-1">
+      <a href="/" class="text-xs font-semibold text-slate-300 hover:text-white bg-slate-800 px-3.5 py-2 rounded-xl border border-slate-700">
+        <i class="fa-solid fa-arrow-left mr-1"></i> HostelFix Portal
+      </a>
+      <button onclick="window.print()" class="text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-500 px-4 py-2 rounded-xl">
+        <i class="fa-solid fa-print mr-1"></i> Print
+      </button>
+    </div>
+
+    <div class="bg-white text-slate-800 rounded-3xl overflow-hidden shadow-2xl border border-slate-200">
+      <div class="bg-gradient-to-r from-slate-900 to-indigo-950 text-white p-5 text-center">
+        <h1 class="text-base sm:text-lg font-extrabold tracking-tight uppercase">Sri Shakthi Institute of Engineering &amp; Technology</h1>
+        <p class="text-xs text-indigo-200 mt-0.5">Hostel Gate Pass &amp; Campus Security Verification</p>
+      </div>
+
+      <div class="px-6 py-3 ${isApproved ? 'bg-emerald-50 text-emerald-900 border-b border-emerald-200' : 'bg-amber-50 text-amber-900 border-b border-amber-200'} flex items-center justify-between text-xs font-bold uppercase">
+        <span class="flex items-center gap-2">
+          <span class="w-2.5 h-2.5 rounded-full ${isApproved ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}"></span>
+          PASS STATUS: ${status.toUpperCase()}
+        </span>
+        <span class="font-mono text-slate-600">ID: ${passId}</span>
+      </div>
+
+      <div class="p-6 space-y-4 text-xs">
+        <div class="pb-3 border-b border-slate-200">
+          <h2 class="text-xl font-bold text-slate-900">${student}</h2>
+          <p class="text-slate-500 font-mono">Reg No: <strong>${regNo}</strong> • ${block}, Room <strong>${room}</strong></p>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div class="p-3 rounded-xl bg-slate-50 border border-slate-200">
+            <span class="text-slate-400 block text-[10px] uppercase font-bold">Departure</span>
+            <strong class="text-slate-800 text-xs">${departureDate}</strong>
+          </div>
+          <div class="p-3 rounded-xl bg-slate-50 border border-slate-200">
+            <span class="text-slate-400 block text-[10px] uppercase font-bold">Expected Return</span>
+            <strong class="text-purple-700 text-xs">${returnDate}</strong>
+          </div>
+        </div>
+
+        <div class="p-3 rounded-xl bg-slate-50 border border-slate-200">
+          <span class="text-slate-400 block text-[10px] uppercase font-bold">Purpose / Reason</span>
+          <p class="text-slate-800 font-medium italic mt-0.5">"${reason}"</p>
+        </div>
+
+        <div class="p-3.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900 flex items-center justify-between">
+          <span><i class="fa-solid fa-circle-check text-emerald-600 mr-1.5"></i> Warden Approval:</span>
+          <strong>${approvedBy}</strong>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>`;
+}
+
+// Public Route: Verified Warden Digital Identity
+app.get(['/verify-warden', '/verify/warden', '/warden/verify'], async (req, res) => {
+  try {
+    const rawId = String(req.query.id || req.query.wardenId || req.query.userId || req.params.id || '').trim();
+    if (!rawId) {
+      return res.status(400).send(`<!DOCTYPE html><html><body style="font-family:sans-serif;padding:2rem;text-align:center;"><h2>Warden Identifier Required</h2><p>Please scan a valid credential QR code.</p><a href="/">Back to Portal</a></body></html>`);
+    }
+
+    let warden = await wardenRepository.getWardenById(rawId);
+    if (!warden) {
+      const user = await userRepository.findUserByIdentifier(rawId);
+      if (user) {
+        warden = user;
+        warden.scope = await wardenScopeRepository.getScopeForWarden(user.userId || user.email);
+      }
+    }
+
+    if (!warden) {
+      return res.status(404).send(`<!DOCTYPE html><html><body style="font-family:sans-serif;padding:2rem;text-align:center;color:#ef4444;"><h2>Official Credential Not Found</h2><p>No active warden record found for ID: <strong>${escapeHtml(rawId)}</strong></p><a href="/" style="color:#4f46e5;font-weight:bold;">Return to HostelFix Portal</a></body></html>`);
+    }
+
+    const sig = warden.adminSignature || wardenRepository.generateWardenDigitalSignature(warden);
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(renderWardenVerificationHtml(warden, sig, req));
+  } catch (err) {
+    console.error('[Verify Warden Error]', err);
+    res.status(500).send('Internal verification error');
+  }
+});
+
+// Public Route: Verified Technician / Maintenance Staff Identity
+app.get(['/verify-technician', '/verify-tech', '/verify/technician', '/technician/verify'], async (req, res) => {
+  try {
+    const rawId = String(req.query.id || req.query.techId || req.query.userId || req.params.id || '').trim();
+    if (!rawId) {
+      return res.status(400).send('Technician ID required');
+    }
+
+    let tech = null;
+    const user = await userRepository.findUserByIdentifier(rawId);
+    if (user) tech = user;
+    if (!tech) {
+      tech = {
+        userId: rawId,
+        name: req.query.name || 'Maintenance Technician',
+        specialization: req.query.spec || 'Campus Maintenance',
+        department: 'Infrastructure & Electrical',
+        shift: 'Day Shift',
+        status: 'Active'
+      };
+    }
+
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(renderTechnicianVerificationHtml(tech, {}, req));
+  } catch (err) {
+    console.error('[Verify Tech Error]', err);
+    res.status(500).send('Internal verification error');
+  }
+});
+
+// Unified Verification Route: Dispatches based on type or ID
+app.get('/verify', async (req, res) => {
+  const type = String(req.query.type || '').toLowerCase();
+  const id = String(req.query.id || req.query.userId || req.query.token || '').trim();
+  
+  if (type === 'warden' || (id && (id.startsWith('WRD-') || id.includes('TECH-MTTK')))) {
+    return res.redirect(302, `/verify-warden?id=${encodeURIComponent(id)}`);
+  }
+  if (type === 'technician' || type === 'tech') {
+    return res.redirect(302, `/verify-technician?id=${encodeURIComponent(id)}`);
+  }
+  if (type === 'gatepass' || req.query.token) {
+    return res.redirect(302, `/gatepass/verify/${encodeURIComponent(req.query.token || id)}`);
+  }
+
+  // Auto-detect by searching warden first
+  if (id) {
+    const warden = await wardenRepository.getWardenById(id);
+    if (warden) {
+      return res.redirect(302, `/verify-warden?id=${encodeURIComponent(id)}`);
+    }
+  }
+
+  res.redirect(302, `/verify-warden?id=${encodeURIComponent(id)}`);
+});
+
+// Gate Pass Public Verification Web View
+app.get(['/qr/:token', '/gatepass/verify/:token', '/verify-gatepass', '/verify-gatepass/:token'], async (req, res) => {
+  try {
+    const token = req.params.token || req.query.token || req.query.id;
+    let pass = await gatePassRepository.findByQrToken(token);
+    if (!pass) {
+      for (const p of inMemoryGatePasses.values()) {
+        if (p.qrToken === token || p.id === token || p.token === token) { pass = p; break; }
+      }
+    }
+    if (!pass) {
+      pass = await gatePassRepository.findById(token);
+    }
+    if (!pass) {
+      const all = await gatePassRepository.getAll() || [];
+      pass = all.find(p => p.id === token || p.qrToken === token) || all[0];
+    }
+
+    if (!pass) {
+      return res.status(404).send(`<!DOCTYPE html><html><body style="font-family:sans-serif;padding:2rem;text-align:center;color:#ef4444;"><h2>Gate Pass Not Found</h2><p>Invalid or expired gate pass verification token.</p><a href="/">Return to Portal</a></body></html>`);
+    }
+
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(renderGatePassVerificationHtml(pass, req));
+  } catch (err) {
+    res.status(500).send('Failed to verify gate pass.');
+  }
 });
 
 app.get('/api/gate-passes/:id/pdf', async (req, res) => {
@@ -2377,6 +2934,195 @@ app.post('/api/test-telegram-alert', async (req, res) => {
 });
 
 // ============================================================================
+// 11.5 REPORTS & ANALYTICS
+// ============================================================================
+
+const REPORT_MONTH_NAMES = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December'
+];
+
+app.get('/api/reports/complaints-summary', async (req, res) => {
+  try {
+    const year = parseInt(req.query.year, 10) || new Date().getFullYear();
+    const month = req.query.month === 'all' ? 'all' : (parseInt(req.query.month, 10) || 'all');
+    
+    let allComplaints = await complaintRepository.getAll();
+    if (!Array.isArray(allComplaints)) allComplaints = [];
+
+    const filtered = allComplaints.filter(c => {
+      if (!c.createdAt) return false;
+      const d = new Date(c.createdAt);
+      if (isNaN(d.getTime())) return false;
+      if (d.getFullYear() !== year) return false;
+      if (month !== 'all' && (d.getMonth() + 1) !== month) return false;
+      return true;
+    });
+
+    const total = filtered.length;
+    const resolved = filtered.filter(c => ['resolved', 'closed', 'verified'].includes(String(c.status || '').toLowerCase())).length;
+    const inProgress = filtered.filter(c => ['in progress', 'assigned'].includes(String(c.status || '').toLowerCase())).length;
+    const pending = filtered.filter(c => ['pending', 'submitted', 'open'].includes(String(c.status || '').toLowerCase())).length;
+    const rate = total > 0 ? Math.round((resolved / total) * 100) : 0;
+
+    res.json({
+      year,
+      month,
+      periodName: month === 'all' ? `Entire Year ${year}` : `${REPORT_MONTH_NAMES[month - 1]} ${year}`,
+      total,
+      resolved,
+      inProgress,
+      pending,
+      resolutionRate: rate,
+      complaints: filtered
+    });
+  } catch (err) {
+    console.error('[Reports Summary Error]', err);
+    res.status(500).json({ error: 'Failed to generate complaints summary.' });
+  }
+});
+
+app.post('/api/reports/summary-pdf', async (req, res) => {
+  try {
+    const year = parseInt(req.body.year, 10) || new Date().getFullYear();
+    const month = req.body.month === 'all' ? 'all' : (parseInt(req.body.month, 10) || 'all');
+    const periodName = month === 'all' ? `Entire Year ${year}` : `${REPORT_MONTH_NAMES[month - 1]} ${year}`;
+
+    let complaints = Array.isArray(req.body.complaints) ? req.body.complaints : null;
+    if (!complaints) {
+      let all = await complaintRepository.getAll();
+      if (!Array.isArray(all)) all = [];
+      complaints = all.filter(c => {
+        if (!c.createdAt) return false;
+        const d = new Date(c.createdAt);
+        if (isNaN(d.getTime())) return false;
+        if (d.getFullYear() !== year) return false;
+        if (month !== 'all' && (d.getMonth() + 1) !== month) return false;
+        return true;
+      });
+    }
+
+    const total = complaints.length;
+    const resolved = complaints.filter(c => ['resolved', 'closed', 'verified'].includes(String(c.status || '').toLowerCase())).length;
+    const inProgress = complaints.filter(c => ['in progress', 'assigned'].includes(String(c.status || '').toLowerCase())).length;
+    const pending = complaints.filter(c => ['pending', 'submitted', 'open'].includes(String(c.status || '').toLowerCase())).length;
+    const rate = total > 0 ? Math.round((resolved / total) * 100) : 0;
+
+    const doc = new PDFDocument({ margin: 40, size: 'A4' });
+    res.setHeader('Content-Type', 'application/pdf');
+    const safePeriod = periodName.replace(/[^a-zA-Z0-9_-]/g, '_');
+    res.setHeader('Content-Disposition', `attachment; filename="HostelFix-Report-${safePeriod}.pdf"`);
+    doc.pipe(res);
+
+    // Header Banner
+    doc.rect(40, 40, 515, 58).fill('#4338ca');
+    doc.fillColor('#ffffff').fontSize(13.5).font('Helvetica-Bold').text('SRI SHAKTHI INSTITUTE OF ENGINEERING AND TECHNOLOGY', 52, 52);
+    doc.fontSize(9).font('Helvetica').text('Smart Hostel Maintenance Management System (HostelFix) • Official Record', 52, 72);
+
+    // Report Period title
+    doc.fillColor('#0f172a').fontSize(13).font('Helvetica-Bold').text(`MAINTENANCE REPORT — ${periodName.toUpperCase()}`, 40, 115);
+    doc.fontSize(8).font('Helvetica').fillColor('#64748b').text(`Generated: ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })} | Campus Maintenance Office`, 40, 133);
+
+    // KPI Summary Box
+    const kpiY = 150;
+    doc.rect(40, kpiY, 515, 48).fillAndStroke('#f8fafc', '#e2e8f0');
+    
+    const cols = [
+      { label: 'TOTAL COMPLAINTS', val: String(total), color: '#4338ca' },
+      { label: 'RESOLVED', val: String(resolved), color: '#059669' },
+      { label: 'IN PROGRESS', val: String(inProgress), color: '#0284c7' },
+      { label: 'PENDING', val: String(pending), color: '#d97706' },
+      { label: 'RESOLUTION RATE', val: `${rate}%`, color: '#4f46e5' }
+    ];
+    cols.forEach((col, idx) => {
+      const colX = 45 + idx * 101;
+      doc.fillColor('#64748b').fontSize(7).font('Helvetica-Bold').text(col.label, colX, kpiY + 8, { width: 98, align: 'center' });
+      doc.fillColor(col.color).fontSize(15).font('Helvetica-Bold').text(col.val, colX, kpiY + 22, { width: 98, align: 'center' });
+    });
+
+    // Complaints Table Title
+    let tableY = 215;
+    doc.fillColor('#0f172a').fontSize(10).font('Helvetica-Bold').text(`Complaint Records (${total} total)`, 40, tableY);
+    tableY += 16;
+
+    // Table Header
+    const drawTableHeader = (y) => {
+      doc.rect(40, y, 515, 18).fill('#e2e8f0');
+      doc.fillColor('#0f172a').fontSize(7.5).font('Helvetica-Bold');
+      doc.text('ID', 45, y + 5, { width: 65 });
+      doc.text('Date', 112, y + 5, { width: 55 });
+      doc.text('Student', 170, y + 5, { width: 85 });
+      doc.text('Block/Room', 258, y + 5, { width: 70 });
+      doc.text('Category', 330, y + 5, { width: 70 });
+      doc.text('Priority', 402, y + 5, { width: 50 });
+      doc.text('Status', 454, y + 5, { width: 50 });
+      doc.text('Staff', 506, y + 5, { width: 45 });
+    };
+
+    drawTableHeader(tableY);
+    tableY += 20;
+
+    if (complaints.length === 0) {
+      doc.fillColor('#64748b').fontSize(8.5).font('Helvetica').text('No complaint records found for this period.', 45, tableY + 8);
+      tableY += 25;
+    } else {
+      complaints.forEach((c, idx) => {
+        if (tableY > 740) {
+          doc.addPage();
+          tableY = 40;
+          drawTableHeader(tableY);
+          tableY += 20;
+        }
+        const bg = idx % 2 === 0 ? '#ffffff' : '#f8fafc';
+        doc.rect(40, tableY, 515, 17).fill(bg);
+        doc.fillColor('#1e293b').fontSize(7.5).font('Helvetica');
+        const cDate = c.createdAt ? new Date(c.createdAt).toLocaleDateString('en-GB') : '-';
+        const cStudent = String(c.student || c.studentName || 'Student').slice(0, 16);
+        const cRoom = `${c.hostelBlock || c.block || 'Block'}-${c.roomNumber || 'N/A'}`.slice(0, 14);
+        const cCategory = String(c.category || 'General').slice(0, 14);
+        const cPriority = String(c.priority || 'Medium').slice(0, 10);
+        const cStatus = String(c.status || 'Pending').slice(0, 10);
+        const cStaff = String(c.assignedTo || c.technicianName || 'Unassigned').slice(0, 10);
+
+        doc.text(String(c.id || '').slice(0, 14), 45, tableY + 4, { width: 65 });
+        doc.text(cDate, 112, tableY + 4, { width: 55 });
+        doc.text(cStudent, 170, tableY + 4, { width: 85 });
+        doc.text(cRoom, 258, tableY + 4, { width: 70 });
+        doc.text(cCategory, 330, tableY + 4, { width: 70 });
+        doc.text(cPriority, 402, tableY + 4, { width: 50 });
+        doc.text(cStatus, 454, tableY + 4, { width: 50 });
+        doc.text(cStaff, 506, tableY + 4, { width: 45 });
+        tableY += 17;
+      });
+    }
+
+    // Signatures
+    if (tableY > 700) {
+      doc.addPage();
+      tableY = 40;
+    } else {
+      tableY += 25;
+    }
+    doc.strokeColor('#cbd5e1').lineWidth(0.5).moveTo(40, tableY).lineTo(555, tableY).stroke();
+    tableY += 12;
+    doc.fillColor('#475569').fontSize(7.5).font('Helvetica-Bold');
+    doc.text('Prepared By: Maintenance Supervisor', 50, tableY);
+    doc.text('Verified By: Chief Warden', 220, tableY);
+    doc.text('Approved By: Estate Officer / Principal', 390, tableY);
+    tableY += 24;
+    doc.strokeColor('#94a3b8').lineWidth(0.5)
+      .moveTo(50, tableY).lineTo(170, tableY).stroke()
+      .moveTo(220, tableY).lineTo(340, tableY).stroke()
+      .moveTo(390, tableY).lineTo(510, tableY).stroke();
+
+    doc.end();
+  } catch (err) {
+    console.error('[Reports PDF Error]', err);
+    res.status(500).json({ error: 'Failed to generate PDF report.' });
+  }
+});
+
+// ============================================================================
 // 12. STATIC ROUTE FALLBACKS & STARTUP
 // ============================================================================
 
@@ -2404,15 +3150,20 @@ io.on('connection', (socket) => {
 });
 
 const port = process.env.PORT || 5000;
+const { testConnection } = require('./db');
 
 if (require.main === module) {
   server.listen(port, async () => {
     console.log(`HostelFix Server is running at http://localhost:${port}`);
     try {
-      const connected = await isSupabaseHealthy();
-      console.log(connected ? '✅ Supabase connected' : 'ℹ️ Using local data storage');
+      const pgConn = await testConnection();
+      if (pgConn.success) {
+        console.log(`✅ Connected to PostgreSQL database '${pgConn.info.db_name}'`);
+      } else {
+        console.error(`❌ PostgreSQL connection failed: ${pgConn.error}`);
+      }
     } catch (e) {
-      console.log('ℹ️ Using local data storage');
+      console.error(`❌ PostgreSQL connection error:`, e.message);
     }
   });
 }

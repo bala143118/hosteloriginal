@@ -15,7 +15,6 @@ function getSupabaseClient() {
                 process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
     if (!url || !key || url.includes('your-project-ref') || key.includes('your-supabase-service-role-key') || key.includes('your-key')) {
-        console.warn('[Supabase] SUPABASE_URL or key is set to a placeholder. Supabase client is disabled; falling back to local database.');
         return null;
     }
 

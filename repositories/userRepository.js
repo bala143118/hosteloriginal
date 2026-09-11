@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const { getSupabaseClient } = require('./supabaseClient');
+const db = require('../db');
 
 const userStatusCache = new Map();
 
@@ -51,6 +52,13 @@ class UserRepository {
     }
 
     async getAll() {
+        try {
+            const res = await db.query('SELECT * FROM users ORDER BY created_at DESC');
+            if (res.rows && res.rows.length > 0) {
+                return res.rows.map(u => this._mapUser(u));
+            }
+        } catch (e) {}
+
         const client = getSupabaseClient();
         if (!client) {
             return readLocalUsers().map(u => this._mapUser(u));
@@ -66,6 +74,13 @@ class UserRepository {
 
     async getByRole(role) {
         const targetRole = String(role || '').trim().toLowerCase();
+        try {
+            const res = await db.query('SELECT * FROM users WHERE LOWER(role) = LOWER($1) ORDER BY created_at DESC', [targetRole]);
+            if (res.rows && res.rows.length > 0) {
+                return res.rows.map(u => this._mapUser(u));
+            }
+        } catch (e) {}
+
         const client = getSupabaseClient();
         if (!client || !targetRole) {
             return readLocalUsers()
@@ -92,13 +107,25 @@ class UserRepository {
     }
 
     async findByEmail(email) {
+        if (!email) return null;
+        const cleanEmail = String(email).trim().toLowerCase();
+        try {
+            const res = await db.query('SELECT * FROM users WHERE LOWER(email) = LOWER($1) LIMIT 1', [cleanEmail]);
+            if (res.rows && res.rows.length > 0) {
+                return this._mapUser(res.rows[0]);
+            }
+        } catch (e) {}
+
         const client = getSupabaseClient();
-        if (!client || !email) return null;
+        if (!client) {
+            const local = readLocalUsers().find(u => String(u.email || '').toLowerCase() === cleanEmail);
+            return local ? this._mapUser(local) : null;
+        }
         try {
             const { data, error } = await client
                 .from(this.tableName)
                 .select('*')
-                .ilike('email', email.trim())
+                .ilike('email', cleanEmail)
                 .maybeSingle();
             if (error) return null;
             return data ? this._mapUser(data) : null;
@@ -108,16 +135,26 @@ class UserRepository {
     }
 
     async findByUserId(userId) {
-        const client = getSupabaseClient();
-        if (!client || !userId) return null;
+        if (!userId) return null;
         const cleanId = String(userId).trim();
+        try {
+            const res = await db.query('SELECT * FROM users WHERE LOWER("userId") = LOWER($1) OR LOWER(email) = LOWER($1) LIMIT 1', [cleanId]);
+            if (res.rows && res.rows.length > 0) {
+                return this._mapUser(res.rows[0]);
+            }
+        } catch (e) {}
+
+        const client = getSupabaseClient();
+        if (!client) {
+            const local = readLocalUsers().find(u => String(u.userId || u.id || '').toLowerCase() === cleanId.toLowerCase());
+            return local ? this._mapUser(local) : null;
+        }
         try {
             let { data, error } = await client
                 .from(this.tableName)
                 .select('*')
                 .eq('user_id', cleanId)
                 .maybeSingle();
-            // Login identifiers are case-insensitive, including generated WRD-/STU- IDs.
             if (!data && !error) {
                 const fallback = await client
                     .from(this.tableName)
@@ -146,62 +183,80 @@ class UserRepository {
     }
 
     async create(userData) {
-        const client = getSupabaseClient();
         const userId = userData.technicianId || userData.userId || userData.id || `TECH-${Date.now().toString(36).toUpperCase()}-${Math.floor(Math.random() * 900 + 100)}`;
         const status = userData.status || 'Active';
+        const cleanEmail = String(userData.email || '').trim().toLowerCase();
+        const cleanId = String(userId).trim();
 
-        userStatusCache.set(String(userId).trim(), status);
-        if (userData.email) {
-            userStatusCache.set(String(userData.email).trim().toLowerCase(), status);
+        userStatusCache.set(cleanId, status);
+        if (cleanEmail) {
+            userStatusCache.set(cleanEmail, status);
         }
 
-        const dbPayload = {
-            user_id: String(userId).trim(),
-            email: String(userData.email).trim().toLowerCase(),
-            password: userData.password,
-            name: String(userData.name || '').trim(),
-            role: String(userData.role || 'technician').trim().toLowerCase(),
-            room_number: userData.roomNumber || userData.room || '',
-            block: userData.block || userData.hostelBlock || '',
-            registration_number: userData.registrationNumber || userData.regNo || '',
-            phone: String(userData.phone || '').trim(),
-            specialization: userData.specialization || userData.department || 'General Maintenance'
-        };
+        try {
+            const res = await db.query(
+                `INSERT INTO users ("userId", email, password, name, role, status, phone, "hostelBlock", "roomNumber", "registrationNumber", "createdByAdmin")
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                 ON CONFLICT (email) DO UPDATE SET
+                    "userId" = EXCLUDED."userId",
+                    name = EXCLUDED.name,
+                    role = EXCLUDED.role,
+                    status = EXCLUDED.status,
+                    password = EXCLUDED.password,
+                    phone = EXCLUDED.phone,
+                    "hostelBlock" = EXCLUDED."hostelBlock",
+                    "roomNumber" = EXCLUDED."roomNumber",
+                    "registrationNumber" = EXCLUDED."registrationNumber"
+                 RETURNING *`,
+                [
+                    cleanId,
+                    cleanEmail,
+                    hashPassword(userData.password || ''),
+                    String(userData.name || '').trim(),
+                    String(userData.role || 'student').trim().toLowerCase(),
+                    status,
+                    String(userData.phone || '').trim(),
+                    userData.hostelBlock || userData.block || '',
+                    userData.roomNumber || userData.room || '',
+                    userData.registrationNumber || userData.regNo || '',
+                    Boolean(userData.createdByAdmin)
+                ]
+            );
+            if (res.rows && res.rows.length > 0) {
+                return this._mapUser(res.rows[0]);
+            }
+        } catch (e) {
+            console.error('[UserRepository PostgreSQL Create Error]', e.message);
+        }
 
         const userObj = {
-            id: String(userId).trim(),
-            userId: String(userId).trim(),
-            technicianId: String(userId).trim(),
-            email: String(userData.email).trim().toLowerCase(),
-            password: userData.password,
+            id: cleanId,
+            userId: cleanId,
+            technicianId: cleanId,
+            email: cleanEmail,
+            password: hashPassword(userData.password || ''),
             name: String(userData.name || '').trim(),
-            role: String(userData.role || 'technician').trim().toLowerCase(),
+            role: String(userData.role || 'student').trim().toLowerCase(),
             specialization: userData.specialization || 'General Maintenance',
             department: userData.department || 'Maintenance Department',
-            hostelBlock: userData.hostelBlock || userData.block || 'All Blocks',
-            shift: userData.shift || 'General Shift',
+            hostelBlock: userData.hostelBlock || userData.block || '',
             phone: String(userData.phone || '').trim(),
             status,
             mustChangePassword: true
         };
 
+        const client = getSupabaseClient();
         if (client) {
             try {
-                const { data, error } = await client
-                    .from(this.tableName)
-                    .insert([{ ...dbPayload, status }])
-                    .select()
-                    .single();
-                if (!error && data) return this._mapUser(data);
-            } catch (e) {}
-
-            try {
-                const { data, error } = await client
-                    .from(this.tableName)
-                    .insert([dbPayload])
-                    .select()
-                    .single();
-                if (!error && data) return this._mapUser(data);
+                const { data } = await client.from(this.tableName).insert([{
+                    user_id: cleanId,
+                    email: cleanEmail,
+                    password: hashPassword(userData.password || ''),
+                    name: String(userData.name || '').trim(),
+                    role: String(userData.role || 'student').trim().toLowerCase(),
+                    status
+                }]).select().single();
+                if (data) return this._mapUser(data);
             } catch (e) {}
         }
 
@@ -212,8 +267,7 @@ class UserRepository {
     }
 
     async update(userId, updates) {
-        const client = getSupabaseClient();
-        if (!client || !userId) return null;
+        if (!userId) return null;
         const cleanId = String(userId).trim();
 
         if (updates.status !== undefined) {
@@ -221,10 +275,46 @@ class UserRepository {
             if (updates.email) userStatusCache.set(String(updates.email).trim().toLowerCase(), updates.status);
         }
 
+        try {
+            const res = await db.query(
+                `UPDATE users SET
+                    name = COALESCE($1, name),
+                    email = COALESCE($2, email),
+                    password = CASE WHEN $3::text IS NOT NULL AND $3::text != '' THEN $3::text ELSE password END,
+                    phone = COALESCE($4, phone),
+                    status = COALESCE($5, status),
+                    "hostelBlock" = COALESCE($6, "hostelBlock"),
+                    "roomNumber" = COALESCE($7, "roomNumber"),
+                    "registrationNumber" = COALESCE($8, "registrationNumber"),
+                    updated_at = NOW()
+                 WHERE LOWER("userId") = LOWER($9) OR LOWER(email) = LOWER($9)
+                 RETURNING *`,
+                [
+                    updates.name ? String(updates.name).trim() : null,
+                    updates.email ? String(updates.email).trim().toLowerCase() : null,
+                    updates.password ? hashPassword(updates.password) : null,
+                    updates.phone ? String(updates.phone).trim() : null,
+                    updates.status || null,
+                    updates.hostelBlock || updates.block || null,
+                    updates.roomNumber || updates.room || null,
+                    updates.registrationNumber || updates.regNo || null,
+                    cleanId
+                ]
+            );
+            if (res.rows && res.rows.length > 0) {
+                return this._mapUser(res.rows[0]);
+            }
+        } catch (e) {
+            console.error('[UserRepository PostgreSQL Update Error]', e.message);
+        }
+
+        const client = getSupabaseClient();
+        if (!client) return null;
+
         const dbPayload = {};
         if (updates.name !== undefined) dbPayload.name = String(updates.name).trim();
         if (updates.email !== undefined) dbPayload.email = String(updates.email).trim().toLowerCase();
-        if (updates.password !== undefined && updates.password) dbPayload.password = updates.password;
+        if (updates.password !== undefined && updates.password) dbPayload.password = hashPassword(updates.password);
         if (updates.phone !== undefined) dbPayload.phone = String(updates.phone).trim();
         if (updates.roomNumber !== undefined || updates.room !== undefined) {
             dbPayload.room_number = updates.roomNumber || updates.room;
@@ -235,40 +325,31 @@ class UserRepository {
         if (updates.registrationNumber !== undefined || updates.regNo !== undefined) {
             dbPayload.registration_number = updates.registrationNumber || updates.regNo;
         }
-        if (updates.specialization !== undefined) {
-            dbPayload.specialization = updates.specialization;
-        }
-        if (updates.department !== undefined && !dbPayload.specialization) {
-            dbPayload.specialization = updates.department;
-        }
 
-        // If only status was updated, return current record with new status
-        if (Object.keys(dbPayload).length === 0) {
-            const current = await this.findUserByIdentifier(cleanId);
-            if (!current) return null;
-            return { ...current, status: updates.status || current.status };
-        }
-
-        let { data, error } = await client
-            .from(this.tableName)
-            .update(dbPayload)
-            .eq('user_id', cleanId)
-            .select()
-            .maybeSingle();
-
-        if (!data) {
-            const { data: byEmail, error: err2 } = await client
+        try {
+            let { data, error } = await client
                 .from(this.tableName)
                 .update(dbPayload)
-                .ilike('email', cleanId)
+                .eq('user_id', cleanId)
                 .select()
                 .maybeSingle();
-            if (err2) throw err2;
-            data = byEmail;
-        }
 
-        if (error && !data) throw error;
-        return data ? this._mapUser(data) : null;
+            if (!data) {
+                const { data: byEmail, error: err2 } = await client
+                    .from(this.tableName)
+                    .update(dbPayload)
+                    .ilike('email', cleanId)
+                    .select()
+                    .maybeSingle();
+                if (err2) throw err2;
+                data = byEmail;
+            }
+
+            if (error && !data) throw error;
+            return data ? this._mapUser(data) : null;
+        } catch (err) {
+            return null;
+        }
     }
 
     setStatus(idOrEmail, status) {
@@ -287,10 +368,20 @@ class UserRepository {
     }
 
     async updatePassword(userId, newPassword) {
-        const client = getSupabaseClient();
-        if (!client || !userId || !newPassword) return false;
+        if (!userId || !newPassword) return false;
         const cleanId = String(userId).trim();
         const hashedPassword = hashPassword(newPassword);
+
+        try {
+            const res = await db.query(
+                `UPDATE users SET password = $1, updated_at = NOW() WHERE LOWER("userId") = LOWER($2) OR LOWER(email) = LOWER($2) RETURNING *`,
+                [hashedPassword, cleanId]
+            );
+            if (res.rows && res.rows.length > 0) return true;
+        } catch (e) {}
+
+        const client = getSupabaseClient();
+        if (!client) return false;
 
         const dbPayload = {
             password: hashedPassword,
@@ -315,16 +406,6 @@ class UserRepository {
                 data = byEmail;
             }
 
-            // Also update Supabase Auth if auth.admin is accessible
-            if (client && client.auth && client.auth.admin && data && data.email) {
-                try {
-                    await client.auth.admin.updateUserById(data.user_id, {
-                        password: newPassword,
-                        user_metadata: { must_change_password: false }
-                    });
-                } catch (e) {}
-            }
-
             return Boolean(data);
         } catch (err) {
             console.error('[UserRepository] updatePassword error:', err);
@@ -333,12 +414,16 @@ class UserRepository {
     }
 
     async delete(userId) {
-        const client = getSupabaseClient();
         if (!userId) return false;
         const cleanId = String(userId).trim();
         
         userStatusCache.delete(cleanId);
 
+        try {
+            await db.query(`DELETE FROM users WHERE LOWER("userId") = LOWER($1) OR LOWER(email) = LOWER($1)`, [cleanId]);
+        } catch (e) {}
+
+        const client = getSupabaseClient();
         if (client) {
             try {
                 let { error } = await client
@@ -363,12 +448,13 @@ class UserRepository {
 
     _mapUser(row) {
         if (!row) return null;
-        const cachedStatus = userStatusCache.get(row.user_id) || userStatusCache.get(row.email);
+        const userIdVal = row.userId || row.user_id || row.id;
+        const cachedStatus = userStatusCache.get(userIdVal) || userStatusCache.get(row.email);
         const isTech = String(row.role || '').toLowerCase() === 'technician';
         
         let meta = {};
         try {
-            if (row.specialization && row.specialization.startsWith('{')) {
+            if (row.specialization && typeof row.specialization === 'string' && row.specialization.startsWith('{')) {
                 meta = JSON.parse(row.specialization);
             }
         } catch (e) {}
@@ -379,27 +465,31 @@ class UserRepository {
             row.must_change_password === true
         );
 
+        const roomNum = row.roomNumber || row.room_number || row.room || '';
+        const blockVal = row.hostelBlock || row.block || '';
+        const regNo = row.registrationNumber || row.registration_number || '';
+
         return {
-            id: row.user_id,
-            userId: row.user_id,
-            technicianId: row.user_id,
+            id: userIdVal,
+            userId: userIdVal,
+            technicianId: userIdVal,
             email: row.email,
             password: row.password,
             name: row.name,
             role: row.role,
-            roomNumber: row.room_number,
-            room: row.room_number,
-            block: row.block,
-            hostelBlock: row.block,
-            registrationNumber: row.registration_number,
-            phone: row.phone,
+            roomNumber: roomNum,
+            room: roomNum,
+            block: blockVal,
+            hostelBlock: blockVal,
+            registrationNumber: regNo,
+            phone: row.phone || '',
             specialization: row.specialization || (isTech ? 'General Maintenance' : ''),
             department: row.specialization || (isTech ? 'Maintenance Department' : ''),
             status: row.status || cachedStatus || 'Active',
             authUserId: meta.auth_user_id || row.auth_user_id || '',
             mustChangePassword: mustChangePassword,
-            createdAt: row.created_at,
-            updatedAt: row.updated_at
+            createdAt: row.created_at || row.createdAt,
+            updatedAt: row.updated_at || row.updatedAt
         };
     }
 }

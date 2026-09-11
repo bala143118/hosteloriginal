@@ -1290,14 +1290,15 @@ async function openWardenDigitalIdModal(wardenId) {
     if (document.getElementById('idCardSignatureFingerprint')) document.getElementById('idCardSignatureFingerprint').textContent = fingerprint;
     if (document.getElementById('idCardSignedAt')) document.getElementById('idCardSignedAt').textContent = signedAt;
 
-    // Scannable dynamic QR Code
+    // Scannable dynamic QR Code (Optimized for Google Lens and Camera Scanners)
     if (document.getElementById('idCardQrImage')) {
         const qrEl = document.getElementById('idCardQrImage');
-        if (sig.qrImage) {
+        const origin = window.location.origin;
+        const verifyUrl = `${origin}/verify-warden?id=${encodeURIComponent(cleanId)}&cert=${encodeURIComponent(certId)}`;
+        if (sig.qrImage && sig.qrPayload && String(sig.qrPayload).startsWith('http')) {
             qrEl.src = sig.qrImage;
         } else {
-            const qrData = encodeURIComponent(`https://hostelfix.edu/verify-warden?id=${cleanId}&cert=${certId}`);
-            qrEl.src = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${qrData}`;
+            qrEl.src = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(verifyUrl)}`;
         }
     }
 
