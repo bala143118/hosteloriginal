@@ -46,3 +46,6 @@ Thumbs.db
 .idea/
 *.log
 .venv-ai/
+.venv-ai/
+__pycache__/
+*.pyc
