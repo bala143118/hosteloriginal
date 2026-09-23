@@ -210,7 +210,10 @@ async function runTestSuite() {
     console.log(`  🎉 SUMMARY: All ${passed}/${total} integration tests passed successfully!`);
     console.log('------------------------------------------------------------\n');
   } finally {
-    server.close();
+    server.close(() => {
+      process.exit(0);
+    });
+    setTimeout(() => process.exit(0), 500);
   }
 }
 

@@ -38,7 +38,7 @@ class WardenPermissionRepository {
 
         try {
             const res = await db.query(
-                `SELECT * FROM warden_permissions WHERE LOWER("wardenId") = LOWER($1) LIMIT 1`,
+                `SELECT * FROM warden_permissions WHERE LOWER("wardenId") = LOWER($1) ORDER BY "updatedAt" DESC LIMIT 1`,
                 [cleanId]
             );
             if (res.rows && res.rows.length > 0) {
@@ -48,9 +48,8 @@ class WardenPermissionRepository {
                 if (row.canIssuePasses) perms.push('view_gatepasses', 'approve_gatepasses');
                 if (row.canManageInventory) perms.push('view_inventory', 'manage_inventory');
                 if (row.canManageStudents) perms.push('view_students', 'manage_students');
-                const fullPerms = Array.from(new Set([...perms, ...DEFAULT_WARDEN_PERMISSIONS]));
-                permissionCache.set(cleanId, fullPerms);
-                return fullPerms;
+                permissionCache.set(cleanId, perms);
+                return perms;
             }
         } catch (e) {}
 

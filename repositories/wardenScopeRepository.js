@@ -14,7 +14,7 @@ class WardenScopeRepository {
 
         try {
             const res = await db.query(
-                `SELECT * FROM warden_scopes WHERE LOWER("wardenId") = LOWER($1) LIMIT 1`,
+                `SELECT * FROM warden_scopes WHERE LOWER("wardenId") = LOWER($1) ORDER BY id DESC LIMIT 1`,
                 [cleanId]
             );
             if (res.rows && res.rows.length > 0) {

@@ -115,6 +115,18 @@ input[type="password"]::-ms-clear {
 .badge-high { background: #FEE2E2; color: #991B1B; }
 .badge-medium { background: #FEF3C7; color: #92400E; }
 .badge-low { background: #E0F2FE; color: #075985; }
+.badge-pending,
+.badge-progress,
+.badge-completed,
+.badge-high,
+.badge-medium,
+.badge-low {
+    white-space: nowrap !important;
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0 !important;
+}
 .dark .badge-pending { background: #451A0A; color: #FCD34D; }
 .dark .badge-progress { background: #1E3A5F; color: #93C5FD; }
 .dark .badge-completed { background: #064E3B; color: #6EE7B7; }

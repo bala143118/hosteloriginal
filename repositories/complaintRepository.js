@@ -210,8 +210,8 @@ class ComplaintRepository {
         // 1. Try PostgreSQL
         try {
             const res = await db.query(
-                `INSERT INTO complaints (id, student, email, "registrationNumber", "hostelBlock", "roomNumber", category, priority, description, status, "assignedTo", timeline, "createdAt", "updatedAt")
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, NOW(), NOW())
+                `INSERT INTO complaints (id, student, email, "registrationNumber", "hostelBlock", "roomNumber", category, priority, description, status, "assignedTo", timeline, student_id, "studentId", "createdAt", "updatedAt")
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, $13, $13, NOW(), NOW())
                  ON CONFLICT (id) DO UPDATE SET
                     student = EXCLUDED.student,
                     email = EXCLUDED.email,
@@ -219,16 +219,19 @@ class ComplaintRepository {
                     priority = EXCLUDED.priority,
                     description = EXCLUDED.description,
                     status = EXCLUDED.status,
+                    student_id = EXCLUDED.student_id,
+                    "studentId" = EXCLUDED."studentId",
                     "updatedAt" = NOW()
                  RETURNING *`,
                 [
                     id, studentName, studentEmail, regNo, block, roomNumber,
                     category, priority, description, 'Submitted', 'Unassigned',
-                    JSON.stringify(initialHistory)
+                    JSON.stringify(initialHistory), studentId
                 ]
             );
             if (res.rows && res.rows.length > 0) {
                 const mapped = this._mapComplaint(res.rows[0]);
+                if (!mapped.studentId && studentId) mapped.studentId = studentId;
                 complaintLocalCache.set(id, mapped);
             }
         } catch (pgErr) {
@@ -413,6 +416,14 @@ class ComplaintRepository {
         }
 
         return complaintLocalCache.get(complaintId) || complaint;
+    }
+
+    async updateStatus(id, status, ...args) {
+        return this.updateWorkflowStatus(id, { status, remarks: args[0] });
+    }
+
+    async assignTechnician(complaintId, technicianIdOrOptions, ...rest) {
+        return this.assignStaff(complaintId, technicianIdOrOptions, ...rest);
     }
 
     async delete(id) {

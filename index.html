@@ -6,7 +6,6 @@
     <title>Smart Hostel Maintenance Management System</title>
     <script src="public/vendor/tailwindcss.js" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4';"></script>
     <link rel="stylesheet" href="public/vendor/fontawesome.css" onerror="this.onerror=null;this.href='https://cdnjs.cloudflare.com/ajax/libs/font-awesome/7.3.0/css/all.min.css';">
-    <script src="public/vendor/html5-qrcode.js" onerror="this.onerror=null;this.src='https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js';"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <style type="text/tailwindcss">
@@ -407,12 +406,12 @@
             box-shadow:0 4px 12px rgba(37,99,235,.25);
         }
     </style>
-    <link rel="stylesheet" href="styles.css?v=2026-09-03-v19">
+    <link rel="stylesheet" href="styles.css?v=2026-09-23-v4">
 </head>
 <body class="bg-surface-alt text-text antialiased">
     <div id="toastContainer" class="fixed top-4 right-4 z-50 space-y-3"></div>
     <div id="modalOverlay" class="modal-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 hidden">
-        <div id="modalContent" class="modal-content bg-surface rounded-[2rem] shadow-2xl max-w-5xl w-full max-h-[92vh] overflow-y-auto"></div>
+        <div id="modalContent" class="modal-content bg-surface rounded-[2rem] shadow-2xl max-w-xl w-full max-h-[92vh] overflow-y-auto transition-all"></div>
     </div>
     <div id="loadingOverlay" class="fixed inset-0 z-[60] bg-surface/80 backdrop-blur-sm flex items-center justify-center hidden">
         <div class="flex flex-col items-center gap-4"><div class="spinner w-12 h-12"></div><p class="text-text-secondary font-medium">Loading...</p></div>
@@ -744,7 +743,7 @@
                         <p class="text-text-muted text-sm"> 2026 HostelFix. All rights reserved.</p>
                         <div class="flex items-center gap-4">
                             <a href="#" aria-label="Twitter" class="w-10 h-10 rounded-full bg-surface-alt border border-border flex items-center justify-center hover:bg-primary hover:text-white hover:border-primary transition-all"><i class="fa-brands fa-twitter"></i></a>
-                            <a href="#" aria-label="LinkedIn" class="w-10 h-10 rounded-full bg-surface-alt border border-border flex items-center justify-center hover:bg-primary hover:text-white hover:border-primary transition-all"><i class="fa-brands fa-linkedin"></i></a>
+                            <a href="https://www.linkedin.com/posts/siet-achivement-2ndprize-share-7504163261823590400-ycwN?utm_source=social_share_send&utm_medium=android_app&rcm=ACoAAFTpfiwBvZq7ecVD3mThlz6Nr2wnOjhkv1I&utm_campaign=whatsapp" target="_blank" rel="noopener noreferrer" aria-label="LinkedIn" class="w-10 h-10 rounded-full bg-surface-alt border border-border flex items-center justify-center hover:bg-primary hover:text-white hover:border-primary transition-all"><i class="fa-brands fa-linkedin"></i></a>
                             <a href="#" aria-label="GitHub" class="w-10 h-10 rounded-full bg-surface-alt border border-border flex items-center justify-center hover:bg-primary hover:text-white hover:border-primary transition-all"><i class="fa-brands fa-github"></i></a>
                         </div>
                     </div>
@@ -1292,7 +1291,7 @@
                             </button>
                         </nav>
                         <div class="mt-8 pt-6 border-t border-border">
-                            <button onclick="navigateTo('landing')" class="w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 text-danger hover:bg-danger/5 transition-all">
+                            <button onclick="logoutCurrentUser()" class="w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 text-danger hover:bg-danger/5 transition-all">
                                 <i class="fa-solid fa-right-from-bracket w-5 text-center"></i> Logout
                             </button>
                         </div>
@@ -1591,7 +1590,7 @@
                             </button>
                         </nav>
                         <div class="mt-8 pt-6 border-t border-border">
-                            <button onclick="navigateTo('landing')" class="w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 text-danger hover:bg-danger/5 transition-all">
+                            <button onclick="logoutCurrentUser()" class="w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 text-danger hover:bg-danger/5 transition-all">
                                 <i class="fa-solid fa-right-from-bracket w-5 text-center"></i> Logout
                             </button>
                         </div>
@@ -1684,7 +1683,7 @@
                             </button>
                         </nav>
                         <div class="mt-8 pt-6 border-t border-border">
-                            <button onclick="navigateTo('landing')" class="w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 text-danger hover:bg-danger/5 transition-all">
+                            <button onclick="logoutCurrentUser()" class="w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 text-danger hover:bg-danger/5 transition-all">
                                 <i class="fa-solid fa-right-from-bracket w-5 text-center"></i> Logout
                             </button>
                         </div>
@@ -1725,24 +1724,6 @@
                     </div>
                 </div>
 
-                <!-- Auto-Detected Student Identity Banner -->
-                <div id="complaintStudentIdentityBanner" class="mb-6 rounded-2xl border border-border bg-gradient-to-r from-primary/10 via-surface to-emerald/10 p-4 sm:p-5 shadow-xs">
-                    <div class="flex items-center justify-between gap-3">
-                        <div class="flex items-center gap-3">
-                            <div class="w-10 h-10 rounded-xl bg-primary text-white flex items-center justify-center font-bold text-sm shadow-xs shrink-0">
-                                <i class="fa-solid fa-id-card"></i>
-                            </div>
-                            <div>
-                                <p class="text-xs font-semibold text-text-secondary">Logged-in Student Account</p>
-                                <h4 id="complaintStudentBadgeName" class="font-bold text-sm text-text mt-0.5">Student Account</h4>
-                                <p id="complaintStudentBadgeDetails" class="text-xs text-text-secondary mt-0.5">ID: — • Block A • Room 101</p>
-                            </div>
-                        </div>
-                        <span class="px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald/15 text-emerald border border-emerald/30">
-                            Verified Resident
-                        </span>
-                    </div>
-                </div>
 
                 <form onsubmit="handleComplaintSubmit(event)" class="glass rounded-2xl border border-border p-6 sm:p-8 space-y-6">
                     <!-- Hidden auto-filled student identity fields -->
@@ -1827,6 +1808,7 @@
                             <div class="relative">
                                 <i class="fa-solid fa-building absolute left-4 top-1/2 -translate-y-1/2 text-text-muted"></i>
                                 <select id="complaintHostelBlock" required class="input-focus w-full pl-11 pr-9 py-3 rounded-xl border border-border bg-surface-alt text-sm font-medium appearance-none">
+                                    <option value="" disabled selected>Select Hostel Block</option>
                                     <option value="Block A">Block A</option>
                                     <option value="Block B">Block B</option>
                                     <option value="Block C">Block C</option>
@@ -2121,7 +2103,7 @@
                             </button>
                         </nav>
                         <div class="mt-8 pt-6 border-t border-border">
-                            <button onclick="navigateTo('landing')" class="w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 text-danger hover:bg-danger/5 transition-all">
+                            <button onclick="logoutCurrentUser()" class="w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 text-danger hover:bg-danger/5 transition-all">
                                 <i class="fa-solid fa-right-from-bracket w-5 text-center"></i> Logout
                             </button>
                         </div>
@@ -2711,7 +2693,7 @@
                             </button>
                         </nav>
                         <div class="mt-8 pt-6 border-t border-border">
-                            <button onclick="navigateTo('landing')" class="w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 text-danger hover:bg-danger/5 transition-all">
+                            <button onclick="logoutCurrentUser()" class="w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 text-danger hover:bg-danger/5 transition-all">
                                 <i class="fa-solid fa-right-from-bracket w-5 text-center"></i> Logout
                             </button>
                         </div>
@@ -2821,19 +2803,19 @@
                             </div>
                         </div>
                         <div class="overflow-x-auto">
-                            <table class="w-full">
+                            <table class="w-full min-w-[1050px]">
                                 <thead class="bg-surface-alt">
                                     <tr>
-                                        <th class="text-left px-6 py-4 text-xs font-semibold text-text-secondary uppercase tracking-wider">ID</th>
-                                        <th class="text-left px-6 py-4 text-xs font-semibold text-text-secondary uppercase tracking-wider">Student</th>
-                                        <th class="text-left px-6 py-4 text-xs font-semibold text-text-secondary uppercase tracking-wider">Reg. No</th>
-                                        <th class="text-left px-6 py-4 text-xs font-semibold text-text-secondary uppercase tracking-wider">Reason</th>
-                                        <th class="text-left px-6 py-4 text-xs font-semibold text-text-secondary uppercase tracking-wider">Session</th>
-                                        <th class="text-left px-6 py-4 text-xs font-semibold text-text-secondary uppercase tracking-wider">Out Date</th>
-                                        <th class="text-left px-6 py-4 text-xs font-semibold text-text-secondary uppercase tracking-wider">Return Date</th>
-                                        <th class="text-left px-6 py-4 text-xs font-semibold text-text-secondary uppercase tracking-wider">Status</th>
-                                        <th class="text-left px-6 py-4 text-xs font-semibold text-text-secondary uppercase tracking-wider">Photo</th>
-                                        <th class="text-left px-6 py-4 text-xs font-semibold text-text-secondary uppercase tracking-wider">Action</th>
+                                        <th class="text-left px-4 py-3.5 text-xs font-semibold text-text-secondary uppercase tracking-wider whitespace-nowrap align-middle">ID</th>
+                                        <th class="text-left px-4 py-3.5 text-xs font-semibold text-text-secondary uppercase tracking-wider whitespace-nowrap align-middle">Student</th>
+                                        <th class="text-left px-4 py-3.5 text-xs font-semibold text-text-secondary uppercase tracking-wider whitespace-nowrap align-middle">Reg. No</th>
+                                        <th class="text-left px-4 py-3.5 text-xs font-semibold text-text-secondary uppercase tracking-wider whitespace-nowrap align-middle">Reason</th>
+                                        <th class="text-left px-4 py-3.5 text-xs font-semibold text-text-secondary uppercase tracking-wider whitespace-nowrap align-middle">Session</th>
+                                        <th class="text-left px-4 py-3.5 text-xs font-semibold text-text-secondary uppercase tracking-wider whitespace-nowrap align-middle">Out Date</th>
+                                        <th class="text-left px-4 py-3.5 text-xs font-semibold text-text-secondary uppercase tracking-wider whitespace-nowrap align-middle">Return Date</th>
+                                        <th class="text-left px-4 py-3.5 text-xs font-semibold text-text-secondary uppercase tracking-wider whitespace-nowrap align-middle">Status</th>
+                                        <th class="text-left px-4 py-3.5 text-xs font-semibold text-text-secondary uppercase tracking-wider whitespace-nowrap align-middle">Photo</th>
+                                        <th class="text-left px-4 py-3.5 text-xs font-semibold text-text-secondary uppercase tracking-wider whitespace-nowrap align-middle">Action</th>
                                     </tr>
                                 </thead>
                                 <tbody id="adminGatePassTableBody" class="divide-y divide-border"></tbody>
@@ -2976,7 +2958,7 @@
                             </button>
                         </nav>
                         <div class="mt-8 pt-6 border-t border-border">
-                            <button onclick="navigateTo('landing')" class="w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 text-danger hover:bg-danger/5 transition-all">
+                            <button onclick="logoutCurrentUser()" class="w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 text-danger hover:bg-danger/5 transition-all">
                                 <i class="fa-solid fa-right-from-bracket w-5 text-center"></i> Logout
                             </button>
                         </div>
@@ -3021,7 +3003,7 @@
                             </button>
                         </nav>
                         <div class="mt-8 pt-6 border-t border-border">
-                            <button onclick="navigateTo('landing')" class="w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 text-danger hover:bg-danger/5 transition-all">
+                            <button onclick="logoutCurrentUser()" class="w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 text-danger hover:bg-danger/5 transition-all">
                                 <i class="fa-solid fa-right-from-bracket w-5 text-center"></i> Logout
                             </button>
                         </div>
@@ -3064,7 +3046,7 @@
                             </button>
                         </nav>
                         <div class="mt-8 pt-6 border-t border-border">
-                            <button onclick="navigateTo('landing')" class="w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 text-danger hover:bg-danger/5 transition-all">
+                            <button onclick="logoutCurrentUser()" class="w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 text-danger hover:bg-danger/5 transition-all">
                                 <i class="fa-solid fa-right-from-bracket w-5 text-center"></i> Logout
                             </button>
                         </div>
@@ -3151,6 +3133,7 @@
                             </button>
                             <button onclick="navigateTo('admin-complaints')" class="sidebar-item w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 text-text-secondary hover:text-text">
                                 <i class="fa-solid fa-clipboard-list w-5 text-center"></i> Complaints
+                                <span class="admin-complaints-badge ml-auto bg-danger text-white text-xs px-2 py-0.5 rounded-full font-semibold">0</span>
                             </button>
                             <button onclick="navigateTo('admin-reports')" class="sidebar-item w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 text-text-secondary hover:text-text">
                                 <i class="fa-solid fa-chart-line w-5 text-center"></i> Reports
@@ -3160,7 +3143,7 @@
                             </button>
                         </nav>
                         <div class="mt-8 pt-6 border-t border-border">
-                            <button onclick="navigateTo('landing')" class="w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 text-danger hover:bg-danger/5 transition-all">
+                            <button onclick="logoutCurrentUser()" class="w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 text-danger hover:bg-danger/5 transition-all">
                                 <i class="fa-solid fa-right-from-bracket w-5 text-center"></i> Logout
                             </button>
                         </div>
@@ -3207,6 +3190,7 @@
                             </button>
                             <button onclick="navigateTo('admin-complaints')" class="sidebar-item w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 text-text-secondary hover:text-text">
                                 <i class="fa-solid fa-clipboard-list w-5 text-center"></i> Complaints
+                                <span class="admin-complaints-badge ml-auto bg-danger text-white text-xs px-2 py-0.5 rounded-full font-semibold">0</span>
                             </button>
                             <button onclick="navigateTo('admin-reports')" class="sidebar-item w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 text-text-secondary hover:text-text">
                                 <i class="fa-solid fa-chart-line w-5 text-center"></i> Reports
@@ -3216,7 +3200,7 @@
                             </button>
                         </nav>
                         <div class="mt-8 pt-6 border-t border-border">
-                            <button onclick="navigateTo('landing')" class="w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 text-danger hover:bg-danger/5 transition-all">
+                            <button onclick="logoutCurrentUser()" class="w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 text-danger hover:bg-danger/5 transition-all">
                                 <i class="fa-solid fa-right-from-bracket w-5 text-center"></i> Logout
                             </button>
                         </div>
@@ -3309,15 +3293,15 @@
                             <table class="w-full">
                                 <thead class="bg-surface-alt">
                                     <tr>
-                                        <th class="text-left px-4 py-3.5 text-xs font-semibold text-text-secondary uppercase">Student</th>
-                                        <th class="text-left px-4 py-3.5 text-xs font-semibold text-text-secondary uppercase">Pass & Cert ID</th>
-                                        <th class="text-left px-4 py-3.5 text-xs font-semibold text-text-secondary uppercase">Warden Approval</th>
-                                        <th class="text-left px-4 py-3.5 text-xs font-semibold text-text-secondary uppercase">Security Exit</th>
-                                        <th class="text-left px-4 py-3.5 text-xs font-semibold text-text-secondary uppercase">Warden Arrival</th>
-                                        <th class="text-left px-4 py-3.5 text-xs font-semibold text-text-secondary uppercase">Exit Time</th>
-                                        <th class="text-left px-4 py-3.5 text-xs font-semibold text-text-secondary uppercase">Hostel Arrival</th>
-                                        <th class="text-left px-4 py-3.5 text-xs font-semibold text-text-secondary uppercase">Final Status</th>
-                                        <th class="text-left px-4 py-3.5 text-xs font-semibold text-text-secondary uppercase">Actions</th>
+                                        <th class="text-left px-4 py-3.5 text-xs font-semibold text-text-secondary uppercase whitespace-nowrap">Student</th>
+                                        <th class="text-left px-4 py-3.5 text-xs font-semibold text-text-secondary uppercase whitespace-nowrap">Pass & Cert ID</th>
+                                        <th class="text-left px-4 py-3.5 text-xs font-semibold text-text-secondary uppercase whitespace-nowrap">Warden Approval</th>
+                                        <th class="text-left px-4 py-3.5 text-xs font-semibold text-text-secondary uppercase whitespace-nowrap">Security Exit</th>
+                                        <th class="text-left px-4 py-3.5 text-xs font-semibold text-text-secondary uppercase whitespace-nowrap">Warden Arrival</th>
+                                        <th class="text-left px-4 py-3.5 text-xs font-semibold text-text-secondary uppercase whitespace-nowrap">Exit Time</th>
+                                        <th class="text-left px-4 py-3.5 text-xs font-semibold text-text-secondary uppercase whitespace-nowrap">Hostel Arrival</th>
+                                        <th class="text-left px-4 py-3.5 text-xs font-semibold text-text-secondary uppercase whitespace-nowrap">Final Status</th>
+                                        <th class="text-left px-4 py-3.5 text-xs font-semibold text-text-secondary uppercase whitespace-nowrap">Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody id="adminGatePassLogFullTableBody" class="divide-y divide-border"></tbody>
@@ -3356,6 +3340,7 @@
                             </button>
                             <button onclick="navigateTo('admin-complaints')" class="sidebar-item w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 text-text-secondary hover:text-text">
                                 <i class="fa-solid fa-clipboard-list w-5 text-center"></i> Complaints
+                                <span class="admin-complaints-badge ml-auto bg-danger text-white text-xs px-2 py-0.5 rounded-full font-semibold">0</span>
                             </button>
                             <button onclick="navigateTo('admin-reports')" class="sidebar-item w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 text-text-secondary hover:text-text">
                                 <i class="fa-solid fa-chart-line w-5 text-center"></i> Reports
@@ -3365,7 +3350,7 @@
                             </button>
                         </nav>
                         <div class="mt-8 pt-6 border-t border-border">
-                            <button onclick="navigateTo('landing')" class="w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 text-danger hover:bg-danger/5 transition-all">
+                            <button onclick="logoutCurrentUser()" class="w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 text-danger hover:bg-danger/5 transition-all">
                                 <i class="fa-solid fa-right-from-bracket w-5 text-center"></i> Logout
                             </button>
                         </div>
@@ -3436,6 +3421,7 @@
                             </button>
                             <button onclick="navigateTo('admin-complaints')" class="sidebar-item w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 text-text-secondary hover:text-text">
                                 <i class="fa-solid fa-clipboard-list w-5 text-center"></i> Complaints
+                                <span class="admin-complaints-badge ml-auto bg-danger text-white text-xs px-2 py-0.5 rounded-full font-semibold">0</span>
                             </button>
                             <button onclick="navigateTo('admin-reports')" class="sidebar-item w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 text-text-secondary hover:text-text">
                                 <i class="fa-solid fa-chart-line w-5 text-center"></i> Reports
@@ -3445,7 +3431,7 @@
                             </button>
                         </nav>
                         <div class="mt-8 pt-6 border-t border-border">
-                            <button onclick="navigateTo('landing')" class="w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 text-danger hover:bg-danger/5 transition-all">
+                            <button onclick="logoutCurrentUser()" class="w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 text-danger hover:bg-danger/5 transition-all">
                                 <i class="fa-solid fa-right-from-bracket w-5 text-center"></i> Logout
                             </button>
                         </div>
@@ -3495,7 +3481,7 @@
 
                     <!-- Dynamic Wardens Grid -->
                     <div id="adminWardensGrid" class="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
-                        <div class="glass p-6 rounded-2xl text-center text-text-secondary">Loading wardens list from Supabase...</div>
+                        <div class="glass p-6 rounded-2xl text-center text-text-secondary">Loading wardens list...</div>
                     </div>
                 </div>
             </div>
@@ -3529,6 +3515,7 @@
                             </button>
                             <button onclick="navigateTo('admin-complaints')" class="sidebar-item w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 text-text-secondary hover:text-text">
                                 <i class="fa-solid fa-clipboard-list w-5 text-center"></i> Complaints
+                                <span class="admin-complaints-badge ml-auto bg-danger text-white text-xs px-2 py-0.5 rounded-full font-semibold">0</span>
                             </button>
                             <button onclick="navigateTo('admin-reports')" class="sidebar-item w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 text-text-secondary hover:text-text">
                                 <i class="fa-solid fa-chart-line w-5 text-center"></i> Reports
@@ -3538,7 +3525,7 @@
                             </button>
                         </nav>
                         <div class="mt-8 pt-6 border-t border-border">
-                            <button onclick="navigateTo('landing')" class="w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 text-danger hover:bg-danger/5 transition-all">
+                            <button onclick="logoutCurrentUser()" class="w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 text-danger hover:bg-danger/5 transition-all">
                                 <i class="fa-solid fa-right-from-bracket w-5 text-center"></i> Logout
                             </button>
                         </div>
@@ -3645,7 +3632,7 @@
                             </button>
                             <button onclick="navigateTo('admin-complaints')" class="sidebar-item active w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 text-primary">
                                 <i class="fa-solid fa-clipboard-list w-5 text-center"></i> Complaints
-                                <span class="ml-auto bg-danger text-white text-xs px-2 py-0.5 rounded-full">18</span>
+                                <span class="admin-complaints-badge ml-auto bg-danger text-white text-xs px-2 py-0.5 rounded-full font-semibold">0</span>
                             </button>
                             <button onclick="navigateTo('admin-reports')" class="sidebar-item w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 text-text-secondary hover:text-text">
                                 <i class="fa-solid fa-chart-line w-5 text-center"></i> Reports
@@ -3655,7 +3642,7 @@
                             </button>
                         </nav>
                         <div class="mt-8 pt-6 border-t border-border">
-                            <button onclick="navigateTo('landing')" class="w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 text-danger hover:bg-danger/5 transition-all">
+                            <button onclick="logoutCurrentUser()" class="w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 text-danger hover:bg-danger/5 transition-all">
                                 <i class="fa-solid fa-right-from-bracket w-5 text-center"></i> Logout
                             </button>
                         </div>
@@ -3805,6 +3792,7 @@
                             </button>
                             <button onclick="navigateTo('admin-complaints')" class="sidebar-item w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 text-text-secondary hover:text-text">
                                 <i class="fa-solid fa-clipboard-list w-5 text-center"></i> Complaints
+                                <span class="admin-complaints-badge ml-auto bg-danger text-white text-xs px-2 py-0.5 rounded-full font-semibold">0</span>
                             </button>
                             <button onclick="navigateTo('admin-reports')" class="sidebar-item active w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 text-primary">
                                 <i class="fa-solid fa-chart-line w-5 text-center"></i> Reports
@@ -3814,7 +3802,7 @@
                             </button>
                         </nav>
                         <div class="mt-8 pt-6 border-t border-border">
-                            <button onclick="navigateTo('landing')" class="w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 text-danger hover:bg-danger/5 transition-all">
+                            <button onclick="logoutCurrentUser()" class="w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 text-danger hover:bg-danger/5 transition-all">
                                 <i class="fa-solid fa-right-from-bracket w-5 text-center"></i> Logout
                             </button>
                         </div>
@@ -4039,6 +4027,7 @@
                             </button>
                             <button onclick="navigateTo('admin-complaints')" class="sidebar-item w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 text-text-secondary hover:text-text">
                                 <i class="fa-solid fa-clipboard-list w-5 text-center"></i> Complaints
+                                <span class="admin-complaints-badge ml-auto bg-danger text-white text-xs px-2 py-0.5 rounded-full font-semibold">0</span>
                             </button>
                             <button onclick="navigateTo('admin-reports')" class="sidebar-item w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 text-text-secondary hover:text-text">
                                 <i class="fa-solid fa-chart-line w-5 text-center"></i> Reports
@@ -4048,7 +4037,7 @@
                             </button>
                         </nav>
                         <div class="mt-8 pt-6 border-t border-border">
-                            <button onclick="navigateTo('landing')" class="w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 text-danger hover:bg-danger/5 transition-all">
+                            <button onclick="logoutCurrentUser()" class="w-full text-left px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-3 text-danger hover:bg-danger/5 transition-all">
                                 <i class="fa-solid fa-right-from-bracket w-5 text-center"></i> Logout
                             </button>
                         </div>
@@ -4159,14 +4148,14 @@
                             <!-- Card 2: Telegram Emergency Alerts -->
                             <div id="section-telegram" class="glass rounded-2xl border border-border p-6 space-y-6">
                                 <div class="flex items-center justify-between gap-4 pb-4 border-b border-border">
-                                    <div class="flex items-center gap-3">
-                                        <div class="w-10 h-10 rounded-xl bg-emerald/10 text-emerald flex items-center justify-center text-lg"><i class="fa-solid fa-paper-plane"></i></div>
-                                        <div>
+                                    <div class="flex items-center gap-3 min-w-0">
+                                        <div class="w-10 h-10 rounded-xl bg-emerald/10 text-emerald flex items-center justify-center text-lg shrink-0"><i class="fa-solid fa-paper-plane"></i></div>
+                                        <div class="min-w-0">
                                             <h3 class="font-bold text-base">Telegram AI Emergency Alerts</h3>
                                             <p class="text-xs text-text-secondary">Configure automatic fire/smoke detection alerts sent to Telegram.</p>
                                         </div>
                                     </div>
-                                    <span id="adminTelegramStatusBadge" class="badge-pending px-3 py-1 rounded-full text-xs font-semibold">Checking Telegram...</span>
+                                    <span id="adminTelegramStatusBadge" class="badge-pending px-3 py-1 rounded-full text-xs font-semibold shrink-0 whitespace-nowrap inline-flex items-center justify-center" style="white-space: nowrap !important; flex-shrink: 0 !important;">Not Configured</span>
                                 </div>
 
                                 <div class="p-4 rounded-xl bg-emerald/10 border border-emerald/20 text-xs leading-relaxed flex items-start gap-3">
@@ -4225,6 +4214,114 @@
                                         </button>
                                         <button type="button" id="testTelegramAlertBtn" onclick="testTelegramAlertConnection()" class="px-4 py-2.5 rounded-xl border border-border text-xs font-semibold text-primary hover:bg-surface-alt transition-all flex items-center gap-2">
                                             <i class="fa-solid fa-paper-plane text-xs"></i> Test Telegram Alert
+                                        </button>
+                                    </div>
+                                </form>
+                            </div>
+
+                            <!-- Card: Dynamic Email & SMTP Configuration -->
+                            <div id="section-email" class="glass rounded-2xl border border-border p-6 space-y-6">
+                                <div class="flex items-center justify-between gap-4 pb-4 border-b border-border">
+                                    <div class="flex items-center gap-3 min-w-0">
+                                        <div class="w-10 h-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center text-lg shrink-0"><i class="fa-solid fa-envelope"></i></div>
+                                        <div class="min-w-0">
+                                             <h3 class="font-bold text-base">Dynamic Email & SMTP Configuration</h3>
+                                             <p class="text-xs text-text-secondary">Configure mail server dynamically for verification codes, OTPs, and alerts without restarting the server.</p>
+                                         </div>
+                                    </div>
+                                    <span id="adminEmailStatusBadge" class="badge-pending px-3 py-1 rounded-full text-xs font-semibold shrink-0 whitespace-nowrap inline-flex items-center justify-center" style="white-space: nowrap !important; flex-shrink: 0 !important;">Not Configured</span>
+                                </div>
+
+                                <div class="p-4 rounded-xl bg-primary/10 border border-primary/20 text-xs leading-relaxed flex items-start gap-3">
+                                    <i class="fa-solid fa-circle-info text-primary text-base shrink-0 mt-0.5"></i>
+                                    <div>
+                                        <p class="font-bold text-primary mb-0.5">Live Dynamic Configuration</p>
+                                        <p class="text-text-secondary">Changes saved here take effect immediately without restarting the server or editing <code class="bg-surface px-1 py-0.5 rounded border text-[11px]">.env</code> files. For Gmail, generate a 16-digit Google App Password in your Google Account Security settings.</p>
+                                    </div>
+                                </div>
+
+                                <form onsubmit="saveEmailSettings(event)" class="space-y-5">
+                                    <div class="grid sm:grid-cols-2 gap-6">
+                                        <div>
+                                            <label class="block text-xs font-semibold text-text-secondary uppercase tracking-wider mb-2">Email Provider Preset</label>
+                                            <div class="relative">
+                                                <i class="fa-solid fa-server absolute left-4 top-1/2 -translate-y-1/2 text-text-muted text-sm"></i>
+                                                <select id="adminEmailProvider" onchange="onEmailProviderChange(this.value)" class="input-focus w-full pl-11 pr-4 py-2.5 rounded-xl border border-border bg-surface-alt text-sm">
+                                                    <option value="gmail">Gmail (smtp.gmail.com)</option>
+                                                    <option value="outlook">Outlook / Office 365 (smtp.office365.com)</option>
+                                                    <option value="custom">Custom SMTP Server</option>
+                                                    <option value="resend">Resend API (HTTP)</option>
+                                                </select>
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <label class="block text-xs font-semibold text-text-secondary uppercase tracking-wider mb-2">SMTP Host</label>
+                                            <div class="relative">
+                                                <i class="fa-solid fa-network-wired absolute left-4 top-1/2 -translate-y-1/2 text-text-muted text-sm"></i>
+                                                <input id="adminSmtpHost" type="text" placeholder="smtp.gmail.com" value="smtp.gmail.com" class="input-focus w-full pl-11 pr-4 py-2.5 rounded-xl border border-border bg-surface-alt text-sm">
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div class="grid sm:grid-cols-2 gap-6">
+                                        <div>
+                                            <label class="block text-xs font-semibold text-text-secondary uppercase tracking-wider mb-2">SMTP Port</label>
+                                            <div class="relative">
+                                                <i class="fa-solid fa-hashtag absolute left-4 top-1/2 -translate-y-1/2 text-text-muted text-sm"></i>
+                                                <input id="adminSmtpPort" type="number" placeholder="465" value="465" class="input-focus w-full pl-11 pr-4 py-2.5 rounded-xl border border-border bg-surface-alt text-sm">
+                                            </div>
+                                            <p class="mt-1 text-[11px] text-text-muted">Use 465 (SSL) or 587 (TLS/STARTTLS).</p>
+                                        </div>
+                                        <div>
+                                            <label class="block text-xs font-semibold text-text-secondary uppercase tracking-wider mb-2">Sender Name & From Header</label>
+                                            <div class="relative">
+                                                <i class="fa-solid fa-signature absolute left-4 top-1/2 -translate-y-1/2 text-text-muted text-sm"></i>
+                                                <input id="adminEmailFrom" type="text" placeholder='Sri Shakthi HostelFix <your_email@gmail.com>' class="input-focus w-full pl-11 pr-4 py-2.5 rounded-xl border border-border bg-surface-alt text-sm">
+                                            </div>
+                                            <p class="mt-1 text-[11px] text-text-muted">Display name shown to recipients.</p>
+                                        </div>
+                                    </div>
+
+                                    <div class="grid sm:grid-cols-2 gap-6">
+                                        <div>
+                                            <label class="block text-xs font-semibold text-text-secondary uppercase tracking-wider mb-2">SMTP Username / Email</label>
+                                            <div class="relative">
+                                                <i class="fa-solid fa-at absolute left-4 top-1/2 -translate-y-1/2 text-text-muted text-sm"></i>
+                                                <input id="adminSmtpUser" type="email" placeholder="e.g., your_email@gmail.com" class="input-focus w-full pl-11 pr-4 py-2.5 rounded-xl border border-border bg-surface-alt text-sm">
+                                            </div>
+                                            <p class="mt-1 text-[11px] text-text-muted">The email account used to authenticate and send.</p>
+                                        </div>
+                                        <div>
+                                            <label class="block text-xs font-semibold text-text-secondary uppercase tracking-wider mb-2">SMTP Password / App Password</label>
+                                            <div class="relative">
+                                                <i class="fa-solid fa-key absolute left-4 top-1/2 -translate-y-1/2 text-text-muted text-sm"></i>
+                                                <input id="adminSmtpPass" type="password" placeholder="16-character Google App Password" class="input-focus w-full pl-11 pr-10 py-2.5 rounded-xl border border-border bg-surface-alt text-sm">
+                                                <button type="button" onclick="togglePasswordVisibility('adminSmtpPass', this)" class="absolute right-3 top-1/2 -translate-y-1/2 text-text-muted hover:text-text text-sm">
+                                                    <i class="fa-solid fa-eye"></i>
+                                                </button>
+                                            </div>
+                                            <p class="mt-1 text-[11px] text-text-muted">For Gmail, use a Google App Password (not your account password).</p>
+                                        </div>
+                                    </div>
+
+                                    <!-- Optional Resend API Key Field (hidden by default unless Resend selected) -->
+                                    <div id="resendKeyContainer" class="hidden">
+                                        <label class="block text-xs font-semibold text-text-secondary uppercase tracking-wider mb-2">Resend API Key</label>
+                                        <div class="relative">
+                                            <i class="fa-solid fa-shield-halved absolute left-4 top-1/2 -translate-y-1/2 text-text-muted text-sm"></i>
+                                            <input id="adminResendApiKey" type="password" placeholder="re_1234567890abcdef..." class="input-focus w-full pl-11 pr-4 py-2.5 rounded-xl border border-border bg-surface-alt text-sm">
+                                        </div>
+                                    </div>
+
+                                    <div class="pt-3 border-t border-border/60 flex flex-wrap items-center justify-between gap-4">
+                                        <div class="flex items-center gap-2 max-w-sm w-full sm:w-auto">
+                                            <input id="adminTestEmailTarget" type="email" placeholder="test-recipient@example.com" class="input-focus px-3 py-2 rounded-xl border border-border bg-surface-alt text-xs w-full sm:w-64">
+                                            <button type="button" id="btnTestEmailConnection" onclick="testEmailConfigConnection()" class="px-3 py-2 rounded-xl border border-border text-xs font-semibold text-primary hover:bg-surface-alt transition-all whitespace-nowrap flex items-center gap-1.5">
+                                                <i class="fa-solid fa-paper-plane text-xs"></i> Send Test
+                                            </button>
+                                        </div>
+                                        <button type="submit" class="btn-primary px-5 py-2.5 rounded-xl text-white text-xs font-semibold flex items-center gap-2 shadow-lg shadow-primary/25">
+                                            <i class="fa-solid fa-check"></i> Save Email Settings
                                         </button>
                                     </div>
                                 </form>
@@ -5661,7 +5758,7 @@
             <div class="p-6 bg-gradient-to-r from-indigo-600 via-purple-600 to-primary text-white flex items-center justify-between shrink-0">
                 <div>
                     <h3 id="adminWardenModalTitle" class="font-bold text-lg text-white">Add New Warden</h3>
-                    <p class="text-xs text-white/80 mt-0.5">Configure warden credentials, control scope, and RBAC permissions in Supabase.</p>
+                    <p class="text-xs text-white/80 mt-0.5">Configure warden credentials, control scope, and RBAC permissions.</p>
                 </div>
                 <button type="button" onclick="closeAdminWardenModal()" class="w-8 h-8 rounded-full bg-white/20 hover:bg-white/30 text-white flex items-center justify-center text-xs transition-all">
                     <i class="fa-solid fa-xmark"></i>
@@ -6137,7 +6234,7 @@
                     
                     <!-- 0. Institution Header Banner -->
                     <div class="pb-3 mb-2 border-b border-slate-200 text-center">
-                        <img src="data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/4gHYSUNDX1BST0ZJTEUAAQEAAAHIAAAAAAQwAABtbnRyUkdCIFhZWiAH4AABAAEAAAAAAABhY3NwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAA9tYAAQAAAADTLQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAlkZXNjAAAA8AAAACRyWFlaAAABFAAAABRnWFlaAAABKAAAABRiWFlaAAABPAAAABR3dHB0AAABUAAAABRyVFJDAAABZAAAAChnVFJDAAABZAAAAChiVFJDAAABZAAAAChjcHJ0AAABjAAAADxtbHVjAAAAAAAAAAEAAAAMZW5VUwAAAAgAAAAcAHMAUgBHAEJYWVogAAAAAAAAb6IAADj1AAADkFhZWiAAAAAAAABimQAAt4UAABjaWFlaIAAAAAAAACSgAAAPhAAAts9YWVogAAAAAAAA9tYAAQAAAADTLXBhcmEAAAAAAAQAAAACZmYAAPKnAAANWQAAE9AAAApbAAAAAAAAAABtbHVjAAAAAAAAAAEAAAAMZW5VUwAAACAAAAAcAEcAbwBvAGcAbABlACAASQBuAGMALgAgADIAMAAxADb/2wBDAAMCAgICAgMCAgIDAwMDBAYEBAQEBAgGBgUGCQgKCgkICQkKDA8MCgsOCwkJDRENDg8QEBEQCgwSExIQEw8QEBD/2wBDAQMDAwQDBAgEBAgQCwkLEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBD/wAARCABjAuIDASIAAhEBAxEB/8QAHQAAAgIDAQEBAAAAAAAAAAAAAAgHCQQFBgIDAf/EAGkQAAAEBQEEBAUKDBIHBgUFAAIDBAUAAQYHEhMIERQiISMyQhUxM1JyCRY3QUNRU2FighckcXN2g5GSorO00hg0OERXY3R1gZOVlqGjssLD0xlUVpTBxPAlNTZGZLEmJ0VVhIbR4eLx/8QAHAEBAAIDAQEBAAAAAAAAAAAAAAECAwQFBgcICQoLAQABBQEBAQEBAQAAAAAAAAAAAQIDBAUGBwgJCgv/xAAtEQACAQMDAgUEAwEBA~~~~~~~~QIRAgMEESExQVEFEiJhcYETQpEyoSOxwf/aAAwDAXACEOrganization1lAAMAAAABAAEAP0A//g+3//wDAAHdAB0AHQA=" alt="Sri Shakthi Institute of Engineering and Technology" class="h-12 sm:h-14 object-contain mx-auto">
+                        <img src="/public/sri_shakthi_header.jpg" onerror="this.onerror=null;this.src='/public/siet-logo.png'" alt="Sri Shakthi Institute of Engineering and Technology" class="h-12 sm:h-14 object-contain mx-auto">
                     </div>
 
                     <!-- 1. Header: Department Branding & Smart Pass Pill -->
@@ -6700,10 +6797,10 @@
         </div>
     </div>
 
-    <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+    <script src="public/vendor/html5-qrcode.js" defer onerror="this.onerror=null;this.src='https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js';"></script>
     <script src="/socket.io/socket.io.js" onerror="console.warn('Socket.IO offline')"></script>
     <script src="public/fire-detection-utils.js"></script>
-    <script src="script.js?v=2026-09-09-v4"></script>
+    <script src="script.js?v=2026-09-23-v10"></script>
     <script src="warden-admin.js?v=2026-09-09-v4"></script>
     <script src="technician-admin.js?v=2026-09-09-v4"></script>
 </body>

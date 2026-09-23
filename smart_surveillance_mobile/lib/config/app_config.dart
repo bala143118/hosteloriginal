@@ -1,5 +1,5 @@
 class AppConfig {
-  static const String baseUrl = 'https://provider-acre-daredevil.ngrok-free.dev';
+  static const String baseUrl = 'https://demeanor-alongside-lyricist.ngrok-free.dev';
   static const String appName = 'Smart Surveillance';
   static const String appSubtitle = 'AI-Powered Security Monitoring';
   static const String appVersion = '1.0.0+1';

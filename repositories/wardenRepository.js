@@ -251,16 +251,18 @@ class WardenRepository {
 
         try {
             const res = await db.query(
-                `INSERT INTO users ("userId", email, password, name, role, status, phone, "hostelBlock", "roomNumber")
-                 VALUES ($1, $2, $3, $4, 'warden', $5, $6, $7, $8)
+                `INSERT INTO users ("userId", email, password, name, role, status, phone, "hostelBlock", "roomNumber", specialization, must_change_password)
+                 VALUES ($1, $2, $3, $4, 'warden', $5, $6, $7, $8, $9, TRUE)
                  ON CONFLICT (email) DO UPDATE SET
                     "userId" = EXCLUDED."userId",
                     name = EXCLUDED.name,
                     status = EXCLUDED.status,
                     phone = EXCLUDED.phone,
-                    "hostelBlock" = EXCLUDED."hostelBlock"
+                    "hostelBlock" = EXCLUDED."hostelBlock",
+                    specialization = EXCLUDED.specialization,
+                    must_change_password = EXCLUDED.must_change_password
                  RETURNING *`,
-                [userId, email, hashedPassword, finalName, status, String(wardenData.phone || wardenData.mobileNumber || '').trim(), wardenData.hostelBlock || wardenData.block || 'Block A', wardenData.roomNumber || '']
+                [userId, email, hashedPassword, finalName, status, String(wardenData.phone || wardenData.mobileNumber || '').trim(), wardenData.hostelBlock || wardenData.block || 'Block A', wardenData.roomNumber || '', specialization]
             );
             if (res.rows && res.rows.length > 0) {
                 insertedRow = res.rows[0];
@@ -418,9 +420,12 @@ class WardenRepository {
         const hashedPassword = hashPassword(newPassword);
 
         try {
+            const meta = warden.meta || {};
+            meta.mustChangePassword = false;
+            meta.must_change_password = false;
             await db.query(
-                `UPDATE users SET password = $1, updated_at = NOW() WHERE LOWER("userId") = LOWER($2) OR LOWER(email) = LOWER($2)`,
-                [hashedPassword, warden.userId]
+                `UPDATE users SET password = $1, must_change_password = FALSE, specialization = $3, updated_at = NOW() WHERE LOWER("userId") = LOWER($2) OR LOWER(email) = LOWER($2)`,
+                [hashedPassword, warden.userId, JSON.stringify(meta)]
             );
         } catch (e) {}
 

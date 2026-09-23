@@ -7,7 +7,9 @@
     "start": "node server.js",
     "dev": "node server.js",
     "test": "node tests/serverless.test.js && node tests/repository.test.js",
-    "test:repo": "node tests/repository.test.js"
+    "test:repo": "node tests/repository.test.js",
+    "test:security": "node tests/security_hardening.test.js",
+    "test:all": "node tests/serverless.test.js && node tests/repository.test.js && node tests/admin_warden_management.test.js && node tests/technician_management.test.js && node tests/dynamic_warden_scope.test.js && node tests/dashboard_data_isolation.test.js && node tests/security_hardening.test.js"
   },
   "keywords": [
     "hostel-management",
@@ -42,13 +44,13 @@
     "dotenv": "^16.6.1",
     "express": "^4.18.2",
     "jsonwebtoken": "^9.0.2",
-    "localtunnel": "^2.0.2",
     "nodemailer": "^9.1.1",
     "pdfkit": "^0.19.1",
     "pg": "^8.23.0",
     "qrcode": "^1.5.4",
     "socket.io": "^4.7.2",
     "tailwindcss": "^4.3.3",
-    "twilio": "^5.13.1"
+    "twilio": "^5.13.1",
+    "zod": "^4.6.5"
   }
 }

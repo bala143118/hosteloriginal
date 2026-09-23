@@ -67,9 +67,10 @@ def prepare_cctv_frame(image):
 
 def serialize_face(result):
     x1, y1, x2, y2 = [int(value) for value in result.bbox]
+    label = result.name if result.matched else result.authorization_label
     return {
         'authorized': bool(result.matched),
-        'label': result.authorization_label,
+        'label': label,
         'confidence': float(result.confidence),
         'box': [x1, y1, max(0, x2 - x1), max(0, y2 - y1)],
         'matchedName': result.name if result.matched else None

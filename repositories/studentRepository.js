@@ -112,20 +112,24 @@ class StudentRepository {
         const block = studentData.hostelBlock || studentData.block || 'Block A';
         const regNo = studentData.registrationNumber || studentData.regNo || '';
         const phone = studentData.phone || '';
+        const parentPhone = studentData.parentPhone || studentData.parent_phone || '';
         const dept = studentData.department || studentData.specialization || '';
 
         try {
             const res = await db.query(
-                `INSERT INTO users ("userId", email, password, name, role, status, phone, "hostelBlock", "roomNumber", "registrationNumber")
-                 VALUES ($1, $2, $3, $4, 'student', 'Active', $5, $6, $7, $8)
+                `INSERT INTO users ("userId", email, password, name, role, status, phone, "parentPhone", "parent_phone", "hostelBlock", "roomNumber", "registrationNumber")
+                 VALUES ($1, $2, $3, $4, 'student', 'Active', $5, $6, $6, $7, $8, $9)
                  ON CONFLICT (email) DO UPDATE SET
                     "userId" = EXCLUDED."userId",
                     name = EXCLUDED.name,
+                    phone = EXCLUDED.phone,
+                    "parentPhone" = EXCLUDED."parentPhone",
+                    "parent_phone" = EXCLUDED."parent_phone",
                     "hostelBlock" = EXCLUDED."hostelBlock",
                     "roomNumber" = EXCLUDED."roomNumber",
                     "registrationNumber" = EXCLUDED."registrationNumber"
                  RETURNING *`,
-                [userId, email, studentData.password || 'student123', studentData.name || 'Student', phone, block, roomNumber, regNo]
+                [userId, email, studentData.password || 'student123', studentData.name || 'Student', phone, parentPhone, block, roomNumber, regNo]
             );
             if (res.rows && res.rows.length > 0) {
                 return this._mapStudent(res.rows[0]);
@@ -147,6 +151,7 @@ class StudentRepository {
             block: block,
             registration_number: regNo,
             phone: phone,
+            parent_phone: parentPhone,
             specialization: dept
         };
 
@@ -169,6 +174,8 @@ class StudentRepository {
         const student = await this.findById(id);
         if (!student) return null;
 
+        const pPhone = updates.parentPhone !== undefined ? updates.parentPhone : updates.parent_phone;
+
         try {
             const res = await db.query(
                 `UPDATE users SET
@@ -176,17 +183,20 @@ class StudentRepository {
                     email = COALESCE($2, email),
                     password = CASE WHEN $3::text IS NOT NULL AND $3::text != '' THEN $3::text ELSE password END,
                     phone = COALESCE($4, phone),
-                    "hostelBlock" = COALESCE($5, "hostelBlock"),
-                    "roomNumber" = COALESCE($6, "roomNumber"),
-                    "registrationNumber" = COALESCE($7, "registrationNumber"),
+                    "parentPhone" = COALESCE($5, "parentPhone"),
+                    "parent_phone" = COALESCE($5, "parent_phone"),
+                    "hostelBlock" = COALESCE($6, "hostelBlock"),
+                    "roomNumber" = COALESCE($7, "roomNumber"),
+                    "registrationNumber" = COALESCE($8, "registrationNumber"),
                     updated_at = NOW()
-                 WHERE LOWER("userId") = LOWER($8) OR LOWER(email) = LOWER($8)
+                 WHERE LOWER("userId") = LOWER($9) OR LOWER(email) = LOWER($9)
                  RETURNING *`,
                 [
                     updates.name ? updates.name.trim() : null,
                     updates.email ? updates.email.trim().toLowerCase() : null,
                     updates.password || null,
-                    updates.phone ? updates.phone.trim() : null,
+                    updates.phone !== undefined ? updates.phone.trim() : null,
+                    pPhone !== undefined && pPhone !== null ? String(pPhone).trim() : null,
                     updates.hostelBlock || updates.block || null,
                     updates.roomNumber || updates.room || null,
                     updates.registrationNumber || updates.regNo || null,
@@ -233,21 +243,50 @@ class StudentRepository {
 
     async delete(id) {
         if (!id) return false;
-        const student = await this.findById(id);
-        if (!student) return false;
+        const cleanId = String(id).trim();
+        const student = await this.findById(cleanId);
+        const targetId = student ? student.userId : cleanId;
+        const targetEmail = student ? (student.email || cleanId) : cleanId;
 
+        let deleted = false;
         try {
-            await db.query(`DELETE FROM users WHERE LOWER("userId") = LOWER($1) OR LOWER(email) = LOWER($1)`, [student.userId]);
-        } catch (e) {}
+            const res = await db.query(
+                `DELETE FROM users WHERE LOWER("userId") = LOWER($1) OR LOWER(email) = LOWER($2) OR LOWER("userId") = LOWER($2) OR LOWER(email) = LOWER($1)`,
+                [targetId, targetEmail]
+            );
+            if (res.rowCount > 0) deleted = true;
+        } catch (e) {
+            console.error('[StudentRepository Delete PG Error]', e.message);
+        }
 
         const client = getSupabaseClient();
-        if (!client) return true;
+        if (client) {
+            try {
+                await client.from(this.tableName).delete().or(`user_id.eq.${targetId},email.eq.${targetEmail}`);
+                deleted = true;
+            } catch (e) {}
+        }
 
         try {
-            await client.from(this.tableName).delete().eq('user_id', student.userId);
+            const fs = require('fs');
+            const path = require('path');
+            const dbPath = path.join(__dirname, '..', 'data', 'db.json');
+            if (fs.existsSync(dbPath)) {
+                const raw = fs.readFileSync(dbPath, 'utf8').replace(/^\uFEFF/, '');
+                const full = JSON.parse(raw);
+                if (Array.isArray(full.users)) {
+                    const before = full.users.length;
+                    full.users = full.users.filter(u => 
+                        (u.userId || u.id || '').toLowerCase() !== targetId.toLowerCase() && 
+                        (u.email || '').toLowerCase() !== targetEmail.toLowerCase()
+                    );
+                    if (full.users.length < before) deleted = true;
+                    fs.writeFileSync(dbPath, JSON.stringify(full, null, 2), 'utf8');
+                }
+            }
         } catch (e) {}
 
-        return true;
+        return deleted || Boolean(student);
     }
 
     _mapStudent(row) {
@@ -271,6 +310,8 @@ class StudentRepository {
             registrationNumber: regNo,
             regNo: regNo,
             phone: row.phone || '',
+            parentPhone: row.parentPhone || row.parent_phone || '',
+            parent_phone: row.parentPhone || row.parent_phone || '',
             department: row.specialization || '',
             specialization: row.specialization || '',
             status: row.status || 'Active',

@@ -451,11 +451,14 @@ async function saveEmergencyAlertSettings(event) {
 function updateTelegramStatusBadge(isConfigured) {
     const badge = document.getElementById('adminTelegramStatusBadge');
     if (!badge) return;
+    badge.style.whiteSpace = 'nowrap';
+    badge.style.flexShrink = '0';
+    badge.style.display = 'inline-flex';
     if (isConfigured) {
-        badge.className = 'badge-completed px-3 py-1 rounded-full text-xs font-semibold';
+        badge.className = 'badge-completed px-3 py-1 rounded-full text-xs font-semibold shrink-0 whitespace-nowrap inline-flex items-center justify-center';
         badge.textContent = 'Telegram Configured';
     } else {
-        badge.className = 'badge-pending px-3 py-1 rounded-full text-xs font-semibold';
+        badge.className = 'badge-pending px-3 py-1 rounded-full text-xs font-semibold shrink-0 whitespace-nowrap inline-flex items-center justify-center';
         badge.textContent = 'Not Configured';
     }
 }
@@ -513,10 +516,180 @@ async function loadEmergencyAlertSettings() {
         emergencyAlertCameraLocation = data.alertCameraLocation || emergencyAlertCameraLocation;
         cctvAlertConfidenceThreshold = (Number(data.alertMinConfidence) || 75) / 100;
         updateTelegramStatusBadge(data.telegramConfigured);
+
+        // Dynamic Email & SMTP Settings
+        const providerSelect = document.getElementById('adminEmailProvider');
+        const smtpHostInput = document.getElementById('adminSmtpHost');
+        const smtpPortInput = document.getElementById('adminSmtpPort');
+        const smtpUserInput = document.getElementById('adminSmtpUser');
+        const smtpPassInput = document.getElementById('adminSmtpPass');
+        const emailFromInput = document.getElementById('adminEmailFrom');
+        const resendKeyInput = document.getElementById('adminResendApiKey');
+
+        if (providerSelect && data.emailProvider) providerSelect.value = data.emailProvider;
+        if (smtpHostInput && data.smtpHost !== undefined) smtpHostInput.value = data.smtpHost;
+        if (smtpPortInput && data.smtpPort !== undefined) smtpPortInput.value = data.smtpPort;
+        if (smtpUserInput && data.smtpUser !== undefined) smtpUserInput.value = data.smtpUser;
+        if (smtpPassInput && data.smtpPass) smtpPassInput.value = data.smtpPass;
+        if (emailFromInput && data.emailFrom !== undefined) emailFromInput.value = data.emailFrom;
+        if (resendKeyInput && data.resendApiKey !== undefined) resendKeyInput.value = data.resendApiKey;
+
+        updateEmailStatusBadge(data.emailConfigured);
     } catch (error) {
-        console.warn('Unable to load emergency settings:', error.message);
+        console.warn('Unable to load settings:', error.message);
     }
 }
+
+function updateEmailStatusBadge(isConfigured) {
+    const badge = document.getElementById('adminEmailStatusBadge');
+    if (!badge) return;
+    badge.style.whiteSpace = 'nowrap';
+    badge.style.flexShrink = '0';
+    badge.style.display = 'inline-flex';
+    if (isConfigured) {
+        badge.className = 'badge-completed px-3 py-1 rounded-full text-xs font-semibold shrink-0 whitespace-nowrap inline-flex items-center justify-center';
+        badge.textContent = 'Email Configured';
+    } else {
+        badge.className = 'badge-pending px-3 py-1 rounded-full text-xs font-semibold shrink-0 whitespace-nowrap inline-flex items-center justify-center';
+        badge.textContent = 'Not Configured';
+    }
+}
+
+function onEmailProviderChange(provider) {
+    const hostInput = document.getElementById('adminSmtpHost');
+    const portInput = document.getElementById('adminSmtpPort');
+    const resendContainer = document.getElementById('resendKeyContainer');
+
+    if (provider === 'gmail') {
+        if (hostInput) hostInput.value = 'smtp.gmail.com';
+        if (portInput) portInput.value = '465';
+        if (resendContainer) resendContainer.classList.add('hidden');
+    } else if (provider === 'outlook') {
+        if (hostInput) hostInput.value = 'smtp.office365.com';
+        if (portInput) portInput.value = '587';
+        if (resendContainer) resendContainer.classList.add('hidden');
+    } else if (provider === 'resend') {
+        if (resendContainer) resendContainer.classList.remove('hidden');
+    } else {
+        if (resendContainer) resendContainer.classList.add('hidden');
+    }
+}
+
+async function saveEmailSettings(event) {
+    if (event && event.preventDefault) event.preventDefault();
+
+    const emailProvider = document.getElementById('adminEmailProvider')?.value || 'gmail';
+    const smtpHost = document.getElementById('adminSmtpHost')?.value.trim() || '';
+    const smtpPort = Number(document.getElementById('adminSmtpPort')?.value || 465);
+    const smtpUser = document.getElementById('adminSmtpUser')?.value.trim() || '';
+    const smtpPass = document.getElementById('adminSmtpPass')?.value.trim() || '';
+    const emailFrom = document.getElementById('adminEmailFrom')?.value.trim() || '';
+    const resendApiKey = document.getElementById('adminResendApiKey')?.value.trim() || '';
+
+    try {
+        const payload = {
+            emailProvider,
+            smtpHost,
+            smtpPort,
+            smtpUser,
+            emailFrom,
+            resendApiKey
+        };
+        // Only update password if not empty and not masked placeholder
+        if (smtpPass && smtpPass !== '••••••••') {
+            payload.smtpPass = smtpPass;
+        }
+
+        const response = await apiRequest('/api/admin-settings', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        const data = await parseJsonResponse(response);
+        if (!response.ok) throw new Error(data.error || 'Failed to save email settings.');
+
+        updateEmailStatusBadge(data.emailConfigured);
+        showToast('Dynamic email configuration saved successfully! (No restart needed)', 'success');
+    } catch (error) {
+        showToast(error.message || 'Unable to save email settings.', 'error');
+    }
+}
+
+async function testEmailConfigConnection() {
+    const testBtn = document.getElementById('btnTestEmailConnection');
+    const emailProvider = document.getElementById('adminEmailProvider')?.value || 'gmail';
+    const smtpHost = document.getElementById('adminSmtpHost')?.value.trim() || '';
+    const smtpPort = Number(document.getElementById('adminSmtpPort')?.value || 465);
+    const smtpUser = document.getElementById('adminSmtpUser')?.value.trim() || '';
+    const smtpPass = document.getElementById('adminSmtpPass')?.value.trim() || '';
+    const emailFrom = document.getElementById('adminEmailFrom')?.value.trim() || '';
+    const resendApiKey = document.getElementById('adminResendApiKey')?.value.trim() || '';
+    const targetEmail = document.getElementById('adminTestEmailTarget')?.value.trim() || smtpUser;
+
+    if (!targetEmail) {
+        showToast('Please enter a recipient email address to send the test email to.', 'warning');
+        return;
+    }
+
+    if (testBtn) {
+        testBtn.disabled = true;
+        testBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin text-xs"></i> Sending...';
+    }
+
+    try {
+        const response = await apiRequest('/api/test-email', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                emailProvider,
+                smtpHost,
+                smtpPort,
+                smtpUser,
+                smtpPass: smtpPass !== '••••••••' ? smtpPass : undefined,
+                emailFrom,
+                resendApiKey,
+                targetEmail
+            })
+        });
+        const data = await parseJsonResponse(response);
+        if (!response.ok) throw new Error(data.error || 'Test email failed.');
+
+        updateEmailStatusBadge(true);
+        showToast(data.message || `Test email sent successfully to ${targetEmail}!`, 'success');
+    } catch (error) {
+        showToast(error.message || 'Test email failed. Check your SMTP credentials.', 'error');
+    } finally {
+        if (testBtn) {
+            testBtn.disabled = false;
+            testBtn.innerHTML = '<i class="fa-solid fa-paper-plane text-xs"></i> Send Test';
+        }
+    }
+}
+
+function togglePasswordVisibility(inputId, btn) {
+    const input = document.getElementById(inputId);
+    if (!input) return;
+    const icon = btn ? btn.querySelector('i') : null;
+    if (input.type === 'password') {
+        input.type = 'text';
+        if (icon) {
+            icon.classList.remove('fa-eye');
+            icon.classList.add('fa-eye-slash');
+        }
+    } else {
+        input.type = 'password';
+        if (icon) {
+            icon.classList.remove('fa-eye-slash');
+            icon.classList.add('fa-eye');
+        }
+    }
+}
+
+window.updateEmailStatusBadge = updateEmailStatusBadge;
+window.onEmailProviderChange = onEmailProviderChange;
+window.saveEmailSettings = saveEmailSettings;
+window.testEmailConfigConnection = testEmailConfigConnection;
+window.togglePasswordVisibility = togglePasswordVisibility;
 
 function renderAlertHistory(alerts) {
     const body = document.getElementById('alertHistoryTableBody');
@@ -1114,18 +1287,10 @@ function clearComplaintPhotoSelection(e) {
 async function prepareComplaintForm() {
     clearComplaintPhotoSelection();
 
-    const studentName = currentUser?.name || 'Resident Student';
-    const regNo = currentUser?.registrationNumber || currentUser?.userId || currentUser?.id || 'STU-001';
-    const block = currentUser?.hostelBlock || currentUser?.block || 'Block A';
-    const room = currentUser?.roomNumber || currentUser?.room || '101';
+    const studentName = currentUser?.name || '';
+    const regNo = currentUser?.registrationNumber || currentUser?.userId || '';
     const email = currentUser?.email || '';
     const phone = currentUser?.phone || currentUser?.mobile || '';
-
-    // Update banner
-    const badgeName = document.getElementById('complaintStudentBadgeName');
-    const badgeDetails = document.getElementById('complaintStudentBadgeDetails');
-    if (badgeName) badgeName.textContent = studentName;
-    if (badgeDetails) badgeDetails.textContent = `ID: ${regNo} • ${block} • Room ${room}`;
 
     // Fill hidden and form fields
     const nameInput = document.getElementById('complaintStudentName');
@@ -1143,8 +1308,8 @@ async function prepareComplaintForm() {
     if (regInput) regInput.value = regNo;
     if (emailInput) emailInput.value = email;
     if (phoneInput) phoneInput.value = phone;
-    if (blockInput) blockInput.value = block;
-    if (roomInput) roomInput.value = room;
+    if (blockInput) blockInput.value = '';
+    if (roomInput) roomInput.value = '';
     if (titleInput) titleInput.value = '';
     if (descInput) descInput.value = '';
     if (prefTimeInput) prefTimeInput.value = '';
@@ -1774,11 +1939,19 @@ function setupAnnouncementSocket() {
             extraHeaders: {
                 'ngrok-skip-browser-warning': 'true'
             },
-            reconnectionAttempts: 5,
-            timeout: 8000,
+            reconnection: true,
+            reconnectionAttempts: Infinity,
+            reconnectionDelay: 1000,
+            reconnectionDelayMax: 5000,
+            timeout: 15000,
             autoConnect: true
         });
+        let disconnectToastTimer = null;
         announcementSocket.on('connect', () => {
+            if (disconnectToastTimer) {
+                clearTimeout(disconnectToastTimer);
+                disconnectToastTimer = null;
+            }
             console.debug('Connected to live announcement socket', socketUrl);
         });
         announcementSocket.on('connect_error', (error) => {
@@ -1801,9 +1974,21 @@ function setupAnnouncementSocket() {
             refreshWebsiteSurveillanceStatus().catch(() => null);
         });
         announcementSocket.on('disconnect', () => {
-            if (['admin', 'warden'].includes(currentUser?.role)) showToast('🔴 REAL-TIME CONNECTION LOST', 'warning');
+            if (['admin', 'warden'].includes(currentUser?.role)) {
+                if (!disconnectToastTimer) {
+                    disconnectToastTimer = setTimeout(() => {
+                        if (announcementSocket && !announcementSocket.connected) {
+                            showToast('🔴 REAL-TIME CONNECTION LOST', 'warning');
+                        }
+                    }, 3000);
+                }
+            }
         });
         announcementSocket.on('reconnect', () => {
+            if (disconnectToastTimer) {
+                clearTimeout(disconnectToastTimer);
+                disconnectToastTimer = null;
+            }
             if (['admin', 'warden'].includes(currentUser?.role)) {
                 showToast('🟢 REAL-TIME CONNECTED', 'success');
                 loadSecurityAlertStats().catch(console.error);
@@ -2190,9 +2375,11 @@ function renderGatePassTable(gatePasses = []) {
         const isPendingWarden = ['PENDING_WARDEN', 'PENDING_ADMIN', 'PENDING', 'REQUESTED'].includes(rawStatus);
         const isApproved = ['SECURITY_PENDING', 'APPROVED', 'QR GENERATED'].includes(rawStatus);
         const isOutside = rawStatus === 'OUTSIDE' || rawStatus === 'OUT';
+        const isPendingWardenReturn = rawStatus === 'PENDING_WARDEN_RETURN' || rawStatus === 'RETURNED';
         const isOutsideNotReturned = rawStatus === 'OUTSIDE_NOT_RETURNED';
         const isCompleted = rawStatus === 'COMPLETED';
-        const isRejected = rawStatus.includes('REJECTED');
+        const isHostelEntryRejected = rawStatus === 'HOSTEL_ENTRY_REJECTED';
+        const isRejected = rawStatus.includes('REJECT') && !isHostelEntryRejected;
 
         let statusBadgeHtml = `<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-800 border border-amber-300 shadow-2xs"><i class="fa-solid fa-clock text-amber-600"></i> Pending Warden</span>`;
 
@@ -2200,58 +2387,45 @@ function renderGatePassTable(gatePasses = []) {
             statusBadgeHtml = `<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald/10 text-emerald border border-emerald/30 shadow-2xs"><i class="fa-solid fa-qrcode text-emerald"></i> Approved (QR Ready)</span>`;
         } else if (isOutside) {
             statusBadgeHtml = `<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-blue-100 text-blue-800 border border-blue-300 shadow-2xs"><i class="fa-solid fa-door-open text-blue-600"></i> Outside (Gate Crossed)</span>`;
+        } else if (isPendingWardenReturn) {
+            statusBadgeHtml = `<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-purple-100 text-purple-800 border border-purple-300 shadow-2xs"><i class="fa-solid fa-hotel text-purple-600"></i> Gate Entry Allowed (Pending Warden)</span>`;
         } else if (isOutsideNotReturned) {
             statusBadgeHtml = `<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-rose-100 text-rose-900 border border-rose-300 shadow-2xs"><i class="fa-solid fa-triangle-exclamation text-rose-600"></i> Outside (Not Returned)</span>`;
         } else if (isCompleted) {
-            statusBadgeHtml = `<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 shadow-2xs"><i class="fa-solid fa-circle-check text-emerald-600"></i> Completed</span>`;
+            statusBadgeHtml = `<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 shadow-2xs"><i class="fa-solid fa-circle-check text-emerald-600"></i> Completed (In Hostel)</span>`;
+        } else if (isHostelEntryRejected) {
+            statusBadgeHtml = `<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-rose-100 text-rose-800 border border-rose-300 shadow-2xs"><i class="fa-solid fa-ban text-rose-600"></i> Hostel Entry Denied</span>`;
         } else if (isRejected) {
             statusBadgeHtml = `<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-danger/10 text-danger border border-danger/30 shadow-2xs"><i class="fa-solid fa-circle-xmark text-danger"></i> Rejected</span>`;
         }
 
         return `
             <tr class="table-row hover:bg-surface-alt/50 transition-colors">
-                <td class="px-6 py-4 text-xs font-mono font-bold text-primary cursor-pointer hover:underline" onclick="viewGatePassDetailsModal('${entry.id}')" title="Click to view full details">
+                <td class="px-4 py-3.5 text-xs font-mono font-bold text-primary cursor-pointer hover:underline whitespace-nowrap align-middle" onclick="viewGatePassDetailsModal('${entry.id}')" title="Click to view full details">
                     ${entry.id || 'N/A'}
                     ${entry.certificateId ? `<span class="block text-[10px] text-text-muted font-normal">${entry.certificateId.slice(0, 14)}...</span>` : ''}
                 </td>
-                <td class="px-6 py-4 text-sm font-semibold text-text">${entry.student || 'Anonymous'}</td>
-                <td class="px-6 py-4 text-xs font-mono text-text-secondary">${entry.registrationNumber || 'N/A'}</td>
-                <td class="px-6 py-4 text-xs text-text-secondary max-w-[160px] truncate" title="${entry.reason || 'General'}">${entry.reason || 'General'}</td>
-                <td class="px-6 py-4 text-xs font-medium">${entry.session || 'Morning'}</td>
-                <td class="px-6 py-4 text-xs text-text-secondary">${formatGatePassDate(entry.gateDate)}</td>
-                <td class="px-6 py-4 text-xs font-medium text-amber-700">${formatGatePassDate(entry.returnDate)}</td>
-                <td class="px-6 py-4">${statusBadgeHtml}</td>
-                <td class="px-6 py-4 text-sm text-text-secondary">
+                <td class="px-4 py-3.5 text-sm font-semibold text-text whitespace-nowrap align-middle">${entry.student || 'Anonymous'}</td>
+                <td class="px-4 py-3.5 text-xs font-mono text-text-secondary whitespace-nowrap align-middle">${entry.registrationNumber || 'N/A'}</td>
+                <td class="px-4 py-3.5 text-xs text-text-secondary max-w-[180px] truncate align-middle" title="${entry.reason || 'General'}">${entry.reason || 'General'}</td>
+                <td class="px-4 py-3.5 text-xs font-medium whitespace-nowrap align-middle">${entry.session || 'Morning'}</td>
+                <td class="px-4 py-3.5 text-xs text-text-secondary whitespace-nowrap align-middle">${formatGatePassDate(entry.gateDate)}</td>
+                <td class="px-4 py-3.5 text-xs font-medium text-amber-700 whitespace-nowrap align-middle">${formatGatePassDate(entry.returnDate)}</td>
+                <td class="px-4 py-3.5 whitespace-nowrap align-middle">${statusBadgeHtml}</td>
+                <td class="px-4 py-3.5 text-sm text-text-secondary whitespace-nowrap align-middle">
                     ${entry.studentPhoto
-                        ? `<img src="${entry.studentPhoto}" alt="Student photo" class="w-10 h-10 rounded-xl object-cover border border-border shadow-2xs cursor-pointer hover:scale-110 transition-transform" onclick="viewGatePassDetailsModal('${entry.id}')">`
-                        : `<div class="w-10 h-10 rounded-xl bg-indigo-50 border border-indigo-100 flex items-center justify-center font-bold text-xs text-indigo-600">${(entry.student || 'S').slice(0, 2).toUpperCase()}</div>`}
+                        ? `<img src="${entry.studentPhoto}" alt="Student photo" class="w-9 h-9 rounded-xl object-cover border border-border shadow-2xs cursor-pointer hover:scale-110 transition-transform" onclick="viewGatePassDetailsModal('${entry.id}')">`
+                        : `<div class="w-9 h-9 rounded-xl bg-indigo-50 border border-indigo-100 flex items-center justify-center font-bold text-xs text-indigo-600">${(entry.student || 'S').slice(0, 2).toUpperCase()}</div>`}
                 </td>
-                <td class="px-6 py-4 text-xs">
-                    ${isPendingWarden ? `
-                        <div class="flex flex-wrap items-center gap-1.5">
-                            <button onclick="approveGatePass('${entry.id}', 'Approved')" class="px-3 py-1.5 rounded-lg bg-emerald hover:bg-emerald/90 text-white font-bold shadow-2xs transition-all flex items-center gap-1">
-                                <i class="fa-solid fa-check"></i> Approve
-                            </button>
-                            <button onclick="approveGatePass('${entry.id}', 'Rejected')" class="px-2.5 py-1.5 rounded-lg bg-danger/10 hover:bg-danger hover:text-white text-danger font-semibold transition-all">
-                                Reject
-                            </button>
-                            <button onclick="viewGatePassDetailsModal('${entry.id}')" class="px-2.5 py-1.5 rounded-lg border border-border hover:bg-surface-alt text-text transition-all" title="View details">
-                                <i class="fa-solid fa-eye text-primary"></i>
-                            </button>
-                            <button onclick="downloadGatePassPdf('${entry.id}')" class="px-2.5 py-1.5 rounded-lg border border-border hover:bg-surface-alt text-text transition-all" title="Download PDF">
-                                <i class="fa-solid fa-file-pdf text-danger"></i>
-                            </button>
-                        </div>
-                    ` : `
-                        <div class="flex flex-wrap items-center gap-1.5">
-                            <button onclick="viewGatePassDetailsModal('${entry.id}')" class="px-3 py-1.5 rounded-lg border border-border bg-surface hover:bg-surface-alt text-text font-medium shadow-2xs transition-all flex items-center gap-1.5">
-                                <i class="fa-solid fa-eye text-primary"></i> Details
-                            </button>
-                            <button onclick="downloadGatePassPdf('${entry.id}')" class="px-2.5 py-1.5 rounded-lg border border-border hover:bg-surface-alt text-text-secondary hover:text-text transition-all" title="Download PDF">
-                                <i class="fa-solid fa-file-pdf text-danger"></i>
-                            </button>
-                        </div>
-                    `}
+                <td class="px-4 py-3.5 text-xs whitespace-nowrap align-middle">
+                    <div class="flex items-center gap-1.5 whitespace-nowrap">
+                        <button onclick="viewGatePassDetailsModal('${entry.id}')" class="px-3 py-1.5 rounded-lg border border-border bg-surface hover:bg-surface-alt text-text font-medium shadow-2xs transition-all flex items-center gap-1.5 whitespace-nowrap">
+                            <i class="fa-solid fa-eye text-primary"></i> Details
+                        </button>
+                        <button onclick="downloadGatePassPdf('${entry.id}')" class="px-2.5 py-1.5 rounded-lg border border-border hover:bg-surface-alt text-text-secondary hover:text-text transition-all" title="Download PDF">
+                            <i class="fa-solid fa-file-pdf text-danger"></i>
+                        </button>
+                    </div>
                 </td>
             </tr>
         `;
@@ -3940,30 +4114,38 @@ function renderAdminStudents(users = [], complaints = []) {
                 <td class="px-6 py-4 text-sm font-bold text-primary">${studentComplaints}</td>
                 <td class="px-6 py-4 text-xs"><select onchange="assignStudentToWarden('${s.userId || s.id || s.email}', this.value)" class="input-focus max-w-[180px] px-2 py-1.5 rounded-lg border border-border bg-surface-alt text-xs"><option value="">Unassigned</option>${wardens.map((warden) => `<option value="${escapeHtml(warden.email || '')}" ${String(s.wardenEmail || '').toLowerCase() === String(warden.email || '').toLowerCase() ? 'selected' : ''}>${escapeHtml(warden.name || 'Warden')}</option>`).join('')}</select></td>
                 <td class="px-6 py-4">
-                    <button onclick="deleteStudent('${s.userId || s.id || s.email}')" class="px-2.5 py-1 rounded-lg bg-danger/10 text-danger hover:bg-danger hover:text-white text-xs font-semibold transition-all">Remove</button>
+                    <button onclick="deleteStudent('${s.userId || s.id || s.email}', '${(s.name || '').replace(/'/g, "\\'")}')" class="px-2.5 py-1 rounded-lg bg-danger/10 text-danger hover:bg-danger hover:text-white text-xs font-semibold transition-all">Remove</button>
                 </td>
             </tr>
         `;
     }).join('');
 }
 
-async function deleteStudent(studentId) {
-    if (!confirm('Are you sure you want to remove this student record?')) return;
+async function deleteStudent(studentId, studentName = '') {
+    const label = studentName ? `student "${studentName}"` : 'this student record';
+    if (!confirm(`Are you sure you want to remove ${label}? This action cannot be undone.`)) return;
     showLoading();
     try {
         const response = await apiRequest(`/api/students/${encodeURIComponent(studentId)}`, { method: 'DELETE' });
         hideLoading();
         if (!response.ok) {
-            showToast('Failed to delete student.', 'error');
+            const data = await parseJsonResponse(response).catch(() => ({}));
+            showToast(data.error || 'Failed to delete student.', 'error');
             return;
         }
         showToast('Student deleted successfully.', 'success');
-        await loadDashboardData();
+        if (typeof closeModal === 'function') closeModal();
+        if (currentUser?.role === 'warden') {
+            await loadWardenAssignedStudents();
+        } else {
+            await loadDashboardData();
+        }
     } catch (err) {
         hideLoading();
         showToast('Unable to connect to server.', 'error');
     }
 }
+window.deleteStudent = deleteStudent;
 
 function renderAdminWardens(users = []) {
     const container = document.getElementById('adminWardensGrid');
@@ -4289,6 +4471,7 @@ function renderAdminFullComplaintsTable(complaints = []) {
     if (pendingCountEl) pendingCountEl.textContent = `${list.filter(c => !c.status || c.status === 'Pending').length}`;
     if (progressCountEl) progressCountEl.textContent = `${list.filter(c => c.status === 'In Progress' || c.status === 'Assigned' || c.status === 'Accepted').length}`;
     if (completedCountEl) completedCountEl.textContent = `${list.filter(c => c.status === 'Completed').length}`;
+    document.querySelectorAll('.admin-complaints-badge, #adminSidebarComplaintBadge').forEach(el => el.textContent = String(list.length || 0));
 
     if (!tbody) return;
 
@@ -4771,12 +4954,24 @@ function logoutCurrentUser() {
     currentUser = null;
     studentNotifications = [];
     localStorage.removeItem(USER_SESSION_KEY);
+    try { sessionStorage.clear(); } catch (_) {}
+    if (announcementSocket && announcementSocket.connected) {
+        try { announcementSocket.disconnect(); } catch (_) {}
+    }
     updateNotificationBadge();
     renderDashboardAnnouncements();
     resetNavAfterLogout();
+    if (window.location.hash) {
+        try {
+            history.replaceState(null, '', window.location.pathname);
+        } catch (_) {
+            window.location.hash = '';
+        }
+    }
     navigateTo('login', { skipHistory: true });
     showToast('You have been logged out successfully.', 'success');
 }
+window.logoutCurrentUser = logoutCurrentUser;
 
 function getCurrentUserDashboard() {
     if (currentUser?.role === 'technician') return 'technician-dashboard';
@@ -5621,10 +5816,7 @@ async function handleRegister(e) {
         return;
     }
 
-    if (role === 'admin' && email.toLowerCase() !== 'sabithacys@siet.ac') {
-        showToast('Only the authorized administrator email can create an admin account.', 'warning');
-        return;
-    }
+
 
     showLoading();
     try {
@@ -5655,7 +5847,7 @@ async function handleRegister(e) {
             loginIdentifier.value = data.userId;
         }
 
-        showToast(`Account created. Your user ID is ${data.userId}. Please sign in to continue.`, 'success');
+        showToast(data.message || `Account created! Verification OTP sent to ${email}. Your user ID is ${data.userId}.`, 'success');
     } catch (error) {
         hideLoading();
         showToast('Unable to reach server. Please try again.', 'error');
@@ -5668,7 +5860,7 @@ async function handleComplaintSubmit(e) {
     const form = e.target;
 
     const studentName = document.getElementById('complaintStudentName')?.value.trim() || currentUser?.name || 'Resident Student';
-    const registrationNumber = document.getElementById('complaintRegistrationNumber')?.value.trim() || currentUser?.registrationNumber || currentUser?.userId || 'STU-001';
+    const registrationNumber = document.getElementById('complaintRegistrationNumber')?.value.trim() || currentUser?.registrationNumber || currentUser?.userId || '';
     const studentEmail = document.getElementById('complaintStudentEmail')?.value.trim() || currentUser?.email || '';
     const studentPhone = document.getElementById('complaintStudentPhone')?.value.trim() || currentUser?.phone || '';
     const studentId = currentUser?.userId || currentUser?.id || registrationNumber;
@@ -5676,8 +5868,8 @@ async function handleComplaintSubmit(e) {
     const title = document.getElementById('complaintTitle')?.value.trim();
     const category = document.getElementById('complaintCategory')?.value || 'General Maintenance';
     const priority = form.querySelector('input[name="priority"]:checked')?.value || 'Medium';
-    const hostelBlock = document.getElementById('complaintHostelBlock')?.value || currentUser?.hostelBlock || 'Block A';
-    const roomNumber = document.getElementById('complaintRoomNumber')?.value.trim() || currentUser?.roomNumber || '101';
+    const hostelBlock = document.getElementById('complaintHostelBlock')?.value || currentUser?.hostelBlock || '';
+    const roomNumber = document.getElementById('complaintRoomNumber')?.value.trim() || currentUser?.roomNumber || '';
     const preferredTime = document.getElementById('complaintPreferredTime')?.value.trim() || '';
     const description = document.getElementById('complaintDescription')?.value.trim();
     const photoUrl = currentComplaintPhotoDataUrl || '';
@@ -6918,6 +7110,7 @@ function renderAdminComplaintsTable(complaints = []) {
     if (elPending) elPending.textContent = String(pendingCount);
     if (elProgress) elProgress.textContent = String(progressCount);
     if (elCompleted) elCompleted.textContent = String(completedCount);
+    document.querySelectorAll('.admin-complaints-badge, #adminSidebarComplaintBadge').forEach(el => el.textContent = String(totalCount || 0));
 
     if (!filtered.length) {
         tbody.innerHTML = '<tr><td colspan="8" class="px-6 py-8 text-center text-text-secondary">No complaints match the selected filter.</td></tr>';
@@ -7850,28 +8043,36 @@ function viewGatePassDetailsModal(passId) {
             ` : ''}
 
             <div class="flex flex-wrap gap-2.5 pt-2 border-t border-border">
-                ${rawStatus === 'PENDING_WARDEN' || rawStatus === 'PENDING_ADMIN' || rawStatus === 'REQUESTED' || rawStatus === 'PENDING' ? `
+                ${currentUser?.role === 'warden' && (rawStatus === 'PENDING_WARDEN' || rawStatus === 'PENDING_ADMIN' || rawStatus === 'REQUESTED' || rawStatus === 'PENDING') ? `
                     <button onclick="updateGatePassStatus('${pass.id}', 'Approved'); closeModal();" class="flex-1 py-2.5 rounded-xl bg-emerald hover:bg-emerald/90 text-white text-xs font-semibold shadow-sm transition-all flex items-center justify-center gap-1.5">
-                        <i class="fa-solid fa-check"></i> Approve Pass (Generate QR)
+                        <i class="fa-solid fa-check"></i> Step 2: Confirm Details & Approve (Generate QR)
                     </button>
                     <button onclick="updateGatePassStatus('${pass.id}', 'Rejected'); closeModal();" class="px-4 py-2.5 rounded-xl bg-danger/10 hover:bg-danger hover:text-white text-danger text-xs font-semibold transition-all">
                         Reject
                     </button>
                 ` : ''}
-                ${(currentUser?.role === 'security' || currentUser?.role === 'admin') && (rawStatus === 'SECURITY_PENDING' || rawStatus === 'QR GENERATED' || rawStatus === 'APPROVED') ? `
+                ${currentUser?.role === 'security' && (rawStatus === 'SECURITY_PENDING' || rawStatus === 'QR GENERATED' || rawStatus === 'APPROVED') ? `
                     <button onclick="executeSecurityVerification('${pass.id}', 'APPROVE'); closeModal();" class="flex-1 py-2.5 rounded-xl bg-emerald hover:bg-emerald/90 text-white text-xs font-semibold shadow-sm transition-all flex items-center justify-center gap-1.5">
-                        <i class="fa-solid fa-door-open"></i> Approve Exit
+                        <i class="fa-solid fa-door-open"></i> Step 3: Approve Student Exit
                     </button>
                     <button onclick="executeSecurityVerification('${pass.id}', 'REJECT'); closeModal();" class="px-4 py-2.5 rounded-xl bg-rose-600/10 hover:bg-rose-600 text-rose-600 hover:text-white text-xs font-semibold transition-all">
                         Reject Exit
                     </button>
                 ` : ''}
-                ${(currentUser?.role === 'warden' || currentUser?.role === 'admin') && (rawStatus === 'OUTSIDE' || rawStatus === 'OUT' || rawStatus === 'OUTSIDE_NOT_RETURNED' || rawStatus === 'RETURNED') ? `
-                    <button onclick="executeWardenVerification('${pass.id}', 'APPROVE'); closeModal();" class="flex-1 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold shadow-sm transition-all flex items-center justify-center gap-1.5">
-                        <i class="fa-solid fa-hotel"></i> Confirm Hostel Arrival
+                ${currentUser?.role === 'security' && (rawStatus === 'OUTSIDE' || rawStatus === 'OUT') ? `
+                    <button onclick="executeSecurityVerification('${pass.id}', 'APPROVE'); closeModal();" class="flex-1 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold shadow-sm transition-all flex items-center justify-center gap-1.5">
+                        <i class="fa-solid fa-plane-arrival"></i> Step 4: Allow Gate Entry (Forward to Warden)
                     </button>
-                    <button onclick="executeWardenVerification('${pass.id}', 'REJECT'); closeModal();" class="px-4 py-2.5 rounded-xl bg-amber-600/10 hover:bg-amber-600 text-amber-700 hover:text-white text-xs font-semibold transition-all">
-                        Mark Not Returned
+                    <button onclick="executeSecurityVerification('${pass.id}', 'REJECT'); closeModal();" class="px-4 py-2.5 rounded-xl bg-rose-600/10 hover:bg-rose-600 text-rose-600 hover:text-white text-xs font-semibold transition-all">
+                        Reject Entry
+                    </button>
+                ` : ''}
+                ${currentUser?.role === 'warden' && (rawStatus === 'PENDING_WARDEN_RETURN' || rawStatus === 'RETURNED') ? `
+                    <button onclick="executeWardenVerification('${pass.id}', 'APPROVE'); closeModal();" class="flex-1 py-2.5 rounded-xl bg-emerald hover:bg-emerald/90 text-white text-xs font-bold shadow-sm transition-all flex items-center justify-center gap-1.5">
+                        <i class="fa-solid fa-hotel"></i> Step 5: Approve Student Return to Hostel
+                    </button>
+                    <button onclick="promptWardenRejection('${pass.id}'); closeModal();" class="px-4 py-2.5 rounded-xl bg-rose-600/10 hover:bg-rose-600 text-rose-600 hover:text-white text-xs font-semibold transition-all">
+                        Deny Hostel Entry
                     </button>
                 ` : ''}
                 <button onclick="downloadGatePassPdf('${pass.id}')" class="px-4 py-2.5 rounded-xl border border-border bg-surface-alt hover:bg-surface text-xs font-semibold text-text transition-all flex items-center gap-1.5">
@@ -8637,27 +8838,34 @@ function renderWardenDashboard() {
         const rawStatus = String(pass.status || 'PENDING_WARDEN').toUpperCase();
         const isPending = rawStatus === 'REQUESTED' || rawStatus === 'PENDING' || rawStatus === 'PENDING_WARDEN' || rawStatus === 'PENDING_ADMIN';
         const isApproved = rawStatus === 'QR GENERATED' || rawStatus === 'APPROVED' || rawStatus === 'SECURITY_PENDING';
-        const isOut = rawStatus === 'OUT' || rawStatus === 'OUTSIDE' || (pass.securityVerified && !pass.wardenVerified);
-        const isReturned = rawStatus === 'RETURNED';
+        const isOut = rawStatus === 'OUT' || rawStatus === 'OUTSIDE';
+        const isPendingWardenReturn = rawStatus === 'PENDING_WARDEN_RETURN' || rawStatus === 'RETURNED';
         const isCompleted = rawStatus === 'COMPLETED';
+        const isHostelEntryRejected = rawStatus === 'HOSTEL_ENTRY_REJECTED';
         const isOutsideNotReturned = rawStatus === 'OUTSIDE_NOT_RETURNED';
-        const isRejected = rawStatus.includes('REJECTED');
+        const isRejected = rawStatus.includes('REJECTED') && !isHostelEntryRejected;
 
         let badgeClass = 'bg-amber-100 text-amber-800 border border-amber-200';
         let displayStatus = pass.status || 'Pending';
 
         if (isApproved) {
             badgeClass = 'bg-emerald/10 text-emerald border border-emerald/20';
-            displayStatus = 'QR Approved';
+            displayStatus = 'Approved (Ready for Gate Exit)';
         } else if (isOut) {
             badgeClass = 'bg-blue-100 text-blue-800 border border-blue-200';
             displayStatus = 'Student Out (Gate Crossed)';
+        } else if (isPendingWardenReturn) {
+            badgeClass = 'bg-purple-100 text-purple-800 border border-purple-200 animate-pulse';
+            displayStatus = 'Gate Entry Allowed • Awaiting Warden Hostel Approval';
+        } else if (isCompleted) {
+            badgeClass = 'bg-emerald-100 text-emerald-800 border border-emerald-200';
+            displayStatus = 'Completed (In Hostel)';
+        } else if (isHostelEntryRejected) {
+            badgeClass = 'bg-rose-100 text-rose-800 border border-rose-300';
+            displayStatus = 'Hostel Entry Denied';
         } else if (isOutsideNotReturned) {
             badgeClass = 'bg-rose-100 text-rose-900 border border-rose-300';
             displayStatus = '⚠️ Outside — Not Returned';
-        } else if (isCompleted) {
-            badgeClass = 'bg-emerald-100 text-emerald-800 border border-emerald-200';
-            displayStatus = 'Completed';
         } else if (isRejected) {
             badgeClass = 'bg-danger/10 text-danger border border-danger/20';
             displayStatus = 'Rejected';
@@ -8676,7 +8884,7 @@ function renderWardenDashboard() {
                     <div class="space-y-1">
                         <div class="flex flex-wrap items-center gap-2">
                             <span class="font-bold text-base text-text">${pass.student || 'Student'}</span>
-                            <span class="text-xs text-text-secondary font-mono">(${pass.registrationNumber || 'N/A'})</span>
+                            <span class="text-xs text-text-secondary font-mono bg-surface-alt px-2 py-0.5 rounded border border-border">ID: ${pass.registrationNumber || 'N/A'}</span>
                             <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold ${badgeClass}">${displayStatus}</span>
                         </div>
                         <p class="text-xs text-text-secondary">
@@ -8685,6 +8893,8 @@ function renderWardenDashboard() {
                         </p>
                         <p class="text-xs text-text-secondary">
                             <strong>Dates:</strong> ${formatGatePassDate(pass.gateDate)} ➔ ${formatGatePassDate(pass.returnDate)}
+                            ${pass.exitTime ? ` • <span class="text-blue-600 font-medium">Exit: ${new Date(pass.exitTime).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</span>` : ''}
+                            ${pass.gateArrivalTime ? ` • <span class="text-purple-600 font-medium">Gate Return: ${new Date(pass.gateArrivalTime).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</span>` : ''}
                         </p>
                         <p class="text-xs text-text-muted italic bg-surface-alt/60 px-2 py-1 rounded-lg">
                             <i class="fa-solid fa-comment-dots mr-1"></i> "${pass.reason || 'Not specified'}"
@@ -8694,19 +8904,19 @@ function renderWardenDashboard() {
                 </div>
                 <div class="flex flex-wrap items-center gap-2 shrink-0">
                     ${isPending ? `
-                        <button onclick="updateGatePassStatus('${pass.id}', 'Approved')" class="px-4 py-2 rounded-xl bg-emerald hover:bg-emerald/90 text-white text-xs font-semibold shadow-sm transition-all flex items-center gap-1.5">
-                            <i class="fa-solid fa-check"></i> Approve
+                        <button onclick="updateGatePassStatus('${pass.id}', 'Approved')" class="px-4 py-2 rounded-xl bg-emerald hover:bg-emerald/90 text-white text-xs font-bold shadow-sm transition-all flex items-center gap-1.5" title="Manually verify Name and ID, then approve departure">
+                            <i class="fa-solid fa-check"></i> Step 2: Confirm & Approve Exit
                         </button>
                         <button onclick="updateGatePassStatus('${pass.id}', 'Rejected')" class="px-3.5 py-2 rounded-xl bg-danger/10 hover:bg-danger hover:text-white text-danger text-xs font-semibold transition-all">
                             Reject
                         </button>
                     ` : ''}
-                    ${isReturned ? `
-                        <button onclick="submitWardenVerificationAction('${pass.id}', 'APPROVE')" class="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-xs transition-all flex items-center gap-1.5">
-                            <i class="fa-solid fa-hotel"></i> Verify Arrival
+                    ${isPendingWardenReturn ? `
+                        <button onclick="submitWardenVerificationAction('${pass.id}', 'APPROVE')" class="px-4 py-2 rounded-xl bg-emerald hover:bg-emerald/90 text-white text-xs font-bold shadow-xs transition-all flex items-center gap-1.5" title="Approve student return into the hostel">
+                            <i class="fa-solid fa-hotel"></i> Step 5: Approve Hostel Entry
                         </button>
-                        <button onclick="promptWardenRejection('${pass.id}')" class="px-3 py-2 rounded-xl bg-amber-600/10 hover:bg-amber-600 hover:text-white text-amber-700 text-xs font-semibold transition-all">
-                            Not Returned
+                        <button onclick="promptWardenRejection('${pass.id}')" class="px-3.5 py-2 rounded-xl bg-rose-600/10 hover:bg-rose-600 hover:text-white text-rose-600 text-xs font-semibold transition-all" title="Deny student entry into the hostel">
+                            Deny Hostel Entry
                         </button>
                     ` : ''}
                     <button onclick="viewGatePassDetailsModal('${pass.id}')" class="px-3 py-2 rounded-xl border border-border bg-surface-alt hover:bg-surface text-xs font-medium text-text hover:text-primary transition-all flex items-center gap-1.5">
@@ -8783,18 +8993,26 @@ function renderSecurityDashboard() {
 
     list.innerHTML = filtered.map((pass) => {
         const rawStatus = String(pass.status || 'SECURITY_PENDING').toUpperCase();
-        const isCompleted = rawStatus === 'COMPLETED' || rawStatus === 'RETURNED';
+        const isCompleted = rawStatus === 'COMPLETED';
+        const isPendingWardenReturn = rawStatus === 'PENDING_WARDEN_RETURN' || rawStatus === 'RETURNED';
         const isSecRejected = rawStatus === 'SECURITY_REJECTED' || rawStatus === 'REJECTED';
-        const isOut = !isCompleted && !isSecRejected && (rawStatus === 'OUTSIDE' || rawStatus === 'OUT');
-        const isReadyForExit = !isCompleted && !isSecRejected && !isOut && (rawStatus === 'SECURITY_PENDING' || rawStatus === 'APPROVED' || rawStatus === 'QR GENERATED');
+        const isHostelEntryRejected = rawStatus === 'HOSTEL_ENTRY_REJECTED';
+        const isOut = !isCompleted && !isPendingWardenReturn && !isSecRejected && !isHostelEntryRejected && (rawStatus === 'OUTSIDE' || rawStatus === 'OUT');
+        const isReadyForExit = !isCompleted && !isPendingWardenReturn && !isSecRejected && !isHostelEntryRejected && !isOut && (rawStatus === 'SECURITY_PENDING' || rawStatus === 'APPROVED' || rawStatus === 'QR GENERATED');
         const returnDue = !pass.returnDate || String(pass.returnDate).slice(0, 10) <= todayStr;
 
         let badgeClass = 'bg-amber-100 text-amber-800 border border-amber-200';
         let badgeLabel = pass.status || 'Pending';
 
         if (isCompleted) {
-            badgeClass = 'bg-purple-100 text-purple-800 border border-purple-200';
-            badgeLabel = 'Completed';
+            badgeClass = 'bg-emerald-100 text-emerald-800 border border-emerald-200';
+            badgeLabel = 'Completed (In Hostel)';
+        } else if (isPendingWardenReturn) {
+            badgeClass = 'bg-purple-100 text-purple-800 border border-purple-200 animate-pulse';
+            badgeLabel = 'Gate Entry Allowed • Awaiting Warden';
+        } else if (isHostelEntryRejected) {
+            badgeClass = 'bg-rose-100 text-rose-800 border border-rose-300';
+            badgeLabel = 'Hostel Entry Denied';
         } else if (isSecRejected) {
             badgeClass = 'bg-danger/10 text-danger border border-danger/20';
             badgeLabel = 'Exit Rejected';
@@ -8819,7 +9037,7 @@ function renderSecurityDashboard() {
                     <div class="space-y-1">
                         <div class="flex flex-wrap items-center gap-2">
                             <span class="font-bold text-base text-text">${pass.student || 'Student'}</span>
-                            <span class="text-xs text-text-secondary font-mono">(${pass.registrationNumber || 'N/A'})</span>
+                            <span class="text-xs text-text-secondary font-mono bg-surface-alt px-2 py-0.5 rounded border border-border">ID: ${pass.registrationNumber || 'N/A'}</span>
                             <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold ${badgeClass}">${badgeLabel}</span>
                         </div>
                         <p class="text-xs text-text-secondary">
@@ -8829,23 +9047,30 @@ function renderSecurityDashboard() {
                         <p class="text-[11px] font-mono text-text-muted">
                             Pass ID: <strong class="text-primary">${pass.id}</strong> ${pass.certificateId ? `• Cert: <strong class="text-emerald-600">${pass.certificateId}</strong>` : ''}
                             ${pass.exitTime ? ` • <span class="text-blue-600 font-sans font-medium">Exit: ${new Date(pass.exitTime).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</span>` : ''}
-                            ${pass.hostelArrivalTime ? ` • <span class="text-emerald-600 font-sans font-medium">Returned: ${new Date(pass.hostelArrivalTime).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</span>` : ''}
+                            ${pass.gateArrivalTime ? ` • <span class="text-purple-600 font-sans font-medium">Gate Return: ${new Date(pass.gateArrivalTime).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</span>` : ''}
+                            ${pass.hostelArrivalTime ? ` • <span class="text-emerald-600 font-sans font-medium">Hostel In: ${new Date(pass.hostelArrivalTime).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</span>` : ''}
                         </p>
                     </div>
                 </div>
                 <div class="flex flex-wrap items-center gap-2 shrink-0">
                     ${isReadyForExit ? `
-                        <button id="btnExit-${pass.id}" onclick="submitSecurityVerificationAction('${pass.id}', 'APPROVE', '', this)" class="px-4 py-2 rounded-xl bg-emerald hover:bg-emerald/90 text-white text-xs font-bold shadow-xs transition-all flex items-center gap-1.5">
-                            <i class="fa-solid fa-door-open"></i> Approve Exit
+                        <button id="btnExit-${pass.id}" onclick="submitSecurityVerificationAction('${pass.id}', 'APPROVE', '', this)" class="px-4 py-2 rounded-xl bg-emerald hover:bg-emerald/90 text-white text-xs font-bold shadow-xs transition-all flex items-center gap-1.5" title="Verify student departure at campus gate">
+                            <i class="fa-solid fa-door-open"></i> Step 3: Approve Exit
                         </button>
                         <button onclick="promptSecurityRejection('${pass.id}')" class="px-3 py-2 rounded-xl bg-rose-600/10 hover:bg-rose-600 hover:text-white text-rose-600 text-xs font-semibold transition-all">
                             Reject
                         </button>
                     ` : isOut ? `
-                        ${returnDue ? `<button id="btnReturn-${pass.id}" onclick="submitSecurityVerificationAction('${pass.id}', 'APPROVE', '', this)" class="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-xs transition-all flex items-center gap-1.5"><i class="fa-solid fa-plane-arrival"></i> Accept Return</button>` : `<span class="px-3 py-2 rounded-xl bg-surface-alt border border-border text-text-secondary text-xs font-semibold">Return on ${formatGatePassDate(pass.returnDate)}</span>`}
+                        <button id="btnReturn-${pass.id}" onclick="submitSecurityVerificationAction('${pass.id}', 'APPROVE', '', this)" class="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-xs transition-all flex items-center gap-1.5" title="Verify student return at gate and grant campus gate entry">
+                            <i class="fa-solid fa-plane-arrival"></i> Step 4: Allow Gate Entry
+                        </button>
                         <button onclick="promptSecurityRejection('${pass.id}')" class="px-3 py-2 rounded-xl bg-rose-600/10 hover:bg-rose-600 hover:text-white text-rose-600 text-xs font-semibold transition-all">
                             Reject
                         </button>
+                    ` : isPendingWardenReturn ? `
+                        <span class="px-3 py-2 rounded-xl bg-purple-100 text-purple-800 border border-purple-200 text-xs font-semibold flex items-center gap-1.5">
+                            <i class="fa-solid fa-hotel text-purple-600"></i> Gate Entry Allowed (Pending Warden)
+                        </span>
                     ` : ''}
                     <button onclick="viewGatePassDetailsModal('${pass.id}')" class="px-3.5 py-2 rounded-xl border border-border bg-surface-alt hover:bg-surface text-xs font-semibold text-text hover:text-primary transition-all flex items-center gap-1.5">
                         <i class="fa-solid fa-eye text-primary"></i> Details
@@ -8953,7 +9178,7 @@ function renderAdminGatePassLogsPage() {
 
         return `
             <tr class="table-row hover:bg-surface-alt/40 transition-colors text-xs">
-                <td class="px-4 py-3.5">
+                <td class="px-4 py-3.5 whitespace-nowrap">
                     <div class="flex items-center gap-2.5">
                         ${entry.studentPhoto ? `
                             <img src="${entry.studentPhoto}" alt="Photo" class="w-8 h-8 rounded-xl object-cover border border-border shrink-0">
@@ -8964,47 +9189,47 @@ function renderAdminGatePassLogsPage() {
                         </div>
                     </div>
                 </td>
-                <td class="px-4 py-3.5">
+                <td class="px-4 py-3.5 whitespace-nowrap">
                     <p class="font-mono font-bold text-primary">${entry.id || 'N/A'}</p>
                     ${entry.certificateId ? `<p class="font-mono text-[10px] text-emerald-600 truncate max-w-[130px]">${entry.certificateId}</p>` : '<span class="text-[10px] text-text-muted">Cert Pending</span>'}
                 </td>
-                <td class="px-4 py-3.5">
+                <td class="px-4 py-3.5 whitespace-nowrap">
                     ${isAdminApproved ? `
-                        <span class="px-2 py-0.5 rounded-md font-semibold text-emerald bg-emerald/10 border border-emerald/20">✅ Approved</span>
+                        <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full font-semibold text-emerald-700 bg-emerald-100 border border-emerald-200 whitespace-nowrap">✅ Approved</span>
                     ` : isAdminRejected ? `
-                        <span class="px-2 py-0.5 rounded-md font-semibold text-danger bg-danger/10 border border-danger/20">❌ Rejected</span>
+                        <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full font-semibold text-rose-700 bg-rose-100 border border-rose-200 whitespace-nowrap">❌ Rejected</span>
                     ` : `
-                        <span class="px-2 py-0.5 rounded-md font-semibold text-amber-700 bg-amber-100 border border-amber-200">⏳ Pending</span>
+                        <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full font-semibold text-amber-700 bg-amber-100 border border-amber-200 whitespace-nowrap">⏳ Pending</span>
                     `}
                 </td>
-                <td class="px-4 py-3.5">
+                <td class="px-4 py-3.5 whitespace-nowrap">
                     ${isSecurityApproved ? `
-                        <span class="px-2 py-0.5 rounded-md font-semibold text-blue-700 bg-blue-100 border border-blue-200">✅ Exit Approved</span>
+                        <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full font-semibold text-blue-700 bg-blue-100 border border-blue-200 whitespace-nowrap">✅ Exit Approved</span>
                     ` : isSecurityRejected ? `
-                        <span class="px-2 py-0.5 rounded-md font-semibold text-danger bg-danger/10 border border-danger/20">❌ Rejected</span>
+                        <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full font-semibold text-rose-700 bg-rose-100 border border-rose-200 whitespace-nowrap">❌ Rejected</span>
                     ` : `
-                        <span class="px-2 py-0.5 rounded-md font-semibold text-text-muted bg-surface-alt border border-border">⏳ Pending</span>
+                        <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full font-semibold text-text-muted bg-surface-alt border border-border whitespace-nowrap">⏳ Pending</span>
                     `}
                 </td>
-                <td class="px-4 py-3.5">
+                <td class="px-4 py-3.5 whitespace-nowrap">
                     ${isWardenApproved ? `
-                        <span class="px-2 py-0.5 rounded-md font-semibold text-emerald-700 bg-emerald-100 border border-emerald-200">✅ Verified</span>
+                        <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full font-semibold text-emerald-700 bg-emerald-100 border border-emerald-200 whitespace-nowrap">✅ Verified</span>
                     ` : isWardenRejected ? `
-                        <span class="px-2 py-0.5 rounded-md font-semibold text-rose-800 bg-rose-100 border border-rose-300">❌ Rejected</span>
+                        <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full font-semibold text-rose-800 bg-rose-100 border border-rose-300 whitespace-nowrap">❌ Rejected</span>
                     ` : `
-                        <span class="px-2 py-0.5 rounded-md font-semibold text-text-muted bg-surface-alt border border-border">⏳ Pending</span>
+                        <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full font-semibold text-text-muted bg-surface-alt border border-border whitespace-nowrap">⏳ Pending</span>
                     `}
                 </td>
-                <td class="px-4 py-3.5 font-mono text-text-secondary">
+                <td class="px-4 py-3.5 font-mono text-text-secondary whitespace-nowrap">
                     ${formatTimeOnly(entry.exitTime || entry.outTime)}
                 </td>
-                <td class="px-4 py-3.5 font-mono text-text-secondary">
+                <td class="px-4 py-3.5 font-mono text-text-secondary whitespace-nowrap">
                     ${formatTimeOnly(entry.hostelArrivalTime || entry.inTime)}
                 </td>
-                <td class="px-4 py-3.5">
-                    <span class="px-2.5 py-1 rounded-full text-xs font-bold ${finalBadgeClass}">${finalLabel}</span>
+                <td class="px-4 py-3.5 whitespace-nowrap">
+                    <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-bold whitespace-nowrap ${finalBadgeClass}">${finalLabel}</span>
                 </td>
-                <td class="px-4 py-3.5">
+                <td class="px-4 py-3.5 whitespace-nowrap">
                     <div class="flex items-center gap-1.5">
                         <button onclick="viewGatePassDetailsModal('${entry.id}')" class="px-2.5 py-1 rounded-lg border border-border bg-surface-alt hover:bg-surface text-xs font-semibold text-text hover:text-primary transition-all">Details</button>
                         <button onclick="downloadGatePassPdf('${entry.id}')" class="px-2 py-1 rounded-lg border border-border bg-surface-alt hover:bg-surface text-xs font-semibold text-text-secondary hover:text-text transition-all"><i class="fa-solid fa-file-pdf text-danger"></i></button>
@@ -9679,11 +9904,26 @@ async function saveNightRestriction(event) {
     showToast('Night restriction settings saved.', 'success');
 }
 
-function showModal(title, content) {
+function showModal(title, content, options = {}) {
     const overlay = document.getElementById('modalOverlay');
     const modalContent = document.getElementById('modalContent');
     if (!overlay || !modalContent) return;
-    modalContent.innerHTML = '<div class="p-6 border-b border-border flex items-center justify-between"><h3 class="font-semibold text-lg">' + title + '</h3><button onclick="closeModal()" class="w-8 h-8 rounded-lg hover:bg-surface-alt flex items-center justify-center transition-all"><i class="fa-solid fa-xmark text-text-secondary"></i></button></div><div class="p-6">' + content + '</div>';
+
+    modalContent.classList.remove('max-w-sm', 'max-w-md', 'max-w-lg', 'max-w-xl', 'max-w-2xl', 'max-w-3xl', 'max-w-4xl', 'max-w-5xl', 'max-w-6xl');
+
+    let sizeClass = 'max-w-xl'; // Default compact box size for clean, professional dialogs
+    if (typeof options === 'string') {
+        sizeClass = options;
+    } else if (options && options.maxWidth) {
+        sizeClass = options.maxWidth;
+    } else if (title.includes('CCTV') || title.includes('Surveillance') || title.includes('History') || title.includes('Evidence') || title.includes('Timeline') || title.includes('Biometric')) {
+        sizeClass = 'max-w-5xl';
+    } else if (title.includes('Details') || title.includes('Emergency') || title.includes('FIRE')) {
+        sizeClass = 'max-w-2xl';
+    }
+    modalContent.classList.add(sizeClass);
+
+    modalContent.innerHTML = '<div class="p-5 sm:p-6 border-b border-border flex items-center justify-between"><h3 class="font-semibold text-lg flex-1 mr-2">' + title + '</h3><button onclick="closeModal()" class="w-8 h-8 rounded-lg hover:bg-surface-alt flex items-center justify-center transition-all shrink-0 cursor-pointer"><i class="fa-solid fa-xmark text-text-secondary"></i></button></div><div class="p-5 sm:p-6">' + content + '</div>';
     modalContent.classList.toggle('night-restriction-modal', title.includes('Night Restriction') || title.includes('Hostel CCTV Live Monitoring'));
     overlay.classList.remove('hidden');
     void overlay.offsetWidth;
@@ -11064,7 +11304,7 @@ function renderCCTVBoxes(predictions) {
         // Person requires >= 35% confidence
         if (isSmoke && prediction.confidence < 0.50) return;
         if (isFire && prediction.confidence < 0.50) return;
-        if (isPerson && prediction.confidence < 0.35) return;
+        if (isPerson && prediction.confidence < 0.25) return;
         if (!isFire && !isSmoke && !isPerson && prediction.confidence < 0.45) return;
 
         const normalized = Math.max(rawX, rawY, rawWidth, rawHeight) <= 1;
@@ -12411,36 +12651,146 @@ async function openAddStudentModal() {
         return;
     }
 
-    showModal('Add Student', `
+    const wardenName = currentUser.name || currentUser.fullName || currentUser.email || 'Hostel Warden';
+    const wardenInitial = (wardenName.charAt(0) || 'W').toUpperCase();
+
+    showModal('<span class="flex items-center gap-2.5"><span class="w-8 h-8 rounded-xl bg-primary/10 text-primary inline-flex items-center justify-center text-sm shrink-0 shadow-sm"><i class="fa-solid fa-user-plus"></i></span><span class="inline-block"><span class="block font-bold text-base text-text leading-tight">Add New Student</span><span class="block text-[11px] text-text-secondary font-normal mt-0.5">Register credentials, contact & room allocation</span></span></span>', `
         <form onsubmit="handleAdminStudentSubmit(event)" autocomplete="off" class="space-y-4">
-            <p class="text-sm text-text-secondary">Create a student account with a private login and password.</p>
-            <div class="grid sm:grid-cols-2 gap-4">
-                <input id="adminStudentName" name="student-full-name" autocomplete="off" required placeholder="Full name" class="input-focus w-full px-4 py-3 rounded-xl border border-border bg-surface-alt text-sm">
-                <input id="adminStudentEmail" name="student-account-email" autocomplete="new-password" required type="email" placeholder="Email address" class="input-focus w-full px-4 py-3 rounded-xl border border-border bg-surface-alt text-sm">
-                <input id="adminStudentPassword" name="student-account-password" autocomplete="new-password" required minlength="6" type="password" placeholder="Temporary password" class="input-focus w-full px-4 py-3 rounded-xl border border-border bg-surface-alt text-sm">
-                <input id="adminStudentRegistrationNumber" name="student-registration-number" autocomplete="off" required placeholder="Registration number" class="input-focus w-full px-4 py-3 rounded-xl border border-border bg-surface-alt text-sm">
-                <select id="adminStudentHostelBlock" required class="input-focus w-full px-4 py-3 rounded-xl border border-border bg-surface-alt text-sm">
-                    <option value="" selected disabled>Select hostel block</option>
-                    <option>Block A</option><option>Block B</option><option>Block C</option><option>Block D</option>
-                </select>
-                <input id="adminStudentRoomNumber" name="student-room-number" autocomplete="off" required placeholder="Room number" class="input-focus w-full px-4 py-3 rounded-xl border border-border bg-surface-alt text-sm">
-                <select id="adminStudentWarden" ${isWarden ? 'disabled' : 'required'} class="input-focus w-full px-4 py-3 rounded-xl border border-border bg-surface-alt text-sm sm:col-span-2 ${isWarden ? 'hidden' : ''}">
-                    <option value="" selected disabled>Assign controlling warden</option>
-                    
-                </select>
-                ${isWarden ? `<div class="sm:col-span-2 rounded-xl border border-indigo-200 bg-indigo-500/5 px-4 py-3 text-sm text-indigo-700">This student will be automatically assigned to you: <strong>${escapeHtml(currentUser.name || currentUser.email)}</strong></div>` : ''}
+            <!-- Controlling Warden Info Card -->
+            <div class="p-3 rounded-xl border border-primary/20 bg-primary/5 flex items-center justify-between gap-3 text-xs shadow-sm">
+                <div class="flex items-center gap-2.5 min-w-0">
+                    <div class="w-8 h-8 rounded-lg bg-primary text-white flex items-center justify-center font-bold text-xs shadow-sm shrink-0">
+                        ${wardenInitial}
+                    </div>
+                    <div class="min-w-0">
+                        <p class="font-bold text-text truncate">${escapeHtml(wardenName)} <span class="text-[10px] font-semibold text-primary ml-1">(Controlling Warden)</span></p>
+                        <p class="text-[11px] text-text-secondary truncate mt-0.5">Auto-assigned to your supervision scope</p>
+                    </div>
+                </div>
+                <span class="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2.5 py-0.5 rounded-full border border-emerald-500/20 shrink-0">
+                    <i class="fa-solid fa-circle-check text-[9px] mr-1"></i>Auto-linked
+                </span>
             </div>
-            <div class="flex justify-end gap-3 pt-2">
-                <button type="button" onclick="closeModal()" class="px-4 py-2.5 rounded-xl border border-border text-sm font-semibold">Cancel</button>
-                <button type="submit" class="btn-primary px-5 py-2.5 rounded-xl text-white text-sm font-semibold">Create Student</button>
+
+            <!-- Credentials Section -->
+            <div class="space-y-2.5">
+                <div class="flex items-center gap-1.5 text-[11px] font-bold text-text-secondary uppercase tracking-wider pb-1 border-b border-border/60">
+                    <i class="fa-solid fa-id-badge text-primary text-xs"></i> Credentials & Contact Details
+                </div>
+                <div class="grid sm:grid-cols-2 gap-3">
+                    <div>
+                        <label for="adminStudentName" class="block text-xs font-semibold text-text mb-1">
+                            Full Name <span class="text-danger">*</span>
+                        </label>
+                        <div class="relative">
+                            <i class="fa-solid fa-user absolute left-3 top-1/2 -translate-y-1/2 text-text-muted text-xs pointer-events-none"></i>
+                            <input id="adminStudentName" name="student-full-name" autocomplete="off" required placeholder="e.g. John Doe" class="input-focus w-full pl-8 pr-3 py-2 rounded-xl border border-border bg-surface-alt text-xs text-text placeholder:text-text-muted shadow-sm">
+                        </div>
+                    </div>
+
+                    <div>
+                        <label for="adminStudentEmail" class="block text-xs font-semibold text-text mb-1">
+                            Email Address <span class="text-danger">*</span>
+                        </label>
+                        <div class="relative">
+                            <i class="fa-solid fa-envelope absolute left-3 top-1/2 -translate-y-1/2 text-text-muted text-xs pointer-events-none"></i>
+                            <input id="adminStudentEmail" name="student-account-email" autocomplete="new-password" required type="email" placeholder="e.g. student@siet.ac" class="input-focus w-full pl-8 pr-3 py-2 rounded-xl border border-border bg-surface-alt text-xs text-text placeholder:text-text-muted shadow-sm">
+                        </div>
+                    </div>
+
+                    <div>
+                        <label for="adminStudentRegistrationNumber" class="block text-xs font-semibold text-text mb-1">
+                            Registration Number <span class="text-danger">*</span>
+                        </label>
+                        <div class="relative">
+                            <i class="fa-solid fa-id-card absolute left-3 top-1/2 -translate-y-1/2 text-text-muted text-xs pointer-events-none"></i>
+                            <input id="adminStudentRegistrationNumber" name="student-registration-number" autocomplete="off" required placeholder="e.g. 714021104001" class="input-focus w-full pl-8 pr-3 py-2 rounded-xl border border-border bg-surface-alt text-xs text-text placeholder:text-text-muted shadow-sm">
+                        </div>
+                    </div>
+
+                    <div>
+                        <label for="adminStudentPassword" class="block text-xs font-semibold text-text mb-1">
+                            Temporary Password <span class="text-danger">*</span>
+                        </label>
+                        <div class="relative">
+                            <i class="fa-solid fa-lock absolute left-3 top-1/2 -translate-y-1/2 text-text-muted text-xs pointer-events-none"></i>
+                            <input id="adminStudentPassword" name="student-account-password" autocomplete="new-password" required minlength="6" type="password" placeholder="Min. 6 chars" class="input-focus w-full pl-8 pr-8 py-2 rounded-xl border border-border bg-surface-alt text-xs text-text placeholder:text-text-muted shadow-sm">
+                            <button type="button" onclick="togglePasswordVisibility('adminStudentPassword', this)" class="absolute right-2 top-1/2 -translate-y-1/2 text-text-muted hover:text-text text-xs p-1 rounded transition-colors cursor-pointer" title="Toggle password visibility">
+                                <i class="fa-solid fa-eye"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div>
+                        <label for="adminStudentParentPhone" class="block text-xs font-semibold text-text mb-1">
+                            Parent Mobile Number <span class="text-danger">*</span>
+                        </label>
+                        <div class="relative">
+                            <i class="fa-solid fa-phone-volume absolute left-3 top-1/2 -translate-y-1/2 text-text-muted text-xs pointer-events-none"></i>
+                            <input id="adminStudentParentPhone" name="student-parent-phone" required type="tel" placeholder="e.g. +91 98765 43210" class="input-focus w-full pl-8 pr-3 py-2 rounded-xl border border-border bg-surface-alt text-xs text-text placeholder:text-text-muted shadow-sm">
+                        </div>
+                    </div>
+
+                    <div>
+                        <label for="adminStudentPhone" class="block text-xs font-semibold text-text mb-1">
+                            Student Mobile Number
+                        </label>
+                        <div class="relative">
+                            <i class="fa-solid fa-mobile-screen absolute left-3 top-1/2 -translate-y-1/2 text-text-muted text-xs pointer-events-none"></i>
+                            <input id="adminStudentPhone" name="student-phone" type="tel" placeholder="e.g. +91 91234 56789" class="input-focus w-full pl-8 pr-3 py-2 rounded-xl border border-border bg-surface-alt text-xs text-text placeholder:text-text-muted shadow-sm">
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Hostel Section -->
+            <div class="space-y-2.5">
+                <div class="flex items-center gap-1.5 text-[11px] font-bold text-text-secondary uppercase tracking-wider pb-1 border-b border-border/60">
+                    <i class="fa-solid fa-hotel text-primary text-xs"></i> Hostel & Room Allocation
+                </div>
+                <div class="grid sm:grid-cols-2 gap-3">
+                    <div>
+                        <label for="adminStudentHostelBlock" class="block text-xs font-semibold text-text mb-1">
+                            Hostel Block <span class="text-danger">*</span>
+                        </label>
+                        <div class="relative">
+                            <i class="fa-solid fa-building absolute left-3 top-1/2 -translate-y-1/2 text-text-muted text-xs pointer-events-none"></i>
+                            <select id="adminStudentHostelBlock" required class="input-focus w-full pl-8 pr-8 py-2 rounded-xl border border-border bg-surface-alt text-xs text-text appearance-none cursor-pointer shadow-sm">
+                                <option value="" selected disabled>Select block</option>
+                                <option value="Block A">Block A</option>
+                                <option value="Block B">Block B</option>
+                                <option value="Block C">Block C</option>
+                                <option value="Block D">Block D</option>
+                            </select>
+                            <i class="fa-solid fa-chevron-down absolute right-3 top-1/2 -translate-y-1/2 text-text-muted text-[10px] pointer-events-none"></i>
+                        </div>
+                    </div>
+
+                    <div>
+                        <label for="adminStudentRoomNumber" class="block text-xs font-semibold text-text mb-1">
+                            Room Number <span class="text-danger">*</span>
+                        </label>
+                        <div class="relative">
+                            <i class="fa-solid fa-door-closed absolute left-3 top-1/2 -translate-y-1/2 text-text-muted text-xs pointer-events-none"></i>
+                            <input id="adminStudentRoomNumber" name="student-room-number" autocomplete="off" required placeholder="e.g. 101 or A-204" class="input-focus w-full pl-8 pr-3 py-2 rounded-xl border border-border bg-surface-alt text-xs text-text placeholder:text-text-muted shadow-sm">
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="flex items-center justify-end gap-2.5 pt-3 border-t border-border mt-4">
+                <button type="button" onclick="closeModal()" class="px-4 py-2 rounded-xl border border-border text-xs font-semibold hover:bg-surface-alt text-text-secondary hover:text-text transition-all cursor-pointer">
+                    Cancel
+                </button>
+                <button type="submit" id="btnSubmitAddStudent" class="btn-primary px-5 py-2 rounded-xl text-white text-xs font-semibold flex items-center gap-1.5 shadow-md shadow-primary/20 hover:shadow-primary/30 transition-all cursor-pointer">
+                    <i class="fa-solid fa-user-plus text-xs"></i> Create Student Account
+                </button>
             </div>
         </form>
-    `);
+    `, 'max-w-xl');
 
-    // Some browsers/password managers ignore autocomplete hints and reuse the
-    // logged-in warden credentials. Always start a new student form blank.
     setTimeout(() => {
-        ['adminStudentName', 'adminStudentEmail', 'adminStudentPassword', 'adminStudentRegistrationNumber', 'adminStudentRoomNumber']
+        ['adminStudentName', 'adminStudentEmail', 'adminStudentPassword', 'adminStudentRegistrationNumber', 'adminStudentParentPhone', 'adminStudentPhone', 'adminStudentRoomNumber']
             .forEach((id) => {
                 const input = document.getElementById(id);
                 if (input) input.value = '';
@@ -12523,7 +12873,31 @@ async function loadWardenAssignedStudents() {
         window.currentWardenStudents = Array.isArray(students) ? students : [];
         select.innerHTML = `<option value="">Select a student to filter gate-pass requests</option>${students.map((student) => `<option value="${escapeHtml(student.name || '')}">${escapeHtml(student.name || 'Student')} · ${escapeHtml(student.registrationNumber || 'No reg. no.')}</option>`).join('')}`;
         list.innerHTML = students.length
-            ? students.map((student) => `<div class="rounded-xl border border-border bg-surface-alt p-3"><div class="flex items-start justify-between gap-2"><div><p class="font-semibold text-sm">${escapeHtml(student.name || 'Student')}</p><p class="text-xs text-text-secondary mt-1">${escapeHtml(student.registrationNumber || 'No registration number')} · ${escapeHtml(student.hostelBlock || 'No block')} · Room ${escapeHtml(student.roomNumber || 'N/A')}</p></div><button onclick="openWardenStudentEditModal('${escapeHtml(student.userId || student.id || student.email)}')" class="px-2.5 py-1 rounded-lg bg-primary/10 text-primary text-xs font-semibold hover:bg-primary hover:text-white">Edit</button></div></div>`).join('')
+            ? students.map((student) => {
+                const sId = escapeHtml(student.userId || student.id || student.email || '');
+                const sName = escapeHtml(student.name || 'Student');
+                const safeNameForJs = (student.name || 'Student').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+                const pPhone = student.parentPhone || student.parent_phone;
+                return `<div class="rounded-xl border border-border bg-surface-alt p-3.5 hover:border-border/80 transition-all">
+                    <div class="flex items-center justify-between gap-3">
+                        <div class="min-w-0 flex-1">
+                            <p class="font-semibold text-sm truncate">${sName}</p>
+                            <p class="text-xs text-text-secondary mt-0.5 truncate">${escapeHtml(student.registrationNumber || 'No registration number')} · ${escapeHtml(student.hostelBlock || 'No block')} · Room ${escapeHtml(student.roomNumber || 'N/A')}${pPhone ? ` · <span class="text-primary font-medium"><i class="fa-solid fa-phone text-[10px]"></i> Parent: ${escapeHtml(pPhone)}</span>` : ''}</p>
+                        </div>
+                        <div class="flex items-center gap-2 shrink-0">
+                            <button onclick="openWardenStudentDetailsModal('${sId}')" class="px-3 py-1.5 rounded-lg bg-surface border border-border text-text hover:bg-surface-alt text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer shadow-sm">
+                                <i class="fa-solid fa-circle-info text-primary text-[11px]"></i> Details
+                            </button>
+                            <button onclick="openWardenStudentEditModal('${sId}')" class="px-3 py-1.5 rounded-lg bg-primary/10 text-primary text-xs font-semibold hover:bg-primary hover:text-white transition-all flex items-center gap-1.5 cursor-pointer">
+                                <i class="fa-solid fa-pen-to-square text-[11px]"></i> Edit
+                            </button>
+                            <button onclick="deleteStudent('${sId}', '${safeNameForJs}')" class="px-3 py-1.5 rounded-lg bg-danger/10 text-danger text-xs font-semibold hover:bg-danger hover:text-white transition-all flex items-center gap-1.5 cursor-pointer">
+                                <i class="fa-solid fa-trash-can text-[11px]"></i> Delete
+                            </button>
+                        </div>
+                    </div>
+                </div>`;
+            }).join('')
             : '<p class="text-sm text-text-secondary">No students have been assigned to you yet. Ask the administrator to assign students.</p>';
         section.classList.remove('hidden');
     } catch (error) {
@@ -12531,27 +12905,262 @@ async function loadWardenAssignedStudents() {
         section.classList.remove('hidden');
     }
 }
+window.loadWardenAssignedStudents = loadWardenAssignedStudents;
+
+function openWardenStudentDetailsModal(studentId) {
+    const student = (window.currentWardenStudents || []).find((item) => (item.userId || item.id || item.email) === studentId);
+    if (!student) return;
+    const sId = escapeHtml(student.userId || student.id || student.email || '');
+    const sName = escapeHtml(student.name || 'Student');
+    const safeNameForJs = (student.name || 'Student').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    const parentPhone = student.parentPhone || student.parent_phone || '';
+    const studentPhone = student.phone || '';
+    const regNo = student.registrationNumber || 'Not assigned';
+    const hostelBlock = student.hostelBlock || 'Unallocated';
+    const roomNo = student.roomNumber || 'Unassigned';
+    const email = student.email || '';
+    const status = student.status || 'Active';
+    const initial = (student.name || 'S').charAt(0).toUpperCase();
+
+    showModal('<span class="flex items-center gap-2.5"><span class="w-8 h-8 rounded-xl bg-primary/10 text-primary inline-flex items-center justify-center text-sm shrink-0 shadow-sm"><i class="fa-solid fa-id-card-clip"></i></span><span class="inline-block"><span class="block font-bold text-base text-text leading-tight">Student Profile Details</span><span class="block text-[11px] text-text-secondary font-normal mt-0.5">Comprehensive profile & contact information</span></span></span>', `
+        <div class="space-y-4">
+            <!-- Student Header Profile Card -->
+            <div class="p-3.5 rounded-xl border border-border bg-surface-alt flex items-center justify-between gap-3 shadow-sm">
+                <div class="flex items-center gap-3 min-w-0">
+                    <div class="w-11 h-11 rounded-2xl bg-gradient-to-tr from-primary/20 to-primary/5 text-primary border border-primary/20 flex items-center justify-center font-bold text-lg shrink-0 shadow-inner">
+                        ${initial}
+                    </div>
+                    <div class="min-w-0">
+                        <div class="flex items-center gap-2">
+                            <p class="font-bold text-sm text-text truncate">${sName}</p>
+                            <span class="px-2 py-0.5 rounded-full text-[10px] font-semibold ${status.toLowerCase() === 'active' ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20' : 'bg-surface text-text-secondary border border-border'}">
+                                <i class="fa-solid fa-circle text-[6px] mr-1 ${status.toLowerCase() === 'active' ? 'text-emerald-500 animate-pulse' : 'text-text-muted'}"></i>${escapeHtml(status)}
+                            </span>
+                        </div>
+                        <p class="text-xs text-text-secondary font-mono mt-0.5 truncate">${escapeHtml(regNo)}</p>
+                    </div>
+                </div>
+                <div class="text-right shrink-0">
+                    <span class="px-2.5 py-1 rounded-xl text-xs font-bold bg-primary/10 text-primary border border-primary/20 inline-block shadow-sm">
+                        <i class="fa-solid fa-hotel text-[11px] mr-1"></i>${escapeHtml(hostelBlock)} · Rm ${escapeHtml(roomNo)}
+                    </span>
+                </div>
+            </div>
+
+            <!-- Parent Contact Highlight Box -->
+            <div class="p-3 rounded-xl border border-amber-500/30 bg-amber-500/5 dark:bg-amber-500/10 space-y-1.5">
+                <div class="flex items-center justify-between">
+                    <span class="text-[11px] font-bold text-amber-700 dark:text-amber-400 uppercase tracking-wider flex items-center gap-1.5">
+                        <i class="fa-solid fa-phone-volume text-xs"></i> Parent / Guardian Mobile
+                    </span>
+                    ${parentPhone ? `
+                        <a href="tel:${escapeHtml(parentPhone)}" class="px-2.5 py-1 rounded-lg bg-amber-500 text-white hover:bg-amber-600 text-xs font-semibold transition-all inline-flex items-center gap-1.5 shadow-sm cursor-pointer">
+                            <i class="fa-solid fa-phone text-[10px]"></i> Call Parent
+                        </a>
+                    ` : ''}
+                </div>
+                <div class="flex items-center gap-2">
+                    <p class="text-sm font-bold font-mono text-text">${parentPhone ? escapeHtml(parentPhone) : '<span class="text-text-muted font-sans font-normal italic text-xs">No parent mobile registered</span>'}</p>
+                </div>
+            </div>
+
+            <!-- Detailed Grid Information -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <div class="p-3 rounded-xl border border-border bg-surface flex flex-col justify-between">
+                    <span class="text-[10px] font-bold text-text-secondary uppercase tracking-wider flex items-center gap-1.5 mb-1">
+                        <i class="fa-solid fa-envelope text-primary text-[11px]"></i> Student Email
+                    </span>
+                    <p class="text-xs font-semibold text-text truncate">
+                        ${email ? `<a href="mailto:${escapeHtml(email)}" class="text-primary hover:underline">${escapeHtml(email)}</a>` : '<span class="text-text-muted italic font-normal">Not provided</span>'}
+                    </p>
+                </div>
+
+                <div class="p-3 rounded-xl border border-border bg-surface flex flex-col justify-between">
+                    <span class="text-[10px] font-bold text-text-secondary uppercase tracking-wider flex items-center gap-1.5 mb-1">
+                        <i class="fa-solid fa-mobile-screen text-primary text-[11px]"></i> Student Mobile
+                    </span>
+                    <p class="text-xs font-semibold text-text truncate">
+                        ${studentPhone ? `<a href="tel:${escapeHtml(studentPhone)}" class="hover:text-primary transition-colors">${escapeHtml(studentPhone)}</a>` : '<span class="text-text-muted italic font-normal">Not provided</span>'}
+                    </p>
+                </div>
+
+                <div class="p-3 rounded-xl border border-border bg-surface flex flex-col justify-between">
+                    <span class="text-[10px] font-bold text-text-secondary uppercase tracking-wider flex items-center gap-1.5 mb-1">
+                        <i class="fa-solid fa-building text-primary text-[11px]"></i> Hostel & Wing
+                    </span>
+                    <p class="text-xs font-semibold text-text">${escapeHtml(hostelBlock)}</p>
+                </div>
+
+                <div class="p-3 rounded-xl border border-border bg-surface flex flex-col justify-between">
+                    <span class="text-[10px] font-bold text-text-secondary uppercase tracking-wider flex items-center gap-1.5 mb-1">
+                        <i class="fa-solid fa-door-open text-primary text-[11px]"></i> Room Allocation
+                    </span>
+                    <p class="text-xs font-semibold text-text">Room ${escapeHtml(roomNo)}</p>
+                </div>
+            </div>
+
+            <!-- Footer Action Controls -->
+            <div class="flex items-center justify-between pt-3 border-t border-border mt-3">
+                <button type="button" onclick="deleteStudent('${sId}', '${safeNameForJs}')" class="px-3.5 py-2 rounded-xl bg-danger/10 text-danger hover:bg-danger hover:text-white text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer">
+                    <i class="fa-solid fa-trash-can text-xs"></i> Delete Student
+                </button>
+                <div class="flex items-center gap-2">
+                    <button type="button" onclick="openWardenStudentEditModal('${sId}')" class="px-4 py-2 rounded-xl bg-primary/10 text-primary hover:bg-primary hover:text-white text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer">
+                        <i class="fa-solid fa-pen-to-square text-xs"></i> Edit Details
+                    </button>
+                    <button type="button" onclick="closeModal()" class="px-4 py-2 rounded-xl border border-border text-xs font-semibold hover:bg-surface-alt text-text-secondary hover:text-text transition-all cursor-pointer">
+                        Close
+                    </button>
+                </div>
+            </div>
+        </div>
+    `, 'max-w-xl');
+}
+window.openWardenStudentDetailsModal = openWardenStudentDetailsModal;
 
 function openWardenStudentEditModal(studentId) {
     const student = (window.currentWardenStudents || []).find((item) => (item.userId || item.id || item.email) === studentId);
     if (!student) return;
-    showModal('Update Student Account', `
-        <form onsubmit="handleWardenStudentUpdate(event, '${escapeHtml(student.userId || student.id || student.email)}')" class="space-y-4">
-            <p class="text-sm text-text-secondary">Update the student details and login credentials provided by the warden.</p>
-            <input id="editWardenStudentName" required value="${escapeHtml(student.name || '')}" placeholder="Full name" class="input-focus w-full px-4 py-3 rounded-xl border border-border bg-surface-alt text-sm">
-            <input id="editWardenStudentEmail" required type="email" value="${escapeHtml(student.email || '')}" placeholder="Email address" class="input-focus w-full px-4 py-3 rounded-xl border border-border bg-surface-alt text-sm">
-            <input id="editWardenStudentPassword" minlength="6" type="password" placeholder="New password (leave blank to keep current)" class="input-focus w-full px-4 py-3 rounded-xl border border-border bg-surface-alt text-sm">
-            <div class="grid sm:grid-cols-2 gap-4">
-                <input id="editWardenStudentRegistration" required value="${escapeHtml(student.registrationNumber || '')}" placeholder="Registration number" class="input-focus w-full px-4 py-3 rounded-xl border border-border bg-surface-alt text-sm">
-                <input id="editWardenStudentRoom" required value="${escapeHtml(student.roomNumber || '')}" placeholder="Room number" class="input-focus w-full px-4 py-3 rounded-xl border border-border bg-surface-alt text-sm">
+    const sId = escapeHtml(student.userId || student.id || student.email || '');
+    const sName = escapeHtml(student.name || 'Student');
+    const safeNameForJs = (student.name || 'Student').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    
+    showModal('<span class="flex items-center gap-2.5"><span class="w-8 h-8 rounded-xl bg-primary/10 text-primary inline-flex items-center justify-center text-sm shrink-0 shadow-sm"><i class="fa-solid fa-user-pen"></i></span><span class="inline-block"><span class="block font-bold text-base text-text leading-tight">Update Student Account</span><span class="block text-[11px] text-text-secondary font-normal mt-0.5">Modify student credentials, contact & room allocation</span></span></span>', `
+        <form onsubmit="handleWardenStudentUpdate(event, '${sId}')" class="space-y-4">
+            <div class="p-3 rounded-xl border border-border bg-surface-alt flex items-center justify-between gap-3 shadow-sm text-xs">
+                <div class="flex items-center gap-2.5 min-w-0">
+                    <div class="w-8 h-8 rounded-lg bg-primary/15 text-primary flex items-center justify-center font-bold text-xs shrink-0">
+                        ${(student.name || 'S').charAt(0).toUpperCase()}
+                    </div>
+                    <div class="min-w-0">
+                        <p class="font-bold text-text truncate">${sName}</p>
+                        <p class="text-[11px] text-text-secondary truncate mt-0.5">${escapeHtml(student.email || 'No email')} · ${escapeHtml(student.registrationNumber || 'No reg. no.')}</p>
+                    </div>
+                </div>
+                <span class="px-2.5 py-0.5 rounded-lg text-[11px] font-semibold bg-primary/10 text-primary shrink-0">
+                    ${escapeHtml(student.hostelBlock || 'Block A')} · Rm ${escapeHtml(student.roomNumber || 'N/A')}
+                </span>
             </div>
-            <select id="editWardenStudentBlock" required class="input-focus w-full px-4 py-3 rounded-xl border border-border bg-surface-alt text-sm">
-                ${['Block A', 'Block B', 'Block C', 'Block D'].map((block) => `<option ${student.hostelBlock === block ? 'selected' : ''}>${block}</option>`).join('')}
-            </select>
-            <div class="flex justify-end gap-3 pt-2"><button type="button" onclick="closeModal()" class="px-4 py-2.5 rounded-xl border border-border text-sm font-semibold">Cancel</button><button type="submit" class="btn-primary px-5 py-2.5 rounded-xl text-white text-sm font-semibold">Save Changes</button></div>
+
+            <!-- Credentials Section -->
+            <div class="space-y-2.5">
+                <div class="flex items-center gap-1.5 text-[11px] font-bold text-text-secondary uppercase tracking-wider pb-1 border-b border-border/60">
+                    <i class="fa-solid fa-id-badge text-primary text-xs"></i> Credentials & Contact Details
+                </div>
+                <div class="grid sm:grid-cols-2 gap-3">
+                    <div>
+                        <label for="editWardenStudentName" class="block text-xs font-semibold text-text mb-1">
+                            Full Name <span class="text-danger">*</span>
+                        </label>
+                        <div class="relative">
+                            <i class="fa-solid fa-user absolute left-3 top-1/2 -translate-y-1/2 text-text-muted text-xs pointer-events-none"></i>
+                            <input id="editWardenStudentName" required value="${sName}" placeholder="e.g. John Doe" class="input-focus w-full pl-8 pr-3 py-2 rounded-xl border border-border bg-surface-alt text-xs text-text placeholder:text-text-muted shadow-sm">
+                        </div>
+                    </div>
+
+                    <div>
+                        <label for="editWardenStudentEmail" class="block text-xs font-semibold text-text mb-1">
+                            Email Address <span class="text-danger">*</span>
+                        </label>
+                        <div class="relative">
+                            <i class="fa-solid fa-envelope absolute left-3 top-1/2 -translate-y-1/2 text-text-muted text-xs pointer-events-none"></i>
+                            <input id="editWardenStudentEmail" required type="email" value="${escapeHtml(student.email || '')}" placeholder="e.g. student@siet.ac" class="input-focus w-full pl-8 pr-3 py-2 rounded-xl border border-border bg-surface-alt text-xs text-text placeholder:text-text-muted shadow-sm">
+                        </div>
+                    </div>
+
+                    <div>
+                        <label for="editWardenStudentRegistration" class="block text-xs font-semibold text-text mb-1">
+                            Registration Number <span class="text-danger">*</span>
+                        </label>
+                        <div class="relative">
+                            <i class="fa-solid fa-id-card absolute left-3 top-1/2 -translate-y-1/2 text-text-muted text-xs pointer-events-none"></i>
+                            <input id="editWardenStudentRegistration" required value="${escapeHtml(student.registrationNumber || '')}" placeholder="e.g. 714021104001" class="input-focus w-full pl-8 pr-3 py-2 rounded-xl border border-border bg-surface-alt text-xs text-text placeholder:text-text-muted shadow-sm">
+                        </div>
+                    </div>
+
+                    <div>
+                        <label for="editWardenStudentPassword" class="block text-xs font-semibold text-text mb-1">
+                            New Password <span class="text-text-muted text-[10px] font-normal">(Blank = keep current)</span>
+                        </label>
+                        <div class="relative">
+                            <i class="fa-solid fa-lock absolute left-3 top-1/2 -translate-y-1/2 text-text-muted text-xs pointer-events-none"></i>
+                            <input id="editWardenStudentPassword" minlength="6" type="password" placeholder="Leave blank to keep" class="input-focus w-full pl-8 pr-8 py-2 rounded-xl border border-border bg-surface-alt text-xs text-text placeholder:text-text-muted shadow-sm">
+                            <button type="button" onclick="togglePasswordVisibility('editWardenStudentPassword', this)" class="absolute right-2 top-1/2 -translate-y-1/2 text-text-muted hover:text-text text-xs p-1 rounded transition-colors cursor-pointer" title="Toggle password visibility">
+                                <i class="fa-solid fa-eye"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div>
+                        <label for="editWardenStudentParentPhone" class="block text-xs font-semibold text-text mb-1">
+                            Parent Mobile Number <span class="text-danger">*</span>
+                        </label>
+                        <div class="relative">
+                            <i class="fa-solid fa-phone-volume absolute left-3 top-1/2 -translate-y-1/2 text-text-muted text-xs pointer-events-none"></i>
+                            <input id="editWardenStudentParentPhone" required type="tel" value="${escapeHtml(student.parentPhone || student.parent_phone || '')}" placeholder="e.g. +91 98765 43210" class="input-focus w-full pl-8 pr-3 py-2 rounded-xl border border-border bg-surface-alt text-xs text-text placeholder:text-text-muted shadow-sm">
+                        </div>
+                    </div>
+
+                    <div>
+                        <label for="editWardenStudentPhone" class="block text-xs font-semibold text-text mb-1">
+                            Student Mobile Number
+                        </label>
+                        <div class="relative">
+                            <i class="fa-solid fa-mobile-screen absolute left-3 top-1/2 -translate-y-1/2 text-text-muted text-xs pointer-events-none"></i>
+                            <input id="editWardenStudentPhone" type="tel" value="${escapeHtml(student.phone || '')}" placeholder="e.g. +91 91234 56789" class="input-focus w-full pl-8 pr-3 py-2 rounded-xl border border-border bg-surface-alt text-xs text-text placeholder:text-text-muted shadow-sm">
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Hostel Section -->
+            <div class="space-y-2.5">
+                <div class="flex items-center gap-1.5 text-[11px] font-bold text-text-secondary uppercase tracking-wider pb-1 border-b border-border/60">
+                    <i class="fa-solid fa-hotel text-primary text-xs"></i> Hostel & Room Allocation
+                </div>
+                <div class="grid sm:grid-cols-2 gap-3">
+                    <div>
+                        <label for="editWardenStudentBlock" class="block text-xs font-semibold text-text mb-1">
+                            Hostel Block <span class="text-danger">*</span>
+                        </label>
+                        <div class="relative">
+                            <i class="fa-solid fa-building absolute left-3 top-1/2 -translate-y-1/2 text-text-muted text-xs pointer-events-none"></i>
+                            <select id="editWardenStudentBlock" required class="input-focus w-full pl-8 pr-8 py-2 rounded-xl border border-border bg-surface-alt text-xs text-text appearance-none cursor-pointer shadow-sm">
+                                ${['Block A', 'Block B', 'Block C', 'Block D'].map((block) => `<option ${student.hostelBlock === block ? 'selected' : ''}>${block}</option>`).join('')}
+                            </select>
+                            <i class="fa-solid fa-chevron-down absolute right-3 top-1/2 -translate-y-1/2 text-text-muted text-[10px] pointer-events-none"></i>
+                        </div>
+                    </div>
+
+                    <div>
+                        <label for="editWardenStudentRoom" class="block text-xs font-semibold text-text mb-1">
+                            Room Number <span class="text-danger">*</span>
+                        </label>
+                        <div class="relative">
+                            <i class="fa-solid fa-door-closed absolute left-3 top-1/2 -translate-y-1/2 text-text-muted text-xs pointer-events-none"></i>
+                            <input id="editWardenStudentRoom" required value="${escapeHtml(student.roomNumber || '')}" placeholder="e.g. 101 or A-204" class="input-focus w-full pl-8 pr-3 py-2 rounded-xl border border-border bg-surface-alt text-xs text-text placeholder:text-text-muted shadow-sm">
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="flex items-center justify-between pt-4 border-t border-border mt-4">
+                <button type="button" onclick="deleteStudent('${sId}', '${safeNameForJs}')" class="px-4 py-2 rounded-xl bg-danger/10 text-danger hover:bg-danger hover:text-white text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer">
+                    <i class="fa-solid fa-trash-can text-xs"></i> Delete Student
+                </button>
+                <div class="flex items-center gap-2">
+                    <button type="button" onclick="closeModal()" class="px-4 py-2 rounded-xl border border-border text-xs font-semibold hover:bg-surface-alt text-text-secondary hover:text-text transition-all cursor-pointer">
+                        Cancel
+                    </button>
+                    <button type="submit" class="btn-primary px-5 py-2 rounded-xl text-white text-xs font-semibold shadow-md shadow-primary/20 hover:shadow-primary/30 transition-all flex items-center gap-1.5 cursor-pointer">
+                        <i class="fa-solid fa-check text-xs"></i> Save Changes
+                    </button>
+                </div>
+            </div>
         </form>
-    `);
+    `, 'max-w-xl');
 }
+window.openWardenStudentEditModal = openWardenStudentEditModal;
 
 async function handleWardenStudentUpdate(event, studentId) {
     event.preventDefault();
@@ -12562,6 +13171,8 @@ async function handleWardenStudentUpdate(event, studentId) {
         email: document.getElementById('editWardenStudentEmail')?.value.trim(),
         password: document.getElementById('editWardenStudentPassword')?.value || '',
         registrationNumber: document.getElementById('editWardenStudentRegistration')?.value.trim(),
+        phone: document.getElementById('editWardenStudentPhone')?.value.trim() || '',
+        parentPhone: document.getElementById('editWardenStudentParentPhone')?.value.trim() || '',
         roomNumber: document.getElementById('editWardenStudentRoom')?.value.trim(),
         hostelBlock: document.getElementById('editWardenStudentBlock')?.value
     };
@@ -12602,6 +13213,8 @@ async function handleAdminStudentSubmit(event) {
         email: document.getElementById('adminStudentEmail')?.value.trim(),
         password: document.getElementById('adminStudentPassword')?.value || '',
         registrationNumber: document.getElementById('adminStudentRegistrationNumber')?.value.trim(),
+        phone: document.getElementById('adminStudentPhone')?.value.trim() || '',
+        parentPhone: document.getElementById('adminStudentParentPhone')?.value.trim() || '',
         hostelBlock: document.getElementById('adminStudentHostelBlock')?.value,
         roomNumber: document.getElementById('adminStudentRoomNumber')?.value.trim()
     };
@@ -12623,6 +13236,9 @@ async function handleAdminStudentSubmit(event) {
         }
         closeModal();
         showToast('Student account created successfully.', 'success');
+        if (currentUser?.role === 'warden') {
+            await loadWardenAssignedStudents();
+        }
         await loadDashboardData();
     } catch (error) {
         hideLoading();

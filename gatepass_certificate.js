@@ -1,6 +1,10 @@
+const path = require('path');
+const fs = require('fs');
 const PDFDocument = require('pdfkit');
 
-const INSTITUTION_NAME = 'HOSTELFIX STUDENT RESIDENCE';
+const BANNER_PATH = path.join(__dirname, 'public', 'sri_shakthi_header.jpg');
+const FALLBACK_LOGO = path.join(__dirname, 'public', 'siet-logo.png');
+const INSTITUTION_NAME = 'SRI SHAKTHI INSTITUTE OF ENGINEERING AND TECHNOLOGY';
 const DOCUMENT_TITLE = 'Leave Authorization';
 
 // Restrained institutional palette - designed for print as well as screen.
@@ -40,7 +44,7 @@ function isAuthorised(status) {
 }
 
 function drawSectionTitle(doc, title, x, y, width) {
-  doc.fillColor(COLOR.blue).rect(x, y, 4, 18).fill();
+  doc.fillColor('#0B6A3E').rect(x, y, 4, 18).fill();
   doc.fillColor(COLOR.ink).font('Helvetica-Bold').fontSize(10)
     .text(title.toUpperCase(), x + 12, y + 4, { width: width - 12 });
   doc.fillColor(COLOR.line).rect(x, y + 22, width, 1).fill();
@@ -103,20 +107,32 @@ function createLeaveAuthorizationCertificate(gatePass) {
     const statusColor = approved ? COLOR.green : COLOR.red;
     const statusWash = approved ? COLOR.greenWash : COLOR.redWash;
 
-    // Brand header - clean and intentionally free of decorative seals.
-    doc.rect(0, 0, W, 112).fill(COLOR.navy);
-    doc.rect(0, 108, W, 4).fill(COLOR.blue);
-    doc.fillColor(COLOR.white).font('Helvetica-Bold').fontSize(21).text('HF', x, 30);
-    doc.fillColor('#B9C9DC').font('Helvetica').fontSize(7).text('HOSTEL SYSTEM', x, 55);
-    doc.fillColor('#59728F').rect(x + 82, 28, 1, 38).fill();
-    doc.fillColor(COLOR.white).font('Helvetica-Bold').fontSize(16)
-      .text(INSTITUTION_NAME, x + 100, 32);
-    doc.fillColor('#B9C9DC').font('Helvetica').fontSize(8.5)
-      .text('Student Affairs and Hostel Administration', x + 100, 55);
-    doc.fillColor(COLOR.white).font('Helvetica-Bold').fontSize(14)
-      .text(DOCUMENT_TITLE.toUpperCase(), x, 80);
-    doc.fillColor('#B9C9DC').font('Helvetica').fontSize(8)
-      .text('Official student movement document', x + 190, 83);
+    // Sri Shakthi Institution Header Banner
+    const bannerTop = 18;
+    const bannerH = Math.round(contentW * (99 / 738)); // ~69pt
+    if (fs.existsSync(BANNER_PATH)) {
+      doc.image(BANNER_PATH, x, bannerTop, { width: contentW });
+    } else if (fs.existsSync(FALLBACK_LOGO)) {
+      doc.image(FALLBACK_LOGO, x, bannerTop, { height: 58 });
+      doc.fillColor('#0F7644').font('Helvetica-Bold').fontSize(15)
+        .text('SRI SHAKTHI INSTITUTE OF ENGINEERING AND TECHNOLOGY', x + 65, bannerTop + 6);
+      doc.fillColor('#172033').font('Helvetica-Bold').fontSize(8.5)
+        .text('(AN AUTONOMOUS INSTITUTION)', x + 65, bannerTop + 24);
+      doc.fillColor('#607086').font('Helvetica').fontSize(7.5)
+        .text('Approved By AICTE, New Delhi • Affiliated to ANNA UNIVERSITY, Chennai', x + 65, bannerTop + 37);
+    }
+
+    // Elegant dividing lines below header banner
+    const lineY = bannerTop + bannerH + 6;
+    doc.strokeColor('#0B6A3E').lineWidth(2).moveTo(x, lineY).lineTo(x + contentW, lineY).stroke();
+    doc.strokeColor('#D9E2EC').lineWidth(0.5).moveTo(x, lineY + 3).lineTo(x + contentW, lineY + 3).stroke();
+
+    // Document Title Block
+    const titleY = lineY + 11;
+    doc.fillColor('#0B6A3E').font('Helvetica-Bold').fontSize(13)
+      .text('LEAVE AUTHORIZATION', x, titleY, { characterSpacing: 0.5 });
+    doc.fillColor(COLOR.muted).font('Helvetica').fontSize(8)
+      .text('Official student movement document • Student Affairs and Hostel Administration', x + 175, titleY + 3);
 
     // Reference strip.
     let y = 136;
@@ -141,18 +157,18 @@ function createLeaveAuthorizationCertificate(gatePass) {
     const photoW = 108;
     const detailsW = contentW - photoW - 24;
     doc.roundedRect(x, y, detailsW, 108, 7).fillAndStroke(COLOR.white, COLOR.line);
-    drawField(doc, 'Student name', gatePass.student || 'N/A', x + 16, y + 18, 205, 12);
-    drawField(doc, 'Registration number', gatePass.registrationNumber || 'N/A', x + 16, y + 70, 205, 11);
-    drawField(doc, 'Hostel block', gatePass.hostelBlock || 'N/A', x + 240, y + 18, 120, 11);
-    drawField(doc, 'Room number', gatePass.roomNumber || 'N/A', x + 240, y + 70, 120, 11);
-    drawPhoto(doc, gatePass.studentPhoto, x + detailsW + 24, y, photoW, 108);
+    drawField(doc, 'Student name', gatePass.student || gatePass.studentName || 'N/A', x + 16, y + 18, 205, 12);
+    drawField(doc, 'Registration number', gatePass.registrationNumber || gatePass.regNo || gatePass.studentId || 'N/A', x + 16, y + 70, 205, 11);
+    drawField(doc, 'Hostel block', gatePass.hostelBlock || gatePass.block || 'N/A', x + 240, y + 18, 120, 11);
+    drawField(doc, 'Room number', gatePass.roomNumber || gatePass.room || 'N/A', x + 240, y + 70, 120, 11);
+    drawPhoto(doc, gatePass.studentPhoto || gatePass.photo || gatePass.student_photo, x + detailsW + 24, y, photoW, 108);
 
     // Leave period uses a visual journey instead of a dense form table.
     y += 130;
     drawSectionTitle(doc, 'Approved leave period', x, y, contentW);
     y += 36;
     doc.roundedRect(x, y, contentW, 96, 7).fillAndStroke(COLOR.sky, '#CFE0FF');
-    drawField(doc, 'Leave begins', formatDate(gatePass.gateDate), x + 18, y + 18, 165, 11);
+    drawField(doc, 'Leave begins', formatDate(gatePass.gateDate || gatePass.departureDate), x + 18, y + 18, 165, 11);
     drawField(doc, 'Session / time', gatePass.session || 'General', x + 18, y + 60, 165, 10);
     // Clean directional arrow from Leave Date to Return Date
     const arrowY = y + 45;
@@ -161,7 +177,7 @@ function createLeaveAuthorizationCertificate(gatePass) {
     doc.moveTo(x + 215, arrowY).lineTo(x + 290, arrowY).stroke();
     doc.moveTo(x + 290, arrowY - 4).lineTo(x + 298, arrowY).lineTo(x + 290, arrowY + 4).closePath().fill();
     doc.restore();
-    drawField(doc, 'Return by', formatDate(gatePass.returnDate), x + 332, y + 18, 155, 11);
+    drawField(doc, 'Return by', formatDate(gatePass.returnDate || gatePass.expectedReturnDate), x + 332, y + 18, 155, 11);
     drawField(doc, 'Authorised by', gatePass.approvedBy || 'Pending approval', x + 332, y + 60, 155, 10);
 
     // Reason remains readable even for a longer explanation.
@@ -170,7 +186,7 @@ function createLeaveAuthorizationCertificate(gatePass) {
     y += 36;
     doc.roundedRect(x, y, contentW, 62, 7).fillAndStroke(COLOR.wash, COLOR.line);
     doc.fillColor(COLOR.ink).font('Helvetica').fontSize(10)
-      .text(String(gatePass.reason || 'Not specified'), x + 16, y + 16, { width: contentW - 32, height: 34, ellipsis: true, lineGap: 2 });
+      .text(String(gatePass.reason || gatePass.purpose || 'Not specified'), x + 16, y + 16, { width: contentW - 32, height: 34, ellipsis: true, lineGap: 2 });
 
     // Verification block.
     y += 84;
@@ -198,24 +214,6 @@ function createLeaveAuthorizationCertificate(gatePass) {
     doc.fillColor(COLOR.blue).font('Helvetica-Bold').fontSize(8)
       .text(gatePass.certificateId || gatePass.id || 'Not available', x + 250, y + 56, { width: 230 });
 
-    // Draw the top information layer last so it stays crisp above embedded student photographs.
-    doc.fillColor(COLOR.white).font('Helvetica-Bold').fontSize(21).text('HF', x, 30);
-    doc.fillColor('#B9C9DC').font('Helvetica').fontSize(7).text('HOSTEL SYSTEM', x, 55);
-    doc.fillColor('#59728F').rect(x + 82, 28, 1, 38).fill();
-    doc.fillColor(COLOR.white).font('Helvetica-Bold').fontSize(16).text(INSTITUTION_NAME, x + 100, 32);
-    doc.fillColor('#B9C9DC').font('Helvetica').fontSize(8.5).text('Student Affairs and Hostel Administration', x + 100, 55);
-    doc.fillColor(COLOR.white).font('Helvetica-Bold').fontSize(14).text(DOCUMENT_TITLE.toUpperCase(), x, 80);
-    doc.fillColor('#B9C9DC').font('Helvetica').fontSize(8).text('Official student movement document', x + 190, 83);
-    doc.roundedRect(x, 136, contentW, 56, 7).fillAndStroke(COLOR.wash, COLOR.line);
-    drawField(doc, 'Reference no.', gatePass.id || 'N/A', x + 16, 148, 155, 9);
-    drawField(doc, 'Certificate no.', gatePass.certificateId || 'Not issued', x + 185, 148, 165, 8.5);
-    drawField(doc, 'Issued', new Date(gatePass.approvedAt || gatePass.createdAt || Date.now()).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }), x + 355, 148, 78, 7.5);
-    doc.roundedRect(x + contentW - 108, 151, 92, 26, 13).fill(statusWash);
-    doc.fillColor(statusColor).font('Helvetica-Bold').fontSize(8.5).text(statusText, x + contentW - 108, 160, { width: 92, align: 'center' });
-    doc.fillColor(COLOR.ink).font('Helvetica').fontSize(10).text(
-      'This certifies that the student named below is authorised to be away from the residence during the approved leave period. Present this document with a valid institutional ID when requested.',
-      x, 216, { width: contentW, lineGap: 3 }
-    );
 
     // Footer.
     const footerY = H - 30;

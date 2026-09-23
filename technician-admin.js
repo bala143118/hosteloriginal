@@ -765,7 +765,9 @@
         }
     }
 
-    const SRI_SHAKTHI_BANNER_DATA_URL = (typeof window.SRI_SHAKTHI_BANNER_DATA_URL !== 'undefined') ? window.SRI_SHAKTHI_BANNER_DATA_URL : "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/4gHYSUNDX1BST0ZJTEUAAQEAAAHIAAAAAAQwAABtbnRyUkdCIFhZWiAH4AABAAEAAAAAAABhY3NwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAA9tYAAQAAAADTLQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAlkZXNjAAAA8AAAACRyWFlaAAABFAAAABRnWFlaAAABKAAAABRiWFlaAAABPAAAABR3dHB0AAABUAAAABRyVFJDAAABZAAAAChnVFJDAAABZAAAAChiVFJDAAABZAAAAChjcHJ0AAABjAAAADxtbHVjAAAAAAAAAAEAAAAMZW5VUwAAAAgAAAAcAHMAUgBHAEJYWVogAAAAAAAAb6IAADj1AAADkFhZWiAAAAAAAABimQAAt4UAABjaWFlaIAAAAAAAACSgAAAPhAAAts9YWVogAAAAAAAA9tYAAQAAAADTLXBhcmEAAAAAAAQAAAACZmYAAPKnAAANWQAAE9AAAApbAAAAAAAAAABtbHVjAAAAAAAAAAEAAAAMZW5VUwAAACAAAAAcAEcAbwBvAGcAbABlACAASQBuAGMALgAgADIAMAAxADb/2wBDAAMCAgICAgMCAgIDAwMDBAYEBAQEBAgGBgUGCQgKCgkICQkKDA8MCgsOCwkJDRENDg8QEBEQCgwSExIQEw8QEBD/2wBDAQMDAwQDBAgEBAgQCwkLEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBD/wAARCABjAuIDASIAAhEBAxEB/8QAHQAAAgIDAQEBAAAAAAAAAAAAAAgHCQQFBgIDAf/EAGkQAAAEBQEEBAUKDBIHBgUFAAIDBAUAAQYHEhMIERQiISMyQhUxM1JyCRY3QUNRU2FighckcXN2g5GSorO00hg0OERXY3R1gZOVlqGjssLD0xlUVpTBxPAlNTZGZLEmJ0VVhIbR4eLx/xAHAEBAAIDAQEBAAAAAAAAAAAAAAECAwQFBgcICQoLAQABBQEBAQEBAQAAAAAAAAAAAQIDBAUGBwgJCgv/xAAtEQACAQMDAgUEAwEBA~~~~~~~~QIRAgMEESExQVEFEiJhcYETQpEyoSOxwf/aAAw0ax44rE7B2J4N8Hj9yM4";
+    const SRI_SHAKTHI_BANNER_DATA_URL = (typeof window !== 'undefined' && window.location && window.location.origin) 
+        ? window.location.origin + '/public/sri_shakthi_header.jpg' 
+        : '/public/sri_shakthi_header.jpg';
 
     function printTechnicianDigitalIdCard() {
         const printArea = get('technicianDigitalIdCardContent');
@@ -844,10 +846,6 @@
                     </button>
                 </div>
                 <div class="print-card-wrapper">
-                    <!-- Sri Shakthi Institution Header Banner (Added on Print / Download) -->
-                    <div style="width: 100%; display: flex; justify-content: center; align-items: center; padding-bottom: 14px; margin-bottom: 18px; border-bottom: 1px solid #e2e8f0;">
-                        <img src="${SRI_SHAKTHI_BANNER_DATA_URL}" alt="Sri Shakthi Institute of Engineering and Technology" class="print-banner-img">
-                    </div>
                     ${cardHtml}
                 </div>
                 <script>
